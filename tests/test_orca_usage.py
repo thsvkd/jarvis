@@ -108,15 +108,16 @@ class ReadTest(unittest.TestCase):
         with mock.patch.object(orca_usage.orca, "find_dir", return_value="/x"), \
                 mock.patch.object(orca_usage.orca_rpc, "call", side_effect=lambda m, p, timeout: calls.append(p["refreshUsage"]) or SNAP), \
                 mock.patch.object(orca_usage.threading, "Thread", Now), \
-                mock.patch.object(orca_usage, "_refreshed", 0.0), mock.patch.object(orca_usage.time, "monotonic") as mono:
+                mock.patch.object(orca_usage, "_refreshed", 0.0), mock.patch.object(orca_usage, "_last", None), \
+                mock.patch.object(orca_usage.time, "monotonic") as mono:
             seen = []
             for t, force in ((1000, False), (1010, False), (1020, True), (1050, True), (1400, False)):
                 mono.return_value = t
                 code, body = orca_usage.read(force)
                 self.assertEqual((code, len(body["providers"])), (200, 4))
                 seen.append((body["refreshed"], body["refreshing"]))
-        # 처음: 뒤에서 갱신 + 보관값 · 10초 뒤: 보관값 · 강제는 30초 지나야 그 자리에서 · 자동은 300초 지나야
-        self.assertEqual(calls, [True, False, False, False, True, True, False])
+        # 처음: 보관값을 읽고 뒤에서 갱신 · 10초 뒤: 보관값 · 강제는 30초 지나야 그 자리에서 · 300초 뒤: 마지막 값 + 뒤에서 갱신
+        self.assertEqual(calls, [False, True, False, False, True, True])
         self.assertEqual(seen, [(False, True), (False, False), (False, False), (True, False), (False, True)])
 
     def test_slow_forced_refresh_falls_back(self):
@@ -126,16 +127,27 @@ class ReadTest(unittest.TestCase):
             return SNAP
         with mock.patch.object(orca_usage.orca, "find_dir", return_value="/x"), \
                 mock.patch.object(orca_usage.orca_rpc, "call", side_effect=call), \
-                mock.patch.object(orca_usage, "_refreshed", 0.0):
+                mock.patch.object(orca_usage, "_refreshed", 0.0), mock.patch.object(orca_usage, "_last", None):
             code, body = orca_usage.read(force=True)
             self.assertEqual((body["running"], len(body["providers"])), (True, 4))
             self.assertGreater(orca_usage._refreshed, 0)  # 실패해도 시도 시각을 남겨 곧바로 다시 부르지 않는다
+
+    def test_busy_pipe_serves_last(self):
+        # 뒤에서 다시 읽는 동안(RPC 잠김)은 파이프를 다시 열지 않고 마지막 값을 준다
+        last = (123.0, [{"id": "claude"}])
+        with mock.patch.object(orca_usage.orca, "find_dir", return_value="/x"), \
+                mock.patch.object(orca_usage.orca_rpc, "call", side_effect=AssertionError("RPC 를 부르면 안 된다")), \
+                mock.patch.object(orca_usage, "_refreshed", 1e12), mock.patch.object(orca_usage, "_last", last), \
+                mock.patch.object(orca_usage.time, "monotonic", return_value=1e12 + 1):
+            with orca_usage._rpc:
+                body = orca_usage.read()[1]
+        self.assertEqual((body["fetched_at"], body["providers"], body["refreshing"]), (123.0, [{"id": "claude"}], True))
 
     def test_not_installed_and_rpc_error(self):
         with mock.patch.object(orca_usage.orca, "find_dir", return_value=None):
             self.assertEqual(orca_usage.read()[1], {"installed": False, "running": False, "providers": []})
         with mock.patch.object(orca_usage.orca, "find_dir", return_value="/x"), \
-                mock.patch.object(orca_usage, "_refreshed", 1e12), \
+                mock.patch.object(orca_usage, "_refreshed", 1e12), mock.patch.object(orca_usage, "_last", None), \
                 mock.patch.object(orca_usage.orca_rpc, "call", side_effect=RuntimeError("Orca 로컬 소켓이 없습니다")):
             code, body = orca_usage.read()
         self.assertEqual((code, body["running"], body["error"]), (200, False, "Orca 로컬 소켓이 없습니다"))

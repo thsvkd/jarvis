@@ -3,7 +3,8 @@
 Orca 로컬 RPC accounts.list 의 rateLimits 를 그대로 정규화한다(사용량 조회·토큰 갱신은 Orca 가 한다).
 refreshUsage=true 는 계정마다 프로바이더 API 를 한 번씩 부르고 Orca 의 조회 간격·Retry-After 를 건너뛴다:
 REFRESH_S 마다 한 번만(버튼으로 강제해도 FORCE_S 간격) 쓰고, 그 사이에는 Orca 가 들고 있는 값을 읽는다.
-자동 갱신은 뒤에서 돌리고 보관값을 바로 준다(계정이 많으면 45초까지 걸린다). 시도한 시각부터 간격을 센다(실패·지연이 반복 호출이 되지 않게).
+자동 갱신은 뒤에서 돌리고 마지막 값을 바로 준다(계정이 많으면 45초까지 걸린다). 시도한 시각부터 간격을 센다(실패·지연이 반복 호출이 되지 않게).
+RPC 는 한 번에 하나만 부른다: Windows 명명 파이프는 다른 연결이 열려 있는 동안 열리지 않는다.
 계정은 이메일만 내보낸다. 홈 경로·조직 UUID·프로바이더 계정 ID·자격 출처는 넣지 않는다.
 
 공식 계약: src/main/runtime/rpc/methods/accounts.ts, src/shared/rate-limit-types.ts (stablyai/orca)
@@ -26,6 +27,8 @@ NOT_SET_UP = {"missing-credentials", "cli-unavailable"}
 
 _lock = threading.Lock()
 _refreshed = 0.0  # 마지막 refreshUsage=true 의 monotonic 시각
+_rpc = threading.Lock()  # Orca RPC 는 하나씩
+_last = None  # (fetched_at, providers): 마지막으로 읽은 값. 뒤에서 다시 읽는 동안 바로 준다
 
 
 def _num(v):
@@ -95,8 +98,9 @@ def limits(r):
 
 
 def _set_up(lim):
-    return lim is not None and lim["status"] != "unavailable" and lim["failure"] not in NOT_SET_UP \
-        and (lim["status"] != "idle" or lim["windows"])
+    # 'idle'·'fetching' 은 Orca 가 아직(또는 다시) 읽는 중이라 설정 여부를 모른다: 값이 있을 때만 보인다
+    return lim is not None and lim["failure"] not in NOT_SET_UP \
+        and (lim["status"] in ("ok", "error") or bool(lim["windows"]))
 
 
 def _managed(snap, pid, rl):
@@ -149,11 +153,24 @@ def normalize(snap):
     return providers
 
 
+def _call(refresh, timeout):
+    global _last
+    with _rpc:
+        snap = orca_rpc.call("accounts.list", {"refreshUsage": refresh}, timeout=timeout)
+    providers = normalize(snap)
+    _last = (time.time(), providers)
+    return providers
+
+
 def _refresh_behind():
     try:
-        orca_rpc.call("accounts.list", {"refreshUsage": True}, timeout=45)
-    except Exception:  # 다음 간격에 다시 시도한다. 보관값은 이미 주었다
+        _call(True, 45)
+    except Exception:  # 다음 간격에 다시 시도한다. 마지막 값은 이미 주었다
         pass
+
+
+def _behind():
+    threading.Thread(target=_refresh_behind, name="jarvis-orca-usage", daemon=True).start()
 
 
 def read(force=False):
@@ -168,17 +185,24 @@ def read(force=False):
         behind = not now and (not _refreshed or age > REFRESH_S)
         if now or behind:
             _refreshed = time.monotonic()
-    if behind:
-        threading.Thread(target=_refresh_behind, name="jarvis-orca-usage", daemon=True).start()
+    last = _last
+    if not now and last and (behind or _rpc.locked()):
+        if behind:
+            _behind()
+        return 200, {"installed": True, "running": True, "fetched_at": last[0], "refreshed": False, "refreshing": True,
+                     "providers": last[1]}
     try:
-        try:
-            snap = orca_rpc.call("accounts.list", {"refreshUsage": now}, timeout=45 if now else 12)
-        except Exception:
-            if not now:
-                raise
-            snap = orca_rpc.call("accounts.list", {"refreshUsage": False}, timeout=12)  # 다시 읽기가 늦으면 보관값이라도
-        providers = normalize(snap)
+        if now:
+            try:
+                # 뒤에서 이미 다시 읽는 중이면 끝나기를 기다려 그 값을 읽는다(같은 계정을 거듭 부르지 않게)
+                providers = _call(not _rpc.locked(), 45)
+            except Exception:
+                providers = _call(False, 12)  # 다시 읽기가 늦거나 실패하면 보관값이라도
+        else:
+            providers = _call(False, 12)
     except Exception as e:
         return 200, {"installed": True, "running": False, "providers": [], "error": _scrub(str(e)[:200] or type(e).__name__)}
+    if behind:  # 처음(마지막 값이 없을 때)은 보관값을 먼저 읽고 나서 뒤에서 다시 읽는다
+        _behind()
     return 200, {"installed": True, "running": True, "fetched_at": time.time(), "refreshed": now, "refreshing": behind,
                  "providers": providers}
