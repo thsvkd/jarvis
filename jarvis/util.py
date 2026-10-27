@@ -7,9 +7,12 @@ import tempfile
 import json
 import os
 import re
+import shutil
 import socket
 import ssl
 import subprocess
+import sys
+import threading
 import time
 from datetime import datetime
 
@@ -80,6 +83,40 @@ def docker_api(path, timeout=6):
         return json.loads(body)
     finally:
         conn.close()
+
+
+def which_local(name):
+    """PATH(서비스는 짧다) 다음에 사용자 도구의 기본 설치 위치 ~/.local/bin."""
+    p = os.path.join(os.path.expanduser("~"), ".local", "bin", name + (".exe" if sys.platform == "win32" else ""))
+    return shutil.which(name) or (p if os.path.isfile(p) else None)
+
+
+class Installer:
+    """도구 하나를 뒤에서 설치한다. 실패하면 retry_s 뒤 다시 시도한다. fn() 이 실패 이유를 예외로 던진다."""
+    RETRY_S = 6 * 3600
+
+    def __init__(self, name, fn):
+        self.name, self.fn = name, fn
+        self.lock = threading.Lock()
+        self.state, self.error, self.at = None, None, 0.0  # state: running|done|failed
+
+    def _run(self):
+        try:
+            self.fn()
+            self.state, self.error = "done", None
+            print(f"[jarvis] {self.name} 설치 완료", flush=True)
+        except Exception as e:
+            self.state, self.error = "failed", scrub_home(str(e))[:200] or type(e).__name__
+
+    def ensure(self, purpose):
+        """None(설치 끝남) 또는 화면에 붙일 문구(설치 중·실패 이유)."""
+        with self.lock:
+            if self.state != "running" and (self.state is None or time.monotonic() - self.at > self.RETRY_S):
+                self.state, self.error, self.at = "running", None, time.monotonic()
+                threading.Thread(target=self._run, name="jarvis-install-" + self.name, daemon=True).start()
+            if self.state == "running":
+                return f"{self.name} 을 설치하는 중입니다({purpose})"
+            return self.error
 
 
 def scrub_home(v):

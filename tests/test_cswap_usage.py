@@ -86,9 +86,10 @@ class RunTest(unittest.TestCase):
 
 
 class MergeTest(unittest.TestCase):
-    def merged(self, orca_body, cs):
+    def merged(self, orca_body, cs, ca=None):
         with mock.patch.object(orca_usage, "_orca", return_value=orca_body), \
-                mock.patch.object(orca_usage.cswap_usage, "read", return_value=cs):
+                mock.patch.object(orca_usage.cswap_usage, "read", return_value=cs), \
+                mock.patch.object(orca_usage.caam_usage, "read", return_value=ca):
             return orca_usage.read()[1]
 
     def test_cswap_replaces_orca_system_default(self):
@@ -129,16 +130,12 @@ class MergeTest(unittest.TestCase):
         self.assertNotIn("cswap_error", self.merged({"installed": True, "providers": []}, None))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 @mock.patch.object(cswap_usage, "_cache", None)
 class InstallTest(unittest.TestCase):
     def setUp(self):
-        cswap_usage.install.update(state=None, error=None, at=0.0)
+        cswap_usage.installer.state, cswap_usage.installer.error, cswap_usage.installer.at = None, None, 0.0
         self.which = {"claude": "/home/alice/.local/bin/claude", "uv": "/home/alice/.local/bin/uv", "pipx": None, "cswap": None}
-        p = mock.patch.object(cswap_usage, "_which", side_effect=lambda n: self.which[n])
+        p = mock.patch.object(cswap_usage, "which_local", side_effect=lambda n: self.which[n])
         p.start()
         self.addCleanup(p.stop)
 
@@ -148,7 +145,7 @@ class InstallTest(unittest.TestCase):
 
             def start(self):
                 self.target()
-        p = mock.patch.object(cswap_usage.threading, "Thread", Now)
+        p = mock.patch("jarvis.util.threading.Thread", Now)
         p.start()
         self.addCleanup(p.stop)
 
@@ -157,24 +154,35 @@ class InstallTest(unittest.TestCase):
             self.which["cswap"] = "/home/alice/.local/bin/cswap"
             return mock.Mock(returncode=0, stderr="")
         with mock.patch.object(cswap_usage.subprocess, "run", side_effect=run) as r:
-            self.assertEqual(cswap_usage.ensure(), "cswap 을 설치하는 중입니다(Claude 계정별 사용량)")
+            self.assertIsNone(cswap_usage.ensure())  # 그 자리에서 끝났다(실제로는 뒤에서 돌아 '설치 중'이 먼저 보인다)
         self.assertEqual(r.call_args[0][0], ["/home/alice/.local/bin/uv", "tool", "install", "claude-swap==0.28.0"])
-        self.assertEqual((cswap_usage.install["state"], cswap_usage.ensure()), ("done", None))
+        self.assertEqual(cswap_usage.installer.state, "done")
 
     def test_failure_is_reported_and_retried_later(self):
         self.which.update(uv=None, pipx="/usr/bin/pipx")
         bad = mock.Mock(returncode=1, stderr="error: /home/alice/x not writable\n")
         with mock.patch.object(cswap_usage.subprocess, "run", return_value=bad) as r:
-            cswap_usage.ensure()
-            err = cswap_usage.ensure()  # 6시간 안에는 다시 시도하지 않고 실패 이유만 준다
+            err = cswap_usage.ensure()
+            self.assertEqual(cswap_usage.ensure(), err)  # 6시간 안에는 다시 시도하지 않고 실패 이유만 준다
             self.assertEqual(r.call_count, 1)
             self.assertEqual(r.call_args[0][0][:2], ["/usr/bin/pipx", "install"])
             self.assertIn("종료 코드 1", err)
             self.assertNotIn("alice", err)
-            cswap_usage.install["at"] -= cswap_usage.INSTALL_RETRY_S + 1
+            cswap_usage.installer.at -= cswap_usage.installer.RETRY_S + 1
             cswap_usage.ensure()
             self.assertEqual(r.call_count, 2)
         self.assertEqual(cswap_usage.read()["error"].split("(")[0], "cswap 설치 실패")
+
+    def test_running_message(self):
+        class Later:  # 뒤에서 아직 도는 설치
+            def __init__(self, target, **k):
+                pass
+
+            def start(self):
+                pass
+        with mock.patch("jarvis.util.threading.Thread", Later):
+            self.assertEqual(cswap_usage.ensure(), "cswap 을 설치하는 중입니다(Claude 계정별 사용량)")
+            self.assertEqual(cswap_usage.ensure(), "cswap 을 설치하는 중입니다(Claude 계정별 사용량)")
 
     def test_skipped(self):
         with mock.patch.object(cswap_usage.subprocess, "run") as r:
@@ -186,5 +194,8 @@ class InstallTest(unittest.TestCase):
                 self.assertIsNone(cswap_usage.ensure())
         r.assert_not_called()
         self.which.update(uv=None, pipx=None)
-        cswap_usage.ensure()  # 시작하는 호출은 '설치 중'이다(실제로는 뒤에서 돈다)
         self.assertIn("uv·pipx", cswap_usage.ensure())
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -14,7 +14,7 @@ import math
 import threading
 import time
 
-from . import cswap_usage, orca, orca_rpc
+from . import caam_usage, cswap_usage, orca, orca_rpc
 from .util import scrub_home
 
 REFRESH_S = 300
@@ -175,15 +175,46 @@ def _behind():
     threading.Thread(target=_refresh_behind, name="jarvis-orca-usage", daemon=True).start()
 
 
+def _codex(body, ca):
+    """caam 의 Codex 계정을 Orca 의 Codex 목록에 더한다. 같은 이메일이 Orca 에 값과 함께 있으면 Orca 를 쓴다:
+    Orca 는 Codex 가 실제로 쓰는 로그인을 읽고, caam 금고 사본의 접근 토큰은 Codex 가 갱신하면 낡는다."""
+    cur = next((p for p in body["providers"] if p["id"] == "codex"), None)
+    if cur is None:
+        cur = {"id": "codex", "name": "Codex", "accounts": []}
+        at = next((i + 1 for i, p in enumerate(body["providers"]) if p["id"] == "claude"), 0)
+        body["providers"].insert(at, cur)
+    plan = lambda a: (a.get("plan") or "").split(" · ")[0].lower()
+    # 같은 이메일이라도 ChatGPT 개인·Team 워크스페이스는 한도가 따로다: 요금제가 둘 다 알려져 있고 다르면 다른 계정이다
+    same = lambda o, a: o["label"].lower() == a["label"].lower() and (not plan(o) or not plan(a) or plan(o) == plan(a))
+    orca_rows = list(cur["accounts"])
+    if any(a["active"] for a in ca["accounts"]):  # cswap 과 같은 규칙: 이메일 모르는 시스템 기본 계정은 caam 의 사용 중 계정이다
+        orca_rows = [o for o in orca_rows if o["label"] != "시스템 기본 계정"]
+    accounts, added = list(orca_rows), []
+    for a in ca["accounts"]:
+        i = next((i for i, o in enumerate(orca_rows) if same(o, a)), None)  # caam 프로필끼리는 비교하지 않는다(둘 다 남긴다)
+        if i is None:
+            added.append(a)
+        elif not (orca_rows[i]["windows"] or orca_rows[i]["buckets"]):
+            accounts[accounts.index(orca_rows[i])] = {**a, "active": orca_rows[i]["active"] or a["active"]}
+    accounts += added
+    body["providers"] = [{**p, "accounts": accounts} if p is cur else p for p in body["providers"]]
+
+
 def read(force=False):
-    """(http 상태, 응답). Orca 값에 cswap 의 Claude 계정별 사용량을 합친다(cswap 이 있으면 Claude 계정 목록은 cswap 기준).
-    둘은 동시에 읽는다(차례로 읽으면 강제 새로고침이 core 의 시간 제한을 넘을 수 있다)."""
+    """(http 상태, 응답). Orca 값에 cswap(Claude)·caam(Codex)의 계정별 사용량을 합친다.
+    셋은 동시에 읽는다(차례로 읽으면 강제 새로고침이 core 의 시간 제한을 넘을 수 있다)."""
+    start = time.monotonic()
     box = {}
-    t = threading.Thread(target=lambda: box.update(cs=cswap_usage.read(force)), name="jarvis-cswap", daemon=True)
-    t.start()
+    ts = [threading.Thread(target=lambda m=m, k=k: box.update({k: m.read(force)}), name="jarvis-" + k, daemon=True)
+          for k, m in (("cswap", cswap_usage), ("caam", caam_usage))]
+    for t in ts:
+        t.start()
     body = _orca(force)
-    t.join(cswap_usage.TIMEOUT_S * 2 + 10)  # 잠금 대기(최대 20초) + 실행(15초). Orca 와 동시라 core 의 70초 안이다
-    cs = box.get("cs") if not t.is_alive() else {"error": "cswap 이 늦게 답합니다"}
+    end = start + 60  # 요청이 들어온 때부터 센다: core 는 기기당 70초를 기다린다
+    for t in ts:
+        t.join(max(0, end - time.monotonic()))
+    cs = box.get("cswap") if not ts[0].is_alive() else {"error": "cswap 이 늦게 답합니다"}
+    ca = box.get("caam") if not ts[1].is_alive() else {"error": "caam 이 늦게 답합니다"}
     if cs and cs.get("accounts"):
         mine = [{**a, "org": org(a["org"], a["label"])} for a in cs["accounts"]]  # cswap 결과는 캐시라 고치지 않는다
         seen = {(a["label"].lower(), a["org"]) for a in mine}
@@ -193,12 +224,18 @@ def read(force=False):
         # Orca 에만 있는 관리 계정(같은 이메일의 다른 조직 포함)은 남긴다
         # 조직을 모르는 Orca 줄(시스템 기본 계정이 조직 이름을 못 빌린 경우)은 같은 이메일이면 같은 로그인으로 본다
         extra = [a for a in (old or {}).get("accounts", []) if (a["label"].lower(), a.get("org")) not in seen
-                 and not (a.get("org") is None and a["label"].lower() in emails) and not (a["label"] == "시스템 기본 계정" and any(m["active"] for m in mine))]
+                 and not (a.get("org") is None and a["label"].lower() in emails)
+                 and not (a["label"] == "시스템 기본 계정" and any(m["active"] for m in mine))]
         body["providers"] = [{"id": "claude", "name": "Claude", "accounts": mine + extra}] + \
             [p for p in body["providers"] if p["id"] != "claude"]
         body.setdefault("fetched_at", cs["fetched_at"])  # Orca 를 못 읽은 기기도 수집 시각이 보이게
     elif cs:
         body["cswap_error"] = cs["error"]
+    if ca and ca.get("accounts"):
+        _codex(body, ca)
+        body.setdefault("fetched_at", ca["fetched_at"])
+    elif ca:
+        body["caam_error"] = ca["error"]
     return 200, body
 
 

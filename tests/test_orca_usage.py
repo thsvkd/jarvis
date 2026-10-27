@@ -95,10 +95,11 @@ class NormalizeTest(unittest.TestCase):
 
 
 class ReadTest(unittest.TestCase):
-    def setUp(self):  # 이 기기에 설치된 cswap 을 읽지 않게
-        p = mock.patch.object(orca_usage.cswap_usage, "read", return_value=None)
-        p.start()
-        self.addCleanup(p.stop)
+    def setUp(self):  # 이 기기에 설치된 cswap·caam 을 읽거나 설치하지 않게
+        for m in (orca_usage.cswap_usage, orca_usage.caam_usage):
+            p = mock.patch.object(m, "read", return_value=None)
+            p.start()
+            self.addCleanup(p.stop)
 
     def test_refresh_interval(self):
         calls = []

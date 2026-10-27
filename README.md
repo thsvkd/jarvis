@@ -125,7 +125,7 @@ node tools/check-lab.mjs http://100.64.0.2:9300 /tmp/jarvis-lab-check
 `docker_sock`(자동: /var/run/docker.sock → ~/.orbstack/run/docker.sock → ~/.docker/run/docker.sock. Docker 가 없는 기기는 `""`) ·
 `hermes_re`(Hermes 카테고리로 묶을 컨테이너·프로세스 이름, 기본 `hermes`) · `hermes_url`(Hermes 게이트웨이 `/api/status`, 빈 값이면 안 봄) · `ss` · `pm2` · `tailscale` ·
 `core`(이 기기 Orca 페어링 코드 `/api/orca` 를 받아 갈 core 기기 tailnet IP 목록. 루프백은 받지 않는다) ·
-`devices`(core 역할: 모을 게이트웨이 `[{id, url}, …]`, 설정 파일 전용·재시작 필요) · `viewers`(core 홈의 Orca 페어링 버튼을 누를 수 있는 tailnet IP) · `proxies`(viewers 판정에서 X-Forwarded-For 마지막 항목을 믿을 리버스 프록시 tailnet IP. 도메인을 받는 pit5 Caddy) · `cswap_install`(cswap 자동 설치, 기본 true). `core`·`viewers` 는 호스트명이 아니라 tailnet IP 로 적는다(루프백·LAN IP 는 적어도 받지 않는다. core 가 자기 자신도 모으면 그 `url` 도 tailnet IP 로 적는다).
+`devices`(core 역할: 모을 게이트웨이 `[{id, url}, …]`, 설정 파일 전용·재시작 필요) · `viewers`(core 홈의 Orca 페어링 버튼을 누를 수 있는 tailnet IP) · `proxies`(viewers 판정에서 X-Forwarded-For 마지막 항목을 믿을 리버스 프록시 tailnet IP. 도메인을 받는 pit5 Caddy) · `cswap_install`·`caam_install`(cswap·caam 자동 설치, 기본 true). `core`·`viewers` 는 호스트명이 아니라 tailnet IP 로 적는다(루프백·LAN IP 는 적어도 받지 않는다. core 가 자기 자신도 모으면 그 `url` 도 tailnet IP 로 적는다).
 core 홈(`/`) 위쪽에 기기 목록과 페어링 버튼이 생기고, `/?device=<id>`·`/map/?device=<id>` 로 그 기기 화면을 연다.
 
 설정 파일은 10초마다 변경 여부를 확인한다. 인그레스 대상·도메인·추가 Host·Hermes·인프라 유닛·기대 서비스는 자동 반영한다.
@@ -267,6 +267,13 @@ cswap 은 PATH 다음에 `~/.local/bin/cswap(.exe)` 에서 찾는다. 결과는 
 cswap 이 없고 Claude Code(`claude`)가 있으면 사용량을 처음 읽을 때 뒤에서 `uv tool install claude-swap==0.28.0`(uv 가 없으면 pipx)으로 설치한다.
 버전은 고정한다(서비스가 PyPI 최신판을 저절로 받아 실행하지 않게. 올리기는 그 기기에서 `cswap upgrade`). 실패하면 이유를 화면에 보이고 6시간 뒤 다시 시도한다.
 설치 뒤 계정은 그 기기에서 `cswap add` 로 직접 넣는다. 설정 `cswap_install = false`(또는 `JARVIS_CSWAP_INSTALL=0`)로 끈다.
+Codex 는 그 기기에 [caam](https://github.com/Dicklesworthstone/coding_agent_account_manager)(coding_agent_account_manager)이 있고 Codex 프로필을 저장해 두었으면,
+`caam ls codex --json`(프로필 → 이메일)과 `caam limits codex --format json`(한도)으로 계정별 사용량을 더한다. 결과는 2분 묶는다.
+limits 는 caam 금고의 접근 토큰으로 읽기만 한다. jarvis 는 caam refresh·daemon·activate 를 부르지 않는다(Codex 갱신 토큰은 쓸 때마다 바뀐다).
+같은 이메일이 Orca 에도 값과 함께 있으면 Orca 를 쓴다: Orca 는 Codex 가 실제로 쓰는 로그인을 읽고, 금고 사본은 Codex 가 갱신하면 낡는다.
+caam 이 없고 Codex CLI(`codex`)가 있으면 v0.1.24 릴리스를 받아 코드에 고정한 SHA256 을 확인한 뒤 `~/.local/bin/caam(.exe)` 에 둔다.
+계정은 그 기기에서 caam 으로 직접 저장한다. 설정 `caam_install = false`(또는 `JARVIS_CAAM_INSTALL=0`)로 끈다.
+caam 의 라이선스는 MIT 에 OpenAI·Anthropic 관련 추가 조항이 붙어 있다(사용자가 확인하고 도입을 정했다).
 Orca 가 없거나 실패한 기기(관리자 권한 Orca 를 쓰는 Windows 등)도 cswap 의 Claude 계정은 보인다. Codex 는 Orca 관리 계정(Orca 설정의 계정)으로 계정별 사용량이 나온다.
 프로바이더 API 를 다시 부르는 `refreshUsage` 는 5분에 한 번(새로고침 버튼은 30초 간격)만 쓰고, 그 사이에는 Orca 가 가진 값을 읽는다.
 core `GET /api/devices/usage`(전체, `?refresh=1` 강제)·`/api/devices/<id>/usage` 는 모아 두지 않고 요청마다 게이트웨이에 묻는다.
