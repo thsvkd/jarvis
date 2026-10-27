@@ -24,22 +24,24 @@
  const at=ts=>ts?new Date(ts*1000).toLocaleString("ko-KR",{month:"numeric",day:"numeric",weekday:"short",hour:"2-digit",minute:"2-digit",hour12:false})+" 리셋":"";
  const isErr=a=>a.status==="error";
  const peak=a=>{const v=[...a.windows,...a.buckets].map(w=>w.used);return isErr(a)||!v.length?null:Math.max(...v);};
- const isHot=a=>isErr(a)||(peak(a)??0)>=75;
+ const isHot=a=>isErr(a)||a.attention===true||(peak(a)??0)>=75; // attention: 재로그인 등 사람이 손봐야 다시 읽힌다
  // 같은 구독 계정(이메일·조직)은 어느 기기에서 보든 한도가 같다. 이메일이 없는 '기본 계정'은 기기마다 따로 센다.
- const keyOf=(d,p,a)=>p.id+":"+(a.label.includes("@")?a.label+"\n"+(a.org||""):d.id+":"+a.label);
+ const keyOf=(d,p,a)=>p.id+":"+(a.label.includes("@")?a.label.toLowerCase()+"\n"+(a.org||""):d.id+":"+a.label);
  // 여러 기기에 같은 계정이 있으면 사용량을 읽은 쪽, 그중 최근 것을 쓴다(사용 중이 아닌 기기는 아직 안 읽었을 수 있다)
  const rank=a=>[a.windows.length||a.buckets.length?1:0,a.updated_at||0];
  const better=(x,y)=>{const [a,b]=[rank(x),rank(y)];return a[0]!==b[0]?a[0]>b[0]:a[1]>b[1];};
 
  function state(d){
-  if(d.status===200&&d.installed===false)return ["muted","Orca 없음","이 기기에는 Orca 가 없습니다."];
+  const some=(d.providers||[]).length>0; // Orca 가 없거나 실패해도 cswap 의 Claude 계정은 있을 수 있다
+  if(d.status===200&&d.installed===false)return some?["ok","cswap",""]:["muted","Orca 없음","이 기기에는 Orca 가 없습니다."];
+  if(d.status===200&&d.error&&some)return ["warn","Orca 응답 없음",d.error+" · Claude 는 cswap 값입니다."];
   if(d.status===200&&d.error)return ["warn","Orca 응답 없음",d.error];
   if(d.status===200)return ["ok","Orca 실행 중",""];
   if(d.status===501)return ["muted","미지원",d.error];
   if(d.status===403)return ["crit","권한 없음",d.error];
   return ["crit","접속 불가",d.error||("HTTP "+d.status)];
  }
- const ok=d=>d.status===200&&d.installed!==false&&!d.error;
+ const ok=d=>d.status===200&&((d.providers||[]).length>0||(d.installed!==false&&!d.error));
  const failed=d=>!ok(d)&&!(d.status===200&&d.installed===false)&&d.status!==501; // Orca 없음·갱신 전 jarvis 는 실패가 아니다
  const provs=d=>(ok(d)?d.providers||[]:[]).filter(p=>S.prov==="all"||p.id===S.prov);
  const shown=(d,p)=>p.accounts.filter(a=>!S.hot||isHot(a));
@@ -72,15 +74,16 @@
  }
  function body(a){
   if(isErr(a))return html`<p class="ul-err">${a.error||"사용량을 읽지 못했습니다."}</p>`;
-  if(!a.windows.length&&!a.buckets.length)return html`<p class="ul-muted">${a.status==="fetching"?"사용량을 읽는 중입니다.":"아직 사용량을 읽지 않았습니다."}</p>`;
-  return html`<div class="ul-wins">${a.windows.map(win)}</div>${a.buckets.length?html`<p class="ul-extra">모델별 · ${a.buckets.map((b,i)=>html`${i?" · ":""}${b.name} <b>${pct(b.used)}</b>`)}</p>`:""}${extra(a.extra)}${a.credits?html`<p class="ul-extra">한도 리셋 크레딧 ${a.credits}개</p>`:""}`;
+  const note=a.note?html`<p class="${a.attention?"ul-err":"ul-note"}">${a.note}</p>`:""; // 마지막으로 읽은 값에 붙는 이유
+  if(!a.windows.length&&!a.buckets.length)return note||html`<p class="ul-muted">${a.status==="fetching"?"사용량을 읽는 중입니다.":"아직 사용량을 읽지 않았습니다."}</p>`;
+  return html`${note}<div class="ul-wins">${a.windows.map(win)}</div>${a.buckets.length?html`<p class="ul-extra">모델별 · ${a.buckets.map((b,i)=>html`${i?" · ":""}${b.name} <b>${pct(b.used)}</b>`)}</p>`:""}${extra(a.extra)}${a.credits?html`<p class="ul-extra">한도 리셋 크레딧 ${a.credits}개</p>`:""}`;
  }
- const head=a=>html`<div class="ul-ah"><b class="ul-email">${a.label}</b>${a.plan?html`<span class="ul-plan">${a.plan}</span>`:""}${a.org?html`<span class="ul-plan">${a.org}</span>`:""}${a.active?html`<span class="badge" data-tone="info">사용 중</span>`:""}${isErr(a)?html`<span class="badge" data-tone="crit">확인 실패</span>`:""}</div>`;
+ const head=a=>html`<div class="ul-ah"><b class="ul-email">${a.label}</b>${a.plan?html`<span class="ul-plan">${a.plan}</span>`:""}${a.org?html`<span class="ul-plan">${a.org}</span>`:""}${a.active?html`<span class="badge" data-tone="info">사용 중</span>`:""}${isErr(a)||a.attention?html`<span class="badge" data-tone="crit">${a.attention?"조치 필요":"확인 실패"}</span>`:""}</div>`;
  const acct=a=>html`<div class="ul-acct">${head(a)}${body(a)}${a.updated_at?html`<p class="ul-age">${P.fmt.ago(a.updated_at)} 확인</p>`:""}</div>`;
  const badge=d=>{const [t,l]=state(d);return html`<span class="badge" data-tone="${t}">${l}</span>`;};
  function devMeta(d){
   const busy=S.busy.has(d.id);
-  if((d.status===200&&d.installed===false)||d.status===501)return ""; // Orca 없음·갱신 전 jarvis 는 다시 물어도 같다
+  if((d.status===200&&d.installed===false&&!(d.providers||[]).length)||d.status===501)return ""; // Orca·cswap 모두 없거나 갱신 전 jarvis 는 다시 물어도 같다
   return html`<p class="ul-meta">${d.fetched_at?html`<span>${P.fmt.ago(d.fetched_at)} 수집</span>`:""}<button type="button" class="seg-action ul-ref" data-refresh="${d.id}" ${busy?"disabled":""}>${busy?"읽는 중…":"새로고침"}</button></p>`;
  }
 
@@ -98,10 +101,10 @@
    const p=provs(d).find(p=>p.id===c.id),list=p?shown(d,p):[];
    if(!list.length)return html`<td data-label="${c.name}" class="ul-nil">–</td>`;
    if(S.mode==="full")return html`<td data-label="${c.name}" class="ul-full">${list.map(acct)}</td>`;
-   const err=list.some(isErr),pk=list.map(peak).filter(v=>v!=null),mx=pk.length?Math.max(...pk):null;
-   return html`<td data-label="${c.name}"><button type="button" class="ul-cell" data-cell="${d.id+":"+c.id}" data-tone="${err?"crit":tone(mx)}"><b>${err&&mx==null?"실패":pct(mx)}</b><span>계정 ${list.length}${err?" · 실패 포함":""}</span></button></td>`;
+   const err=list.some(isErr),act=list.some(a=>a.attention),pk=list.map(peak).filter(v=>v!=null),mx=pk.length?Math.max(...pk):null;
+   return html`<td data-label="${c.name}"><button type="button" class="ul-cell" data-cell="${d.id+":"+c.id}" data-tone="${err||act?"crit":tone(mx)}"><b>${err&&mx==null?"실패":pct(mx)}</b><span>계정 ${list.length}${err?" · 실패 포함":""}${act?" · 조치 필요":""}</span></button></td>`;
   };
-  return html`${kpi}${soon}<div class="tile ul-mx" data-mode="${S.mode}"><table><thead><tr><th scope="col">기기</th>${cols.map(c=>html`<th scope="col">${dot(c.id)}${c.name}</th>`)}</tr></thead><tbody>${rows.map(d=>html`<tr aria-busy="${String(S.busy.has(d.id))}"><th scope="row"><b>${d.host||d.id}</b> ${badge(d)}${devMeta(d)}${ok(d)?(d.providers||[]).length?"":html`<span class="ul-muted">로그인한 구독 계정이 없습니다.</span>`:html`<span class="ul-muted">${state(d)[2]}</span>`}</th>${cols.map(c=>cell(d,c))}</tr>`)}</tbody></table></div>`;
+  return html`${kpi}${soon}<div class="tile ul-mx" data-mode="${S.mode}"><table><thead><tr><th scope="col">기기</th>${cols.map(c=>html`<th scope="col">${dot(c.id)}${c.name}</th>`)}</tr></thead><tbody>${rows.map(d=>html`<tr aria-busy="${String(S.busy.has(d.id))}"><th scope="row"><b>${d.host||d.id}</b> ${badge(d)}${devMeta(d)}${state(d)[2]?html`<span class="ul-muted">${state(d)[2]}</span>`:ok(d)&&!(d.providers||[]).length?html`<span class="ul-muted">로그인한 구독 계정이 없습니다.</span>`:""}${d.cswap_error?html`<span class="ul-muted">cswap: ${d.cswap_error}</span>`:""}</th>${cols.map(c=>cell(d,c))}</tr>`)}</tbody></table></div>`;
  }
  const dlg=$("#ulDlg");
  function dlgDraw(){
@@ -153,7 +156,8 @@
    const r=await fetch("/api/devices/"+encodeURIComponent(id)+"/usage?refresh=1",{cache:"no-store",headers:{"X-Jarvis-Action":"usage-refresh"}}),o=await r.json();
    const i=S.devs.findIndex(d=>d.id===id);
    S.devs[i]={...o,id,host:S.devs[i].host,status:r.status};
-   note(r.ok&&!o.error?"":(S.devs[i].host||id)+": "+(o.error||"HTTP "+r.status),!(r.ok&&!o.error));
+   const good=r.ok&&(!o.error||(o.providers||[]).length>0); // Orca 가 실패해도 cswap 값은 읽혔을 수 있다
+   note(good?"":(S.devs[i].host||id)+": "+(o.error||"HTTP "+r.status),!good);
   }catch(e){note((e.message||String(e)),true);}
   S.busy.delete(id);draw();
  }

@@ -1150,6 +1150,8 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
 .ul-wp { text-align: right; font-variant-numeric: tabular-nums; color: var(--tone-ink); }
 .ul-wr { color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; text-align: right; }
 .ul-extra, .ul-age { color: var(--text-2); font-size: var(--fs-xs); margin-top: 6px; }
+.ul-note { color: var(--warn-ink); background: var(--warn-soft); font-size: var(--fs-xs); padding: 6px 8px; border-radius: var(--r-xs); margin-bottom: 8px; }
+.ul-err + .ul-wins { margin-top: 8px; }
 .ul-age { color: var(--text-3); }
 .ul-ah { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin-bottom: 8px; min-width: 0; }
 .ul-email { font-weight: var(--fw-semibold); overflow-wrap: anywhere; }

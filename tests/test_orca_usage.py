@@ -95,6 +95,11 @@ class NormalizeTest(unittest.TestCase):
 
 
 class ReadTest(unittest.TestCase):
+    def setUp(self):  # 이 기기에 설치된 cswap 을 읽지 않게
+        p = mock.patch.object(orca_usage.cswap_usage, "read", return_value=None)
+        p.start()
+        self.addCleanup(p.stop)
+
     def test_refresh_interval(self):
         calls = []
 
@@ -104,6 +109,12 @@ class ReadTest(unittest.TestCase):
 
             def start(self):
                 self.target()
+
+            def join(self, timeout=None):
+                pass
+
+            def is_alive(self):
+                return False
 
         with mock.patch.object(orca_usage.orca, "find_dir", return_value="/x"), \
                 mock.patch.object(orca_usage.orca_rpc, "call", side_effect=lambda m, p, timeout: calls.append(p["refreshUsage"]) or SNAP), \

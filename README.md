@@ -261,6 +261,10 @@ Mac 의 Homebrew cask 와 앱 업데이터를 함께 설치 주체로 사용하�
 core 홈의 **AI 구독 사용량** 섹션은 기기마다 Orca 가 로그인한 구독 계정(Claude·Codex·Grok·Antigravity 등)의 한도를 보여 준다.
 게이트웨이 `GET /api/orca/usage`(설정 core 만)는 Orca 로컬 RPC `accounts.list` 의 rateLimits 를 프로바이더 → 계정 → 한도 창(5시간·주간·Fable 주간·월간)으로 정리한다.
 같은 프로바이더의 다른 관리 계정은 `inactiveClaudeAccounts`·`inactiveCodexAccounts` 에서 읽는다. 계정은 이메일만 내보내고 홈 경로·조직 UUID·프로바이더 계정 ID 는 넣지 않는다.
+Claude 는 그 기기에 [cswap](https://github.com/realiti4/claude-swap)(claude-swap)이 있으면 `cswap list --json`(schemaVersion 1)의 계정 목록을 쓴다.
+cswap 으로 로그인을 바꿔 끼우면 Orca 는 그 로그인을 '시스템 기본 계정' 하나로만 보기 때문이다. 토큰 갱신·조회 간격은 cswap 이 맡고 jarvis 는 자격 증명 파일을 열지 않는다.
+cswap 은 PATH 다음에 `~/.local/bin/cswap(.exe)` 에서 찾는다. 결과는 30초 묶으며, cswap 이 없거나 실패하면 Orca 값을 쓴다.
+Orca 가 없거나 실패한 기기(관리자 권한 Orca 를 쓰는 Windows 등)도 cswap 의 Claude 계정은 보인다. Codex 는 Orca 관리 계정(Orca 설정의 계정)으로 계정별 사용량이 나온다.
 프로바이더 API 를 다시 부르는 `refreshUsage` 는 5분에 한 번(새로고침 버튼은 30초 간격)만 쓰고, 그 사이에는 Orca 가 가진 값을 읽는다.
 core `GET /api/devices/usage`(전체, `?refresh=1` 강제)·`/api/devices/<id>/usage` 는 모아 두지 않고 요청마다 게이트웨이에 묻는다.
 화면은 디자인 랩 04(`/lab/usage/`)의 C 안이다. 간략히(칸마다 최대 사용률, 누르면 계정 상세)와 자세히(칸 안에 계정별 한도 창 전부) 보기를 전환하며, 선택은 localStorage `jarvis.usage.mode` 에 둔다.

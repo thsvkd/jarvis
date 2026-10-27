@@ -82,6 +82,11 @@ def docker_api(path, timeout=6):
         conn.close()
 
 
+def scrub_home(v):
+    """오류 문장에 섞일 수 있는 사용자 홈 경로의 계정 이름을 가린다. repr 로 두 번 쓴 Windows 역슬래시도."""
+    return re.sub(r"(/home/|/Users/|[A-Za-z]:\\+Users\\+)[^/\\\s'\"]+", r"\1~", v) if v else v
+
+
 def parse_iso(ts):
     """도커·Go 형식 RFC3339(나노초 포함)을 epoch 초로. 0001-01-01 은 None."""
     if not ts or ts.startswith("0001-"):
