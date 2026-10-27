@@ -1,0 +1,28 @@
+# Mac Studio(macOS) 설정 예시. 설치: mkdir -p ~/.config/jarvis && cp deploy/macstudio.toml ~/.config/jarvis/config.toml
+# 게이트웨이로 mac-1·mac-2 에서 돈다(2026-10-16). 필요한 Python 3.11+ 와 psutil 은 Homebrew python 으로.
+
+port = 9300
+bind = "0.0.0.0"
+
+# Caddy·cloudflared 를 Docker(OrbStack·Docker Desktop)로 옮겨 오면 컨테이너 이름을 적는다.
+# 이 기기에 없으면 빈 값("")으로 둔다: 수집을 건너뛰고 인프라 목록에서 뺀다(기본값 caddy·cloudflared 는 없으면 다운으로 보인다).
+# ingress_dir = "~/services/ingress"
+caddy = ""
+tunnel = ""
+# domain = "example.com"
+# hosts = ["jarvis.example.com"]
+
+# 이 기기 Orca 페어링 코드(/api/orca)를 받아 갈 core(pi5-server2)의 tailnet IP
+core = ["100.64.0.1"]
+
+# docker_sock 은 자동으로 찾는다: /var/run/docker.sock → ~/.orbstack/run/docker.sock → ~/.docker/run/docker.sock
+# Docker 가 없는 기기는 docker_sock = "" (수집 실패 경보가 뜨지 않게)
+# tailscale 은 /Applications/Tailscale.app/Contents/MacOS/Tailscale 또는 Homebrew 의 것을 자동으로 찾는다.
+
+# launchd 라벨. 빈 값이면 인프라 목록에서 뺀다(Docker·Tailscale 앱은 launchd 데몬으로 보지 않는다).
+[infra_units]
+docker = ""
+containerd = ""
+tailscale = ""
+ssh = "com.openssh.sshd"
+# pm2 = "pm2.<사용자>"   # `pm2 startup launchd` 가 만드는 라벨. 기본값이 이것이다

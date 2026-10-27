@@ -1,0 +1,19 @@
+system = {
+	type = system
+	handle = 0
+	active count = 612
+
+	services = {
+		       0     78 	com.apple.fsck_hfs
+		     105      - 	com.apple.logd
+		     388      - 	com.openssh.sshd
+		    1234      - 	com.docker.vmnetd
+		       0      1 	org.example.broken
+		       0      - 	org.example.idle
+	}
+
+	unmanaged processes = {
+		com.apple.xpc.launchd.unmanaged.loginwindow.123 = {
+		}
+	}
+}

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS LaunchAgent 예시(로그인한 사용자 세션에서 돈다). REPO·HOME 경로를 이 기기에 맞게 바꾼 뒤:
+    sed -e "s#/Users/USER#$HOME#g" deploy/jarvis.plist > ~/Library/LaunchAgents/dev.jarvis.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.jarvis.plist
+    launchctl kickstart -k gui/$(id -u)/dev.jarvis      # 코드를 고친 뒤 재시작
+  python3 는 3.11+ 와 psutil 이 있는 것(Homebrew: brew install python && python3 -m pip install psutil).
+  메뉴 막대 아이콘(JARVIS_TRAY)은 pystray·Pillow 가 있을 때만 뜬다(python3 -m pip install pystray pillow).
+  실동작은 아직 확인하지 않았다(README 의 macOS 절).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>dev.jarvis</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/python3</string>
+    <string>-m</string>
+    <string>jarvis</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/USER/Workspace/jarvis</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PYTHONUNBUFFERED</key><string>1</string>
+    <key>JARVIS_PORT</key><string>9300</string>
+    <key>JARVIS_TRAY</key><string>1</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>ExitTimeOut</key><integer>8</integer>
+  <key>StandardOutPath</key><string>/Users/USER/Library/Logs/jarvis.log</string>
+  <key>StandardErrorPath</key><string>/Users/USER/Library/Logs/jarvis.log</string>
+</dict>
+</plist>

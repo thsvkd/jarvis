@@ -1,0 +1,57 @@
+.focus-fold{margin-top:var(--sp-5);min-width:0;background:var(--tile);border-radius:var(--r-tile);box-shadow:var(--shadow);padding:0 var(--pad)}
+.focus-fold>summary{display:flex;align-items:center;gap:14px;cursor:pointer;list-style:none;min-height:66px;color:var(--text);font-size:var(--fs-lg);font-weight:var(--fw-semibold)}
+.focus-fold>summary::-webkit-details-marker{display:none}
+.focus-fold>summary small{margin-left:auto;color:var(--text-3);font-size:var(--fs-sm);font-weight:var(--fw-normal)}
+.focus-fold>summary>.ic{transition:transform var(--dur) var(--ease);width:15px;height:15px}
+.focus-fold[open]>summary>.ic{transform:rotate(180deg)}
+.focus-fold[open]{padding-bottom:var(--pad)}
+.focus-fold>.sec{padding-top:0}
+.focus-fold>.sec>.sec-head{margin-top:4px}
+#overview>.bento>.focus-fold{grid-column:1/-1;margin-top:0}
+.focus-fold>#mapTile{box-shadow:none;padding:var(--sp-3) 0 0;background:transparent}
+.focus-more{margin:18px 0;display:flex;align-items:center;gap:16px;font-size:var(--fs-md);color:var(--text-2)}
+.seg-action{background:var(--tile);border:1px solid var(--line);color:var(--text);border-radius:var(--r-xs);padding:9px 15px;cursor:pointer;font:inherit}
+
+.focus-overflow,.focus-group-empty{display:none!important}
+/* 원본 Bento 토큰과 컴포넌트. Focus 개선판의 정보 공개 범위만 조정한다. */
+body[data-focus-layout] #focus-hero-extra{display:contents}
+body[data-focus-layout] #focus-hero-extra>summary{display:none}
+.focus-controls,.focus-attention{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px;margin:12px 0 18px;color:var(--text-2);font-size:var(--fs-sm)}
+.focus-controls>p{flex:1}.focus-note{font-size:var(--fs-sm);color:var(--text-2);line-height:1.7}
+.focus-attention>span{font-weight:var(--fw-semibold);color:var(--text)}
+body[data-focus-layout] .svc .svc-sub,body[data-focus-layout] .svc .svc-via,body[data-focus-layout] .svc .svc-extra,body[data-focus-layout] .svc .svc-metrics{display:none}
+body[data-focus-layout] .svc-links>.svc-link:not([data-primary]),body[data-focus-layout] .svc-links>.aud{display:none}
+body[data-focus-layout] .svc .svc-reason{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+#focus-alert-toggle{display:none}
+#focus-pin-dialog .sheet-head h2{font-size:var(--fs-xl)}
+.focus-pin-option{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);font-size:var(--fs-md);cursor:pointer}
+.focus-pin-option>span:first-of-type{flex:1;min-width:0;overflow-wrap:anywhere}.focus-pin-option b{display:block;font-weight:var(--fw-semibold)}.focus-pin-option small{display:block;color:var(--text-3);font-size:var(--fs-sm);margin-top:3px}.focus-pin-option input{width:17px;height:17px;accent-color:var(--accent);flex:none}.focus-pin-option:has(input:disabled){opacity:.55}.focus-pin-actions{display:flex;gap:10px}
+@media(max-width:699px){
+ body[data-focus-layout] .hero{grid-template-areas:"main" "donut" "extra";gap:14px;padding:20px}
+ body[data-focus-layout] .hero-donut{gap:14px}
+ body[data-focus-layout] .hero-donut .donut-wrap,body[data-focus-layout] .hero-donut .donut svg{width:78px;height:78px}
+ body[data-focus-layout] .donut-n{font-size:25px}body[data-focus-layout] .donut-of{font-size:9px}
+ body[data-focus-layout] #focus-hero-extra{display:block;grid-area:extra;border-top:1px solid var(--line);padding-top:12px}
+ body[data-focus-layout] #focus-hero-extra>summary{display:flex;justify-content:space-between;font-size:var(--fs-sm);color:var(--text-2);cursor:pointer;list-style:none}
+ body[data-focus-layout] #focus-hero-extra>summary::-webkit-details-marker{display:none}
+ body[data-focus-layout] #focus-hero-extra[open]>summary{margin-bottom:14px}
+ body[data-focus-layout] #focus-hero-extra .hero-stats{margin-top:14px}
+ body[data-focus-layout] #alerts #alertList{max-height:150px}
+ body[data-focus-layout] #alerts .al-msg{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+ body[data-focus-layout] #alerts.focus-alerts-open #alertList{max-height:420px}
+ body[data-focus-layout] #alerts.focus-alerts-open .al-msg{display:block}
+ body[data-focus-layout] #alerts #alertMore{display:none!important}
+ body[data-focus-layout] #focus-alert-toggle:not([hidden]){display:block;width:100%;margin-top:12px;font-size:var(--fs-sm)}
+ body[data-focus-layout] .lab-fold>summary small{line-height:1.6}
+ body[data-focus-layout] .srow .sr-met{display:none}
+}
+
+body[data-focus-layout] .focus-pinned-mode #svcGroups{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--gap)}
+body[data-focus-layout] .focus-pinned-mode #svcGroups>.svc-group,body[data-focus-layout] .focus-pinned-mode .svc-grid,body[data-focus-layout] .focus-pinned-mode .svc-rows{display:contents}
+body[data-focus-layout] .focus-pinned-mode .grp-head{display:none}
+body[data-focus-layout] .focus-pinned-mode.focus-list-mode #svcGroups{grid-template-columns:minmax(0,1fr)}
+@media(max-width:699px){body[data-focus-layout] .focus-pinned-mode #svcGroups{grid-template-columns:repeat(2,minmax(0,1fr))}}
+body[data-focus-layout] .focus-pinned-mode.focus-list-mode #svcGroups{background:var(--tile);border-radius:var(--r-tile);box-shadow:var(--shadow);padding:0 var(--pad);gap:0}
+body[data-focus-layout] .focus-pinned-mode .srow .sr-sub,body[data-focus-layout] .focus-pinned-mode .srow .sr-met{display:none}
+@media(max-width:699px){.focus-fold{padding-inline:var(--pad)}.focus-fold>summary{flex-wrap:wrap;gap:4px 10px;min-height:62px;padding:12px 0;font-size:16px}.focus-fold>summary small{margin-left:0;flex:1;min-width:100px;font-size:11px;line-height:1.6}.focus-fold>summary span{width:100%}}
+@media(prefers-reduced-motion:reduce){.focus-fold>summary>.ic{transition:none}}

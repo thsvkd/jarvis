@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f2f2f5">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#09090b">
+<meta name="description" content="기기 한 대의 서비스·공개 상태·노출 경로·하드웨어를 한눈에 보는 읽기 전용 대시보드">
+<title>콘텐츠 구성 시안 · Jarvis</title>
+<link rel="icon" href="/shared/favicon.svg">
+<script src="/app/theme-init.js"></script>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="/app/shell.css">
+<link rel="stylesheet" href="/app/bento.css">
+<link rel="stylesheet" href="/lab/proposal/proposal.css">
+<link rel="stylesheet" href="/app/focus.css">
+</head>
+<body>
+<a class="sh-skip" href="#main">본문으로 건너뛰기</a>
+
+<header id="jarvis-shell" data-page="home" data-sections="services:서비스,hardware:하드웨어,network:네트워크,runtime:런타임"></header>
+<script src="/shared/jarvis.js"></script>
+<script src="/lab/concepts.js"></script>
+<script src="/lab/session.js"></script>
+<script src="/lab/proposal/bridge.js"></script>
+<script src="/app/shell.js"></script>
+
+<nav class="lnav" id="lnav" aria-label="이 페이지의 섹션">
+  <div class="wrap lnav-in">
+    <a href="#overview" data-lsec="overview">개요</a>
+    <a href="#services" data-lsec="services">서비스<span class="lnav-n num" data-f="lnav.svc"></span></a>
+    <a href="#hardware" data-lsec="hardware">하드웨어</a>
+    <a href="#network" data-lsec="network">네트워크</a>
+    <a href="#runtime" data-lsec="runtime">런타임</a>
+  </div>
+</nav>
+
+<!-- 연결·수집 안내 띠: API 응답 없음(심각) · 응답 지연 · 일부 수집 지연(경고). 상태 변화 낭독은 공용 헤더가 한다(여기는 라이브 영역 아님) -->
+<div class="stale-banner" id="staleBanner" data-tone="crit" hidden>
+  <div class="wrap"><i class="shape" aria-hidden="true"></i><p><strong data-f="stale.head">Jarvis API 가 응답하지 않아요.</strong> <span data-f="stale.msg">마지막으로 받은 데이터를 보여 주는 중이에요.</span> <a class="stale-go" id="staleGo" href="#" hidden>자기 진단 보기</a></p></div>
+</div>
+
+<main id="main" class="wrap">
+<div class="lab-note"><a href="/lab/">← 시안 갤러리</a><strong id="lab-name"></strong><span id="lab-intent"></span></div>
+  <h1 class="sr" data-f="pageTitle">개요</h1>
+
+  <div class="boot-error" id="bootError" hidden role="alert">
+    <strong>Jarvis API에 연결하지 못했어요.</strong>
+    <span data-f="boot.msg">잠시 후 자동으로 다시 시도해요.</span>
+  </div>
+
+  <!-- ============================================================ 개요: 건강 · 경보 · 네트워크 맵 -->
+  <section id="overview" class="sec" aria-label="개요">
+    <div class="bento">
+      <article class="tile hero span-8 m-6" style="--i:0" aria-labelledby="heroSentence">
+        <div class="hero-main">
+          <p class="eyebrow"><span data-f="hero.eyebrow">지금 이 기기는</span></p>
+          <h2 class="hero-sentence" id="heroSentence">상태를 확인하고 있어요.</h2>
+          <div class="hero-detail" id="heroDetail"></div>
+        </div>
+        <div class="hero-donut">
+          <div class="donut-wrap">
+            <div class="donut" id="heroDonut" role="img" aria-label="서비스 상태 분포"></div>
+            <div class="donut-center">
+              <span class="donut-n num" data-f="hero.up">–</span>
+              <span class="donut-of" data-f="hero.total">서비스</span>
+            </div>
+          </div>
+          <ul class="donut-legend" id="heroLegend"></ul>
+        </div>
+        <div class="catbars" id="heroCats" aria-label="카테고리별 서비스 상태 — 누르면 서비스 목록으로 이동"></div>
+        <dl class="hero-stats">
+          <div class="hs"><dt>가동 시간</dt><dd class="hs-v" data-f="hero.uptime">–</dd><dd class="hs-s" data-f="hero.boot">–</dd></div>
+          <div class="hs"><dt>컨테이너</dt><dd class="hs-v"><span data-f="hero.ctr">–</span><span class="hs-of" data-f="hero.ctrTotal"></span></dd><dd class="hs-s" data-f="hero.ctrSub">–</dd></div>
+          <div class="hs"><dt>요청 · 24시간</dt><dd class="hs-v" data-f="hero.req">–</dd><dd class="hs-s" data-f="hero.reqSub">–</dd></div>
+          <div class="hs"><dt>Tailnet 피어</dt><dd class="hs-v"><span data-f="hero.peers">–</span><span class="hs-of" data-f="hero.peersTotal"></span></dd><dd class="hs-s">온라인</dd></div>
+          <div class="hs"><dt>열린 포트</dt><dd class="hs-v" data-f="hero.ports">–</dd><dd class="hs-s" data-f="hero.portsSub">–</dd></div>
+        </dl>
+      </article>
+
+      <article class="tile alerts span-4 m-6" id="alerts" style="--i:1" aria-labelledby="t-alerts">
+        <header class="tile-head">
+          <span class="ib ib-red" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8.5a6 6 0 1 0-12 0c0 6.5-2.5 8.5-2.5 8.5h17S18 15 18 8.5"/><path d="M13.7 20.5a2 2 0 0 1-3.4 0"/></svg></span>
+          <h2 class="tile-title" id="t-alerts">경보</h2>
+          <span class="tile-aside" id="alertCounts"></span>
+        </header>
+        <ul class="alert-list" id="alertList" aria-live="polite"></ul>
+        <button type="button" class="alert-more" id="alertMore" hidden><span data-f="alert.more">더 보기</span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></button>
+        <div class="empty calm" id="alertEmpty" hidden>
+          <span class="calm-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12.3 2.8 2.8L16.2 9"/></svg></span>
+          <strong>조용하네요</strong>
+          <span>지금은 확인할 경보가 없어요.</span>
+        </div>
+        <div class="collector-errors" id="collectorErrors" hidden></div>
+      </article>
+
+      <section class="tile span-12 m-6 t-hwstrip" style="--i:2" aria-label="하드웨어 한눈에 — 누르면 아래 하드웨어 섹션으로">
+        <div class="hwd"><div class="hwd-row" id="hwStrip"></div></div>
+      </section>
+
+      <article class="tile span-12 m-6 t-map" id="mapTile" data-view="concept" style="--i:3" aria-labelledby="t-map">
+        <div class="map-side">
+          <header class="tile-head">
+            <span class="ib ib-indigo" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="5.5" cy="6" r="2.3"/><circle cx="5.5" cy="18" r="2.3"/><circle cx="18.5" cy="12" r="2.3"/><path d="M7.8 6h2.7a3 3 0 0 1 3 3v0a3 3 0 0 0 3 3M7.8 18h2.7a3 3 0 0 0 3-3v0a3 3 0 0 1 3-3"/></svg></span>
+            <h2 class="tile-title" id="t-map"><a class="map-open" id="mapOpen" href="/map/?view=concept">네트워크 맵<span class="sr" data-f="map.openSr"> — 개념 관점으로 전체 지도 열기</span></a></h2>
+            <span class="map-cta" aria-hidden="true">전체 지도<svg class="ic" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+          </header>
+          <div class="seg map-view" id="mapView" role="radiogroup" aria-label="지도 관점 — 미리보기와 전체 지도가 이 관점으로 열려요" aria-describedby="mapViewQ">
+            <button type="button" role="radio" data-v="concept" aria-checked="true" tabindex="0" title="개념 — 무엇이 어떤 경로로 공개되는가"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.5" cy="6" r="2.5"/><circle cx="18.5" cy="18" r="2.5"/><path d="M8 6h7.5a3 3 0 0 1 0 6h-7a3 3 0 0 0 0 6H16"/></svg><b>개념</b><small>서비스 노출 경로</small></button>
+            <button type="button" role="radio" data-v="physical" aria-checked="false" tabindex="-1" title="물리 — 어느 기기·인터페이스·도커 네트워크 안에 무엇이 있는가"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4" width="17" height="7" rx="2"/><rect x="3.5" y="13" width="17" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg><b>물리</b><small>기기·네트워크</small></button>
+          </div>
+          <p class="sr" id="mapViewQ" data-f="map.q">무엇이 어떤 경로로 공개되는가</p>
+          <p class="map-desc" data-f="map.desc">인터넷 · Tailnet · LAN 에서 이 기기의 서비스까지 이어지는 길이에요. 선 색이 들어오는 길의 종류예요.</p>
+          <div class="map-lv" data-only="concept">
+            <p class="ml-cap">공개 상태 <span>가장 넓게 열린 범위 · 서비스 수</span></p>
+            <dl class="ml-row" id="mapLevels" aria-label="공개 상태 — 가장 넓게 열린 범위 기준 서비스 수"></dl>
+          </div>
+          <div class="map-lv" data-only="physical">
+            <p class="ml-cap">구성 <span>이 기기 안 · 이 기기와 이어진 것</span></p>
+            <dl class="ml-row" id="mapPhys" aria-label="물리 구성 — 인터페이스·도커 네트워크·컨테이너·호스트 프로세스·Tailnet 기기 수"></dl>
+          </div>
+          <p class="map-prob" id="mapProb" data-tone="ok"><i class="shape" aria-hidden="true"></i><span class="mp-l">문제 서비스</span><b class="num" data-f="map.prob">–</b><small data-f="map.probSub">저하·다운 없음</small></p>
+          <p class="map-legend" data-only="concept" aria-hidden="true"><span><i class="kl dash"></i>내부 의존</span><span class="lg-shapes"><i class="shape" data-tone="ok"></i><i class="shape" data-tone="warn"></i><i class="shape" data-tone="crit"></i>서비스 상태</span></p>
+          <p class="map-legend" data-only="physical" aria-hidden="true"><span><i class="kl" data-k="lan"></i>LAN 선</span><span><i class="kl" data-k="tailnet"></i>Tailnet</span><span><i class="kl dash-pub"></i>터널</span><span><i class="lg-box"></i>안에 들어 있음</span><span class="lg-shapes"><i class="shape" data-tone="ok"></i><i class="shape" data-tone="warn"></i><i class="shape" data-tone="crit"></i>상태(정상·주의·장애)</span></p>
+        </div>
+        <div class="mini" id="miniMap" aria-hidden="true"></div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============================================================ 서비스 -->
+  <section id="services" class="sec" aria-labelledby="h-svc">
+    <div class="sec-head">
+      <h2 id="h-svc">서비스</h2>
+      <p class="sec-sub" data-f="svc.sub">이 기기에서 떠 있는 모든 것</p>
+    </div>
+    <div class="svc-toolbar">
+      <div class="seg seg-lg scroll-x" id="svcFilter" role="group" aria-label="카테고리 필터">
+        <button type="button" data-v="all">전체 <span class="cnt num" data-f="seg.all"></span></button>
+        <button type="button" data-v="public">공개 <span class="cnt num" data-f="seg.public"></span></button>
+        <button type="button" data-v="tailnet">Tailnet <span class="cnt num" data-f="seg.tailnet"></span></button>
+        <button type="button" data-v="hermes">Hermes <span class="cnt num" data-f="seg.hermes"></span></button>
+        <button type="button" data-v="host">호스트 <span class="cnt num" data-f="seg.host"></span></button>
+        <button type="button" data-v="internal">내부 <span class="cnt num" data-f="seg.internal"></span></button>
+        <button type="button" data-v="infra">인프라 <span class="cnt num" data-f="seg.infra"></span></button>
+        <button type="button" data-v="system">시스템 <span class="cnt num" data-f="seg.system"></span></button>
+      </div>
+      <div class="svc-tools">
+        <label class="search">
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4-4"/></svg>
+          <span class="sr">서비스 검색</span>
+          <input type="search" id="svcSearch" placeholder="이름·주소·포트로 찾기" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="seg seg-lg seg-ic" id="svcView" role="group" aria-label="보기 방식">
+          <button type="button" data-v="cards" title="카드로 보기"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.8"/><rect x="13" y="4" width="7" height="7" rx="1.8"/><rect x="4" y="13" width="7" height="7" rx="1.8"/><rect x="13" y="13" width="7" height="7" rx="1.8"/></svg><span class="seg-l">카드</span></button>
+          <button type="button" data-v="list" title="목록으로 보기"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6.5h11M9 12h11M9 17.5h11"/><circle cx="4.8" cy="6.5" r="1.1"/><circle cx="4.8" cy="12" r="1.1"/><circle cx="4.8" cy="17.5" r="1.1"/></svg><span class="seg-l">목록</span></button>
+        </div>
+      </div>
+    </div>
+    <div id="svcGroups" class="svc-groups"></div>
+    <div class="empty" id="svcEmpty" hidden>
+      <strong>찾는 서비스가 없어요</strong>
+      <span>검색어나 카테고리를 바꿔 보세요.</span>
+    </div>
+  </section>
+
+  <!-- ============================================================ 하드웨어 -->
+  <section id="hardware" class="sec" aria-labelledby="h-hw">
+    <div class="sec-head">
+      <h2 id="h-hw">하드웨어</h2>
+      <p class="sec-sub" data-f="hw.sub">CPU · GPU · 메모리 · 온도 · 네트워크 · 저장소</p>
+      <a class="sec-link" data-physfocus="device" href="/map/?view=physical">물리 지도에서 기기·인터페이스 보기<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+    </div>
+    <div class="bento">
+      <!-- CPU -->
+      <article id="hw-cpu" class="tile span-6 m-6 t-cpu" style="--i:5" aria-labelledby="t-cpu">
+        <header class="tile-head">
+          <span class="ib ib-blue" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.2"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M9 2.5v3M15 2.5v3M9 18.5v3M15 18.5v3M2.5 9h3M2.5 15h3M18.5 9h3M18.5 15h3"/></svg></span>
+          <h3 class="tile-title" id="t-cpu">CPU</h3>
+          <span class="tile-aside" data-f="cpu.aside">–</span>
+        </header>
+        <div class="cpu-top">
+          <div class="metric">
+            <div class="big"><span class="num" data-f="cpu.pct">–</span><span class="u">%</span></div>
+            <div class="metric-sub"><span data-f="cpu.freq">–</span><span data-f="cpu.gov"></span></div>
+          </div>
+          <dl class="kv3">
+            <div><dt>부하 평균 1·5·15분</dt><dd class="num" data-f="cpu.load">–</dd></div>
+            <div><dt>온도</dt><dd class="num" data-f="cpu.temp">–</dd></div>
+            <div><dt>I/O 대기</dt><dd class="num" data-f="cpu.iowait">–</dd></div>
+          </dl>
+        </div>
+        <figure class="area-chart" id="cpuChart">
+          <div class="chart-svg"></div>
+          <figcaption><span>5분 전</span><span data-f="cpu.chartcap">최근 5분 사용률</span><span>지금</span></figcaption>
+        </figure>
+        <div class="cores" id="cpuCores" aria-label="코어별 사용률"></div>
+        <p class="tile-foot" data-f="cpu.foot">–</p>
+      </article>
+
+      <!-- GPU -->
+      <article id="hw-gpu" class="tile span-3 m-3 t-gpu" style="--i:6" aria-labelledby="t-gpu">
+        <header class="tile-head">
+          <span class="ib ib-violet" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2.4"/><circle cx="9" cy="12" r="3"/><path d="M15.5 10h3M15.5 14h3M6 18v2.5M18 18v2.5"/></svg></span>
+          <h3 class="tile-title" id="t-gpu">GPU</h3>
+          <span class="tile-aside" data-f="gpu.name">–</span>
+        </header>
+        <div class="metric">
+          <div class="big"><span class="num" data-f="gpu.pct">–</span><span class="u">%</span></div>
+          <div class="metric-sub"><span data-f="gpu.clkl">V3D</span> <span class="num" data-f="gpu.mhz">–</span><span class="num" data-f="gpu.jobs"></span></div>
+        </div>
+        <div class="spark-box chart" id="gpuSpark" aria-hidden="true"></div>
+        <div class="queues" id="gpuQueues" aria-label="V3D 큐별 사용률"></div>
+      </article>
+
+      <!-- 메모리 -->
+      <article id="hw-mem" class="tile span-3 m-3 t-mem" style="--i:7" aria-labelledby="t-mem">
+        <header class="tile-head">
+          <span class="ib ib-green" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="2.5" y="6.5" width="19" height="9" rx="1.8"/><path d="M6.5 9.5v3M10 9.5v3M14 9.5v3M17.5 9.5v3M5 15.5v3M9 15.5v3M15 15.5v3M19 15.5v3"/></svg></span>
+          <h3 class="tile-title" id="t-mem">메모리</h3>
+          <span class="tile-aside" data-f="mem.total">–</span>
+        </header>
+        <div class="metric">
+          <div class="big"><span class="num" data-f="mem.pct">–</span><span class="u">%</span></div>
+          <div class="metric-sub"><span class="num" data-f="mem.used">–</span> 사용 · <span class="num" data-f="mem.avail">–</span> 가용</div>
+        </div>
+        <div class="stack" id="memStack" role="img" aria-label="메모리 구성"></div>
+        <ul class="legend" id="memLegend"></ul>
+        <div class="spark-box" id="memSpark" aria-hidden="true"></div>
+        <div class="swap" id="memSwap">
+          <div class="swap-row"><span class="swap-l">스왑</span><span class="num swap-v" data-f="mem.swap">–</span></div>
+          <div class="meter" data-tone="muted"><i></i></div>
+          <p class="swap-s num" data-f="mem.swapSub">–</p>
+          <p class="swap-n" data-f="mem.swapNote" data-tone="muted"></p>
+        </div>
+      </article>
+
+      <!-- 온도·팬·전력 -->
+      <article id="hw-therm" class="tile span-4 m-3 t-therm" style="--i:8" aria-labelledby="t-therm">
+        <header class="tile-head">
+          <span class="ib ib-orange" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 14.5V5a2 2 0 1 0-4 0v9.5a4 4 0 1 0 4 0z"/><path d="M12 9.5v7"/></svg></span>
+          <h3 class="tile-title" id="t-therm">온도 · 팬 · 전력</h3>
+          <span class="tile-aside" data-f="therm.pmic">–</span>
+        </header>
+        <div class="therm-grid">
+          <div class="gauge" id="tempGauge">
+            <div class="gauge-svg"></div>
+            <div class="gauge-c"><span class="gauge-v num"><span data-f="therm.temp">–</span><span class="u">°C</span></span><span class="gauge-l">CPU 온도</span></div>
+          </div>
+          <div class="therm-side">
+            <div class="mini-stat" id="fanStat">
+              <span class="fan" id="fanIcon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="1.8"/><path d="M12 10.2c-.4-3.8.6-6.7 3-6.7 2.8 0 3.2 3.9-1.4 7.4M13.6 12.9c3.4 1.7 5.3 4 4.1 6.1-1.4 2.4-4.9.9-5.6-4.9M10.4 12.9c-3.1 2.2-6 2.7-7.2.6-1.4-2.4 1.8-4.6 7.1-2.4"/></svg></span>
+              <div><span class="ms-v"><span class="num" data-f="therm.rpm">–</span> <span class="u">rpm</span></span><span class="ms-l">팬 · <span class="num" data-f="therm.fanpct">–</span></span></div>
+            </div>
+            <div class="mini-stat" id="powerStat">
+              <span class="ms-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M13 2.5 4.5 13.5h6.5l-1 8 8.5-11h-6.5l1-8z"/></svg></span>
+              <div><span class="ms-v"><span class="num" data-f="therm.watts">–</span> <span class="u">W</span></span><span class="ms-l"><span data-f="therm.pwl">보드 전력</span><span data-f="therm.invw"> · 입력 <span class="num" data-f="therm.inv">–</span></span></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="throttle" id="throttle" data-tone="muted"></div>
+        <dl class="clocks" id="clocks"></dl>
+        <details class="rails" id="rails">
+          <summary>전원 레일 <span class="num" data-f="therm.rails">–</span></summary>
+          <div class="rails-body" id="railsBody"></div>
+        </details>
+      </article>
+
+      <!-- 네트워크 -->
+      <article id="hw-net" class="tile span-4 m-3 t-net" style="--i:9" aria-labelledby="t-net">
+        <header class="tile-head">
+          <span class="ib ib-teal" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 3.5v17M8 20.5l-4-4M8 20.5l4-4M16 20.5v-17M16 3.5l-4 4M16 3.5l4 4"/></svg></span>
+          <h3 class="tile-title" id="t-net">네트워크</h3>
+          <span class="tile-aside" data-f="net.aside">–</span>
+        </header>
+        <div class="net-rates">
+          <div class="nr">
+            <span class="nr-l">LAN</span>
+            <span class="nr-v"><span class="dir" aria-label="수신">↓</span><span class="num" data-f="net.rx">–</span></span>
+            <span class="nr-v"><span class="dir" aria-label="송신">↑</span><span class="num" data-f="net.tx">–</span></span>
+          </div>
+          <div class="nr">
+            <span class="nr-l">Tailnet</span>
+            <span class="nr-v"><span class="dir" aria-label="수신">↓</span><span class="num" data-f="net.trx">–</span></span>
+            <span class="nr-v"><span class="dir" aria-label="송신">↑</span><span class="num" data-f="net.ttx">–</span></span>
+          </div>
+        </div>
+        <div class="spark-box tall" id="netSpark" aria-hidden="true"></div>
+        <ul class="legend inline" id="netLegend">
+          <li><i class="sw s1"></i>LAN 수신</li><li><i class="sw s2"></i>LAN 송신</li><li><i class="sw s3"></i>Tailnet 수신</li><li><i class="sw s4"></i>Tailnet 송신</li>
+        </ul>
+        <ul class="ifaces" id="ifaces"></ul>
+        <details class="bridges" id="bridges">
+          <summary>Docker 브리지 <span class="num" data-f="net.bridges">–</span></summary>
+          <ul class="ifaces small" id="bridgesBody"></ul>
+        </details>
+      </article>
+
+      <!-- 저장소 -->
+      <article id="hw-disk" class="tile span-4 m-6 t-disk" style="--i:10" aria-labelledby="t-disk">
+        <header class="tile-head">
+          <span class="ib ib-gray" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.6"/><path d="M3 13.5h18"/><path d="M16.5 16.8h.01M13.5 16.8h.01"/></svg></span>
+          <h3 class="tile-title" id="t-disk">저장소</h3>
+          <span class="tile-aside" data-f="disk.aside">–</span>
+        </header>
+        <ul class="disks" id="disks"></ul>
+        <div class="io">
+          <div class="io-v"><span class="io-l"><i class="sw s1"></i>읽기</span><span class="num" data-f="disk.r">–</span></div>
+          <div class="io-v"><span class="io-l"><i class="sw s2"></i>쓰기</span><span class="num" data-f="disk.w">–</span></div>
+        </div>
+        <div class="spark-box" id="diskSpark" aria-hidden="true"></div>
+        <p class="tile-foot" data-f="disk.foot">최근 5분 디스크 I/O</p>
+      </article>
+
+      <!-- 추이 -->
+      <article id="hw-hist" class="tile span-12 m-6 t-hist" style="--i:11" aria-labelledby="t-hist">
+        <header class="tile-head wrap-head">
+          <span class="ib ib-indigo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3.5 20h17M6 15.5l4-5 3.5 3 5-6.5"/></svg></span>
+          <h3 class="tile-title" id="t-hist">추이</h3>
+          <div class="hist-ctl">
+            <div class="seg scroll-x" id="histMetric" role="group" aria-label="지표 선택">
+              <button type="button" data-v="cpu">CPU·GPU</button>
+              <button type="button" data-v="mem">메모리</button>
+              <button type="button" data-v="temp">온도</button>
+              <button type="button" data-v="fan">팬</button>
+              <button type="button" data-v="net">네트워크</button>
+              <button type="button" data-v="disk">디스크</button>
+              <button type="button" data-v="power">전력</button>
+              <button type="button" data-v="load">부하</button>
+            </div>
+            <div class="seg" id="histRange" role="group" aria-label="기간 선택">
+              <button type="button" data-v="1h">1시간</button>
+              <button type="button" data-v="24h">24시간</button>
+            </div>
+          </div>
+        </header>
+        <div class="hist-legend" id="histLegend"></div>
+        <div class="hist-chart" id="histChart">
+          <div class="hist-svg"></div>
+          <div class="hist-tip" id="histTip" hidden></div>
+        </div>
+        <p class="tile-foot" id="histNote">기록을 불러오는 중…</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============================================================ 네트워크 -->
+  <section id="network" class="sec" aria-labelledby="h-net">
+    <div class="sec-head">
+      <h2 id="h-net">네트워크</h2>
+      <p class="sec-sub">인그레스 · 트래픽 · Tailscale · 열린 포트</p>
+      <a class="sec-link" href="/map/?view=concept">네트워크 맵에서 경로 보기<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+    </div>
+    <div class="bento">
+      <article class="tile span-8 m-6 t-traffic" aria-labelledby="t-traffic">
+        <header class="tile-head wrap-head">
+          <span class="ib ib-teal" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20V11M9.3 20V5M14.6 20v-7M20 20V8"/></svg></span>
+          <h3 class="tile-title" id="t-traffic">트래픽</h3>
+          <div class="seg" id="trRange" role="group" aria-label="트래픽 기간">
+            <button type="button" data-v="1h">1시간</button>
+            <button type="button" data-v="24h">24시간</button>
+          </div>
+        </header>
+        <div class="tr-top">
+          <div class="metric">
+            <div class="big sm"><span class="num" data-f="tr.req">–</span><span class="u">요청</span></div>
+            <div class="metric-sub">p50 <span class="num" data-f="tr.p50">–</span> · p95 <span class="num" data-f="tr.p95">–</span> · <span data-f="tr.other">–</span></div>
+          </div>
+          <div class="tr-splits">
+            <div class="split"><span class="split-l">상태 코드</span><div class="split-bar" id="trStatus"></div><ul class="legend inline" id="trStatusLegend"></ul></div>
+            <div class="split"><span class="split-l">유입 경로</span><div class="split-bar" id="trVia"></div><ul class="legend inline" id="trViaLegend"></ul></div>
+          </div>
+        </div>
+        <figure class="bars-fig">
+          <div class="bars" id="trBars" role="img" aria-label="시간대별 요청 수"></div>
+          <figcaption><span data-f="tr.barsL">60분 전</span><span data-f="tr.barsC">분당 요청 · 빨강은 5xx</span><span>지금</span></figcaption>
+        </figure>
+        <div class="tabs" role="tablist" aria-label="트래픽 상세" id="trTabs">
+          <button type="button" role="tab" id="tab-hosts" aria-controls="panel-hosts" data-v="hosts">상위 호스트</button>
+          <button type="button" role="tab" id="tab-recent" aria-controls="panel-recent" data-v="recent">최근 요청</button>
+          <button type="button" role="tab" id="tab-errors" aria-controls="panel-errors" data-v="errors">Caddy 오류 <span class="cnt num" data-f="tr.errCount"></span></button>
+        </div>
+        <div class="tab-panel scroll-y" role="tabpanel" id="panel-hosts" aria-labelledby="tab-hosts"></div>
+        <div class="tab-panel scroll-y" role="tabpanel" id="panel-recent" aria-labelledby="tab-recent" hidden></div>
+        <div class="tab-panel scroll-y" role="tabpanel" id="panel-errors" aria-labelledby="tab-errors" hidden></div>
+        <p class="tr-stream" id="trStream" data-tone="muted"><i class="shape" aria-hidden="true"></i><span data-f="tr.stream">로그 스트림 확인 중…</span></p>
+      </article>
+
+      <article class="tile span-4 m-6 t-ingress" aria-labelledby="t-ingress">
+        <header class="tile-head">
+          <span class="ib ib-blue" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6l8-3z"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg></span>
+          <h3 class="tile-title" id="t-ingress">인그레스</h3>
+          <span class="tile-aside">Caddy · Cloudflare Tunnel</span>
+        </header>
+        <div id="caddyBox" class="ing-block"></div>
+        <div id="tunnelBox" class="ing-block"></div>
+        <details class="tun-errors" id="tunErrors">
+          <summary>터널 최근 로그 <span class="num" data-f="tun.errs">–</span></summary>
+          <ul class="loglist" id="tunErrorsBody"></ul>
+        </details>
+      </article>
+
+      <article class="tile span-8 m-6 t-ports" aria-labelledby="t-ports">
+        <header class="tile-head wrap-head">
+          <span class="ib ib-orange" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0V7zM12 16v5"/></svg></span>
+          <h3 class="tile-title" id="t-ports">열린 포트</h3>
+          <div class="seg scroll-x" id="portFilter" role="group" aria-label="포트 도달 범위 필터">
+            <button type="button" data-v="all">전체 <span class="cnt num" data-f="pf.all"></span></button>
+            <button type="button" data-v="exposed">LAN 노출 <span class="cnt num" data-f="pf.exposed"></span></button>
+            <button type="button" data-v="tailnet">Tailnet <span class="cnt num" data-f="pf.tailnet"></span></button>
+            <button type="button" data-v="docker">Docker <span class="cnt num" data-f="pf.docker"></span></button>
+            <button type="button" data-v="loopback">로컬 <span class="cnt num" data-f="pf.loopback"></span></button>
+          </div>
+        </header>
+        <p class="ports-note" id="portsNote"></p>
+        <div class="table-wrap scroll-y tall" id="portsWrap">
+          <table class="tbl" id="portsTable">
+            <thead><tr><th scope="col">포트</th><th scope="col">도달 범위</th><th scope="col">프로세스</th><th scope="col">소유 주체</th><th scope="col">바인딩 주소</th></tr></thead>
+            <tbody id="portsBody"></tbody>
+          </table>
+        </div>
+      </article>
+      <article class="tile span-4 m-6 t-tail" aria-labelledby="t-tail">
+        <header class="tile-head">
+          <span class="ib ib-dark" aria-hidden="true"><svg viewBox="0 0 24 24"><g stroke="none" fill="currentColor"><circle cx="5" cy="5" r="2.1" opacity=".4"/><circle cx="12" cy="5" r="2.1" opacity=".4"/><circle cx="19" cy="5" r="2.1" opacity=".4"/><circle cx="5" cy="12" r="2.1"/><circle cx="12" cy="12" r="2.1"/><circle cx="19" cy="12" r="2.1"/><circle cx="5" cy="19" r="2.1" opacity=".4"/><circle cx="12" cy="19" r="2.1"/><circle cx="19" cy="19" r="2.1" opacity=".4"/></g></svg></span>
+          <h3 class="tile-title" id="t-tail">Tailscale</h3>
+          <span class="tile-aside" id="tailState"></span>
+        </header>
+        <div class="tail-top">
+          <div class="metric">
+            <div class="big sm"><span class="num" data-f="tail.on">–</span><span class="u">/ <span class="num" data-f="tail.total">–</span></span></div>
+            <div class="metric-sub">피어 온라인 · <span data-f="tail.mix">–</span></div>
+          </div>
+          <div class="tail-ring" id="tailRing" aria-hidden="true"></div>
+        </div>
+        <dl class="kvlist" id="tailSelf"></dl>
+        <div class="tail-health" id="tailHealth" hidden></div>
+        <ul class="peers scroll-y" id="peers" aria-label="Tailnet 피어"></ul>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ============================================================ 런타임 -->
+  <section id="runtime" class="sec" aria-labelledby="h-rt">
+    <div class="sec-head">
+      <h2 id="h-rt">런타임</h2>
+      <p class="sec-sub">컨테이너 · compose 프로젝트 · systemd 유닛 · 프로세스</p>
+      <a class="sec-link" data-physfocus="engine" href="/map/?view=physical#focus=engine%3Adocker">물리 지도에서 어디서 도는지 보기<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+    </div>
+    <div class="bento">
+      <article class="tile span-7 m-6 t-ctr" aria-labelledby="t-ctr">
+        <header class="tile-head">
+          <span class="ib ib-blue" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20.5 7.8 12 3 3.5 7.8v8.4L12 21l8.5-4.8V7.8z"/><path d="M3.5 7.8 12 12.6l8.5-4.8M12 12.6V21"/></svg></span>
+          <h3 class="tile-title" id="t-ctr">컨테이너</h3>
+          <span class="tile-aside" data-f="ctr.aside">–</span>
+        </header>
+        <div class="table-wrap scroll-y tall">
+          <table class="tbl ctr-tbl">
+            <thead><tr><th scope="col">컨테이너</th><th scope="col">상태</th><th scope="col">가동</th><th scope="col">재시작</th><th scope="col">CPU</th><th scope="col">메모리</th></tr></thead>
+            <tbody id="ctrBody"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="tile span-5 m-6 t-units" aria-labelledby="t-units">
+        <header class="tile-head wrap-head">
+          <span class="ib ib-gray" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.6M12 18.6v2.6M4.2 7.4l2.3 1.3M17.5 15.3l2.3 1.3M4.2 16.6l2.3-1.3M17.5 8.7l2.3-1.3"/><circle cx="12" cy="12" r="7.2"/></svg></span>
+          <h3 class="tile-title" id="t-units">systemd 유닛</h3>
+          <div class="seg scroll-x" id="unitFilter" role="group" aria-label="유닛 필터">
+            <button type="button" data-v="all">전체 <span class="cnt num" data-f="uf.all"></span></button>
+            <button type="button" data-v="failed">실패 <span class="cnt num" data-f="uf.failed"></span></button>
+            <button type="button" data-v="app">앱·서버 <span class="cnt num" data-f="uf.app"></span></button>
+            <button type="button" data-v="infra">인프라 <span class="cnt num" data-f="uf.infra"></span></button>
+            <button type="button" data-v="system">시스템 <span class="cnt num" data-f="uf.system"></span></button>
+          </div>
+        </header>
+        <ul class="units scroll-y tall" id="units"></ul>
+      </article>
+
+      <article class="tile span-12 m-6" aria-labelledby="t-changes">
+        <header class="tile-head">
+          <h3 class="tile-title" id="t-changes">구성 변경 이력</h3>
+          <span class="tile-aside">최근 200건 · 재시작 후 유지</span>
+        </header>
+        <div class="table-wrap scroll-y tall">
+          <table class="tbl">
+            <thead><tr><th scope="col">시각</th><th scope="col">대상</th><th scope="col">변경</th><th scope="col">내용</th></tr></thead>
+            <tbody id="changesBody"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="tile span-12 m-6 t-proc" aria-labelledby="t-proc">
+        <header class="tile-head">
+          <span class="ib ib-green" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8.5 6.5h12M8.5 12h12M8.5 17.5h12M3.5 6.5h.01M3.5 12h.01M3.5 17.5h.01"/></svg></span>
+          <h3 class="tile-title" id="t-proc">프로세스</h3>
+          <span class="tile-aside" data-f="proc.aside">–</span>
+        </header>
+        <div class="proc-cols">
+          <div><h4 class="sub-h">CPU 상위</h4><ol class="procs" id="procCpu"></ol></div>
+          <div><h4 class="sub-h">메모리 상위</h4><ol class="procs" id="procMem"></ol></div>
+        </div>
+      </article>
+    </div>
+  </section>
+</main>
+
+<footer class="foot wrap">
+  <p data-f="foot">Jarvis</p>
+  <p class="foot-self-p"><a class="foot-self" id="footSelf" href="#" data-tone="muted" hidden><i class="shape" aria-hidden="true"></i><span data-f="foot.self">모니터 자기 진단</span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a></p>
+</footer>
+
+<dialog class="sheet" id="sheet" aria-labelledby="sheetTitle">
+  <div class="sheet-panel">
+    <div class="sheet-grab" aria-hidden="true"></div>
+    <header class="sheet-head">
+      <div class="sheet-head-main" id="sheetHead"></div>
+      <button type="button" class="icon-btn sheet-close" id="sheetClose" aria-label="닫기" autofocus>
+        <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </header>
+    <div class="sheet-body" id="sheetBody"></div>
+  </div>
+</dialog>
+
+<script src="/app/home-map.js"></script>
+<script src="/lab/proposal/proposal.js"></script>
+<script src="/app/focus.js"></script>
+<script src="/app/bento.js"></script>
+</body>
+</html>

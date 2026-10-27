@@ -1,0 +1,44 @@
+# pi5-server2(s2) 설정: core + 자기 자신의 게이트웨이. 설치: install -Dm644 deploy/s2.toml ~/.config/jarvis/config.toml
+# devices 를 바꾸면 재시작, core·viewers 는 자동 반영. 키 설명은 jarvis/config.py.
+
+port = 9300
+bind = "0.0.0.0"
+
+caddy = "pi5-server2-caddy"
+tunnel = ""
+
+# Hermes(ubuntu-1) 게이트웨이는 core 가 상태 API 로 본다. 2026-10-13 OpenClaw 에서 Hermes 로 옮김.
+hermes_url = "https://hermes.example.com/api/status"
+
+# 자기 자신도 tailnet IP 로 모은다(/api/orca 는 루프백을 받지 않는다)
+core = ["100.64.0.1"]
+
+# core 홈의 Orca 연결 버튼(페어링 코드)을 누를 수 있는 기기
+viewers = [
+  "100.64.0.5",   # mac-1 (macbookpro)
+  "100.64.0.8",    # win-1 (Windows)
+  "100.64.0.9",    # win-2 (Windows)
+  "100.64.0.10",   # phone (휴대폰)
+]
+
+# jarvis.example.com 는 pit5 Caddy 가 받아 이 core(:9300)로 넘긴다(tailnet 전용 라우트)
+hosts = ["jarvis.example.com"]
+# 그 Caddy(pit5)가 붙인 X-Forwarded-For 로 viewer 를 판정한다. pit5 의 다른 컨테이너도 같은 IP 로 나가므로
+# Caddy 만 아는 키(pit5 ingress .env 의 JARVIS_PROXY_KEY)를 함께 확인한다. 키는 설치한 설정 파일(0600)에만 적는다.
+proxies = ["100.64.0.2"]
+# proxy_key = "..."
+
+devices = [
+  { id = "s2",                   url = "http://100.64.0.1:9300" },
+  { id = "pit5",                 url = "http://100.64.0.2:9300" },
+  { id = "pi5-s3",               url = "http://100.64.0.3:9300" },
+  { id = "cm5-1",                url = "http://100.64.0.4:9300" },
+  { id = "mac-1",           url = "http://100.64.0.5:9300" },
+  { id = "mac-2", url = "http://100.64.0.6:9300" },
+  { id = "ubuntu-1",      url = "http://100.64.0.7:9300" },
+  { id = "win-1",           url = "http://100.64.0.8:9300" },
+  { id = "win-2",         url = "http://100.64.0.9:9300" },
+]
+
+[infra_units]
+pm2 = ""

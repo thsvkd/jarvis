@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark"><title>Jarvis 콘텐츠 구성 랩 · Focus 개선판</title><script src="/app/theme-init.js"></script>
+<link rel="icon" href="/shared/favicon.svg"><link rel="stylesheet" href="/app/shell.css"><link rel="stylesheet" href="/app/bento.css"><link rel="stylesheet" href="/lab/gallery.css">
+<script defer src="/shared/jarvis.js"></script><script defer src="/lab/concepts.js"></script><script defer src="/lab/session.js"></script><script defer src="/app/shell.js"></script><script defer src="/lab/gallery.js"></script>
+</head>
+<body>
+<a class="skip" href="#designs">시안 목록으로 건너뛰기</a>
+<header id="jarvis-shell" data-page="home"></header>
+<nav class="lab-top wrap"><span>디자인 랩 03 · 콘텐츠 구성 비교</span><a href="/" target="_blank" rel="noopener noreferrer">현재 Bento 원본 열기 ↗</a></nav>
+<main class="wrap">
+<section class="intro">
+  <div><p class="eyebrow">SAME BENTO / FOCUS REFINED</p><h1>기존 디자인, Focus를 더 간결하게.</h1><p class="lead"><strong>기존 화면의 헤더·폰트·색상·카드·상세 창을 그대로 재사용합니다.</strong><br>순서, 처음 보이는 정보량, 탭과 접기 방식만 비교해 보세요.</p></div>
+  <aside class="brief"><span class="stamp">CONTENT PLAN / 03</span><h2>이번 랩의 질문</h2><p>같은 정보를 어디에 두고,<br>어디까지 먼저 보여 줄까요?</p><ul><li>첫 화면의 숫자와 표를 줄이기</li><li>섹션 순서를 목적에 맞게 바꾸기</li><li>상세 정보는 선택 후 펼치기</li></ul><div class="live-line"><span class="live-dot"></span><span id="live">실시간 서버에 연결 중…</span></div></aside>
+</section>
+<section class="reading"><span>같은 조건으로 비교하기</span><p><b>상태 확인 → 앱 찾기 → 원인 확인</b>을 각 시안에서 해보세요. 미리보기와 독립 데모 모두 같은 서버 데이터를 사용합니다.</p><a href="#compare">두 시안 나란히 비교 ↓</a></section>
+<section id="designs" aria-labelledby="designs-title"><div class="section-head"><div><p class="eyebrow">CONTENT PLANS + FOCUS REFINED</p><h2 id="designs-title">Bento는 그대로, 읽는 흐름만 다르게.</h2></div><p id="favorite" aria-live="polite">후보를 저장해 두고 비교하세요.</p></div><div id="cards" class="cards"></div></section>
+<section id="compare" aria-labelledby="compare-title"><div class="section-head"><div><p class="eyebrow">SIDE BY SIDE</p><h2 id="compare-title">같은 서버, 다른 첫 화면.</h2></div><button id="compare-toggle" type="button">비교 화면 열기</button></div><p class="compare-help">기존 다섯 시안과 Focus 개선판 중 두 개를 골라 비교합니다. 좁은 화면에서는 위아래로 표시합니다.</p><div id="comparison" hidden><div class="compare-controls"><label>왼쪽 시안 <select id="left"></select></label><label>오른쪽 시안 <select id="right"></select></label></div><div id="compare-frames" class="compare-frames"></div></div></section>
+<section class="recommend"><p class="eyebrow">A STARTING POINT</p><h2>선택한 Focus에 <em>작은 개선을 더했습니다</em>.</h2><p>①+는 서비스를 직접 고정하고, 접힌 영역에 실제 상태를 요약합니다. 모바일 첫 화면과 서비스 카드도 간결하게 다듬었습니다. 나란히 비교의 기본값은 기존 ①과 개선판 ①+입니다.</p><a class="primary" href="/lab/proposal/?concept=focus-plus">Focus 개선판 직접 보기 ↗</a></section>
+</main><footer><span>Jarvis / Design Lab</span><span>탐색용 시안 · 서버 설정을 변경하지 않습니다</span><a href="/">현재 운영 화면</a></footer>
+</body></html>

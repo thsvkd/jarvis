@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="Jarvis 상태 보고 — 호스트 한 대의 서비스·노출 경로·하드웨어를 한 장의 지면으로.">
+<title>Jarvis · Ledger</title>
+<link rel="icon" href="/shared/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<!-- 웹폰트는 렌더를 막지 않게 늦게 붙인다. CDN 이 막혀도 시스템 글꼴로 그대로 읽힌다. -->
+<link rel="stylesheet" media="print" onload="this.media='all'" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,300..600&family=Noto+Serif+KR:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" media="print" onload="this.media='all'" href="https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="ledger.css">
+</head>
+<body>
+<a class="skip" href="#main">본문으로 건너뛰기</a>
+
+<!-- 스크롤하면 나타나는 러닝 헤드: 상태·갱신 시각·실시간 여부를 항상 보이게 -->
+<div class="runhead" id="runhead" aria-hidden="true">
+  <div class="runhead-in">
+    <a class="rh-title" href="#top" tabindex="-1">Jarvis 상태 보고</a>
+    <span class="rh-status" id="rh-status"></span>
+    <nav class="rh-index" aria-label="차례(요약)">
+      <a href="#s-summary" tabindex="-1">01</a><a href="#s-hw" tabindex="-1">02</a><a href="#s-svc" tabindex="-1">03</a><a href="#s-map" tabindex="-1">04</a><a href="#s-ing" tabindex="-1">05</a><a href="#s-ts" tabindex="-1">06</a><a href="#s-ports" tabindex="-1">07</a><a href="#s-rt" tabindex="-1">08</a>
+    </nav>
+    <span class="rh-live" id="rh-live"></span>
+  </div>
+</div>
+
+<div class="page" id="top">
+<header class="masthead">
+  <nav class="topstrip" aria-label="시안 이동">
+    <a class="back" href="/"><span aria-hidden="true">←</span> 갤러리</a>
+    <ul class="designs">
+      <li><a href="/d/control/">Control</a></li>
+      <li><a href="/d/bento/">Bento</a></li>
+      <li><a href="/d/atlas/">Atlas</a></li>
+      <li><a href="/d/ledger/" aria-current="page">Ledger</a></li>
+      <li><a href="/d/terminal/">Terminal</a></li>
+    </ul>
+    <p class="live" id="live" role="status" aria-live="polite"><span class="live-dot" aria-hidden="true"></span><span class="live-t">연결 중…</span></p>
+  </nav>
+
+  <div class="nameplate">
+    <div class="ear ear-l" id="ear-weather" role="group" aria-label="오늘의 판정"></div>
+    <div class="plate">
+      <p class="overline"><span>Ledger</span> · 레저 — Jarvis 시안</p>
+      <h1 class="title">Jarvis 상태 보고</h1>
+    </div>
+    <div class="ear ear-r" id="ear-edition" role="group" aria-label="판 정보"></div>
+  </div>
+
+  <div class="dateline" id="dateline"><span>조판 중…</span></div>
+  <div class="access" id="access"></div>
+
+  <nav class="index" aria-label="이번 호 차례">
+    <ol>
+      <li><a href="#s-summary"><span class="n">01</span>요약</a></li>
+      <li><a href="#s-hw"><span class="n">02</span>하드웨어</a></li>
+      <li><a href="#s-svc"><span class="n">03</span>서비스</a></li>
+      <li><a href="#s-map"><span class="n">04</span>노출 경로</a></li>
+      <li><a href="#s-ing"><span class="n">05</span>인그레스·트래픽</a></li>
+      <li><a href="#s-ts"><span class="n">06</span>Tailscale</a></li>
+      <li><a href="#s-ports"><span class="n">07</span>열린 포트</a></li>
+      <li><a href="#s-rt"><span class="n">08</span>컨테이너·유닛</a></li>
+    </ol>
+  </nav>
+</header>
+
+<p class="stale-banner" id="stale-banner" role="alert" hidden></p>
+<main id="main">
+  <!-- 01 요약 -->
+  <section class="sec" id="s-summary" aria-labelledby="h-summary">
+    <header class="sec-head">
+      <h2 id="h-summary"><span class="num">01</span><span class="dash" aria-hidden="true">—</span>요약</h2>
+      <p class="dek" id="dek-summary">1면</p>
+    </header>
+    <!-- 좁은 화면에서는 머리기사 → 주요 사항(경보) → 본문 순서로 흐른다 -->
+    <div class="front" id="front">
+      <div class="front-hed" id="front-hed"><p class="placeholder">조판 중입니다 — 첫 수집을 기다리는 중…</p></div>
+      <aside class="notes" aria-labelledby="h-notes">
+        <h3 class="notes-h" id="h-notes">주요 사항 <span class="notes-count" id="notes-count"></span></h3>
+        <div id="alerts"></div>
+      </aside>
+      <div class="lede" id="front-lede"></div>
+      <div class="front-figs" id="front-figs"></div>
+      <div class="front-box" id="front-box"></div>
+    </div>
+  </section>
+
+  <!-- 02 하드웨어 -->
+  <section class="sec" id="s-hw" aria-labelledby="h-hw">
+    <header class="sec-head">
+      <h2 id="h-hw"><span class="num">02</span><span class="dash" aria-hidden="true">—</span>하드웨어</h2>
+      <p class="dek" id="dek-hw"></p>
+    </header>
+    <div class="figs" id="hw-figs"></div>
+
+    <div class="hist">
+      <div class="hist-head">
+        <h3 class="sub-h">시계열 <span class="sub-note">같은 시간축의 작은 그림들 — 올리면 그 시각의 값</span></h3>
+        <div class="seg" role="group" aria-label="시계열 기간">
+          <button type="button" data-range="1h" aria-pressed="true">1시간</button>
+          <button type="button" data-range="24h" aria-pressed="false">24시간</button>
+        </div>
+        <p class="hist-note" id="hist-note" aria-live="off"></p>
+      </div>
+      <div class="multiples" id="hist-grid"></div>
+    </div>
+
+    <div class="hw-cols">
+      <div class="hw-col" id="hw-cpu"></div>
+      <div class="hw-col" id="hw-mem"></div>
+      <div class="hw-col" id="hw-net"></div>
+    </div>
+    <div class="hw-procs" id="hw-procs"></div>
+  </section>
+
+  <!-- 03 서비스 -->
+  <section class="sec" id="s-svc" aria-labelledby="h-svc">
+    <header class="sec-head">
+      <h2 id="h-svc"><span class="num">03</span><span class="dash" aria-hidden="true">—</span>서비스 <span class="h-sub">무엇이 떠 있는가</span></h2>
+      <p class="dek" id="dek-svc"></p>
+    </header>
+    <div class="legend" role="group" aria-label="표기법">
+      <span class="lg"><span class="mk ok" aria-hidden="true"></span>정상</span>
+      <span class="lg"><span class="mk warn" aria-hidden="true"></span>저하</span>
+      <span class="lg"><span class="mk crit" aria-hidden="true"></span>다운</span>
+      <span class="lg"><span class="mk muted" aria-hidden="true"></span>확인 불가</span>
+      <span class="lg-sep" aria-hidden="true"></span>
+      <span class="lg"><span class="xp pub">공개</span>인터넷</span>
+      <span class="lg"><span class="xp tn">Tailnet</span>tailnet</span>
+      <span class="lg"><span class="xp lan">LAN</span>사설망</span>
+      <span class="lg"><span class="xp loc">로컬</span>이 기기 안</span>
+      <span class="lg-sep" aria-hidden="true"></span>
+      <span class="lg lg-note">CPU 는 코어 하나 기준(최대 400%)</span>
+    </div>
+    <div class="svc-wrap">
+      <table class="ledger svc-table">
+        <caption class="sr">서비스 목록 — 분류별</caption>
+        <colgroup><col class="w-st"><col class="w-name"><col class="w-url"><col class="w-xp"><col class="w-rt"><col class="w-pr"><col class="w-tr"></colgroup>
+        <thead>
+          <tr><th scope="col">상태</th><th scope="col">서비스</th><th scope="col">주소</th><th scope="col">노출</th><th scope="col">실행</th><th scope="col">점검 · 인증서 · DNS</th><th scope="col" class="num">요청 1시간 / 24시간</th></tr>
+        </thead>
+        <tbody id="svc-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 04 노출 경로 -->
+  <section class="sec" id="s-map" aria-labelledby="h-map">
+    <header class="sec-head">
+      <h2 id="h-map"><span class="num">04</span><span class="dash" aria-hidden="true">—</span>노출 경로 <span class="h-sub">누가 어디로 들어오는가</span></h2>
+      <p class="dek">노드를 누르면 그 경로만 남는다</p>
+    </header>
+    <figure class="map">
+      <p class="map-hint" aria-hidden="true">← 옆으로 밀어서 전체 지도를 본다 →</p>
+      <div class="map-scroll" id="map-scroll" tabindex="0" aria-label="네트워크 지도 (가로로 스크롤)"><div id="map"></div></div>
+      <figcaption class="map-cap">
+        <div class="map-legend" aria-label="선 표기">
+          <span class="ml"><svg width="28" height="8" aria-hidden="true"><line x1="0" y1="4" x2="28" y2="4" class="e-public"/></svg>공개(인터넷)</span>
+          <span class="ml"><svg width="28" height="8" aria-hidden="true"><line x1="0" y1="4" x2="28" y2="4" class="e-tailnet"/></svg>Tailnet</span>
+          <span class="ml"><svg width="28" height="8" aria-hidden="true"><line x1="0" y1="4" x2="28" y2="4" class="e-lan"/></svg>LAN</span>
+          <span class="ml"><svg width="28" height="8" aria-hidden="true"><line x1="0" y1="4" x2="28" y2="4" class="e-depends"/></svg>의존(백엔드)</span>
+          <span class="ml ml-hostbox"><svg width="22" height="12" aria-hidden="true"><rect x="1" y="1" width="20" height="10" class="lg-box"/></svg>이 기기 안</span>
+        </div>
+        <p class="map-sel" id="map-sel" aria-live="polite"></p>
+      </figcaption>
+    </figure>
+    <div class="routes" id="routes"></div>
+  </section>
+
+  <!-- 05 인그레스 -->
+  <section class="sec" id="s-ing" aria-labelledby="h-ing">
+    <header class="sec-head">
+      <h2 id="h-ing"><span class="num">05</span><span class="dash" aria-hidden="true">—</span>인그레스 · 트래픽</h2>
+      <p class="dek" id="dek-ing"></p>
+    </header>
+    <div class="ing-top">
+      <div class="ing-col" id="ing-caddy"></div>
+      <div class="ing-col" id="ing-tunnel"></div>
+      <div class="ing-col" id="ing-traffic"></div>
+    </div>
+    <div class="traffic-charts" id="traffic-charts"></div>
+    <h3 class="sub-h">호스트별 <span class="sub-note">같은 축의 작은 그림 — 24시간 요청 · 상태 구성 · 지연(p50–p95, 로그 축)</span>
+      <span class="lat-key" role="img" aria-label="지연 축은 로그 눈금: 1 ms, 10 ms, 100 ms, 1 s. 채운 점은 p50, 빈 점은 p95.">
+        <span class="lk-ax" aria-hidden="true"><i style="left:23.25%"></i><i style="left:46.5%"></i><i style="left:69.75%"></i><i style="left:93%"></i>
+          <b style="left:23.25%">1ms</b><b style="left:46.5%">10ms</b><b style="left:69.75%">100ms</b><b style="left:93%">1s</b></span>
+        <span class="lk-leg" aria-hidden="true"><span class="lk-d"></span>p50 <span class="lk-d lk-o"></span>p95</span>
+      </span></h3>
+    <div class="hosts" id="hosts"></div>
+    <details class="fold hosts-more" data-dk="hosts-more" id="hosts-more" hidden>
+      <summary>나머지 호스트 <span class="fold-n" id="hosts-more-n"></span></summary>
+      <div class="hosts" id="hosts-rest"></div>
+    </details>
+    <div class="ing-bottom">
+      <div class="recent-wrap">
+        <h3 class="sub-h">최근 요청 <span class="sub-note">최신순 · 인터넷에서 온 값은 그대로 옮겨 적음</span></h3>
+        <div class="scroll recent-scroll" id="recent" tabindex="0" aria-label="최근 요청 목록 (스크롤)"></div>
+      </div>
+      <div class="errs-wrap">
+        <h3 class="sub-h">Caddy 경고·오류</h3>
+        <div id="caddy-errors"></div>
+        <details class="fold" data-dk="tunnel-errors" id="tunnel-errors-d">
+          <summary>cloudflared 최근 오류 <span class="fold-n" id="tunnel-errors-n"></span></summary>
+          <div id="tunnel-errors"></div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- 06 Tailscale -->
+  <section class="sec" id="s-ts" aria-labelledby="h-ts">
+    <header class="sec-head">
+      <h2 id="h-ts"><span class="num">06</span><span class="dash" aria-hidden="true">—</span>Tailscale</h2>
+      <p class="dek" id="dek-ts"></p>
+    </header>
+    <div class="ts-top" id="ts-top"></div>
+    <div class="scroll" data-sk="peers"><table class="ledger peers"><caption class="sr">Tailnet 피어</caption>
+      <thead><tr><th scope="col">상태</th><th scope="col">피어</th><th scope="col">OS</th><th scope="col">Tailnet IP</th><th scope="col">연결</th><th scope="col">경로</th><th scope="col" class="num">수신 / 송신</th><th scope="col">마지막 접속</th><th scope="col">태그</th></tr></thead>
+      <tbody id="peers"></tbody></table></div>
+  </section>
+
+  <!-- 07 열린 포트 -->
+  <section class="sec" id="s-ports" aria-labelledby="h-ports">
+    <header class="sec-head">
+      <h2 id="h-ports"><span class="num">07</span><span class="dash" aria-hidden="true">—</span>열린 포트</h2>
+      <p class="dek" id="dek-ports"></p>
+    </header>
+    <div class="ports-sum" id="ports-sum"></div>
+    <div class="scroll" data-sk="ports"><table class="ledger ports"><caption class="sr">열린 포트(리스너)</caption>
+      <colgroup><col class="w-pt"><col class="w-pr"><col class="w-sc"><col class="w-ad"><col class="w-pc"><col class="w-ow"></colgroup>
+      <thead><tr><th scope="col" class="num">포트</th><th scope="col">프로토콜</th><th scope="col">도달 범위</th><th scope="col">바인딩 주소</th><th scope="col">프로세스</th><th scope="col">소유</th></tr></thead>
+      <tbody id="ports"></tbody></table></div>
+  </section>
+
+  <!-- 08 컨테이너 · 유닛 -->
+  <section class="sec" id="s-rt" aria-labelledby="h-rt">
+    <header class="sec-head">
+      <h2 id="h-rt"><span class="num">08</span><span class="dash" aria-hidden="true">—</span>컨테이너 · 유닛</h2>
+      <p class="dek" id="dek-rt"></p>
+    </header>
+    <h3 class="sub-h">Compose 프로젝트</h3>
+    <div class="projects" id="projects"></div>
+    <h3 class="sub-h">컨테이너</h3>
+    <div class="scroll" data-sk="ctrs"><table class="ledger ctrs"><caption class="sr">도커 컨테이너</caption>
+      <colgroup><col class="w-st"><col class="w-cn"><col class="w-img"><col class="w-hl"><col class="w-up"><col class="w-rs"><col class="w-cpu"><col class="w-mem"><col class="w-pp"></colgroup>
+      <thead><tr><th scope="col">상태</th><th scope="col">컨테이너</th><th scope="col">이미지</th><th scope="col">헬스</th><th scope="col" class="num">가동</th><th scope="col" class="num">재시작</th><th scope="col" class="num">CPU</th><th scope="col" class="num">메모리</th><th scope="col">포트</th></tr></thead>
+      <tbody id="ctrs"></tbody></table></div>
+    <h3 class="sub-h">systemd 유닛 <span class="sub-note" id="units-note"></span></h3>
+    <div class="scroll" data-sk="units"><table class="ledger units"><caption class="sr">systemd 유닛 — 실패 먼저</caption>
+      <thead><tr><th scope="col">상태</th><th scope="col">유닛</th><th scope="col">범위</th><th scope="col">분류</th><th scope="col" class="num">가동</th><th scope="col" class="num">재시작</th><th scope="col" class="num">CPU</th><th scope="col" class="num">메모리</th></tr></thead>
+      <tbody id="units"></tbody></table></div>
+    <details class="fold" data-dk="units-more" id="units-more">
+      <summary>나머지 유닛 <span class="fold-n" id="units-more-n"></span> — 시스템·데스크톱</summary>
+      <div class="scroll" data-sk="units-rest"><table class="ledger units"><caption class="sr">나머지 systemd 유닛</caption>
+        <thead><tr><th scope="col">상태</th><th scope="col">유닛</th><th scope="col">범위</th><th scope="col">분류</th><th scope="col" class="num">가동</th><th scope="col" class="num">재시작</th><th scope="col" class="num">CPU</th><th scope="col" class="num">메모리</th></tr></thead>
+        <tbody id="units-rest"></tbody></table></div>
+    </details>
+  </section>
+</main>
+
+<footer class="colophon" id="colophon"></footer>
+</div>
+
+<script src="/shared/jarvis.js"></script>
+<script src="ledger.js"></script>
+</body>
+</html>

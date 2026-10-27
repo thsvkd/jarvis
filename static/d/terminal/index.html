@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ko" data-theme="tokyo">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Jarvis · 터미널</title>
+<meta name="description" content="Jarvis — btop·k9s 스타일 터미널 대시보드">
+<link rel="icon" href="/shared/favicon.svg">
+<script>
+  // 저장된 테마를 첫 페인트 전에 적용 (깜빡임 방지)
+  (function () {
+    try {
+      var t = localStorage.getItem("jarvis.term.theme");
+      if (t == null) t = localStorage.getItem("pit5.term.theme");
+      if (t === "tokyo" || t === "latte" || t === "gruvbox") document.documentElement.setAttribute("data-theme", t);
+    } catch (e) { /* 저장소 없음: 기본 테마 */ }
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Nanum+Gothic+Coding:wght@400;700&display=swap">
+<link rel="stylesheet" href="/d/terminal/term.css">
+</head>
+<body>
+<a class="skip" href="#p-svc">서비스 목록으로 건너뛰기</a>
+
+<header class="top">
+  <div class="bar1">
+    <div class="brand">
+      <h1><span class="logo" aria-hidden="true">&gt;_</span><span>Jarvis 터미널</span></h1>
+      <span class="host" id="hd-host"><b>host</b></span>
+      <span class="model" id="hd-model"></span>
+    </div>
+    <div class="hd-right">
+    <span id="hd-overall" class="overall t-muted" role="status" aria-live="polite">연결 중…</span>
+    <span id="hd-upd" class="upd" aria-live="off">–</span>
+    <button type="button" class="chip" id="theme-chip" data-act="theme" aria-label="테마 바꾸기">
+      <span class="sw" aria-hidden="true"><i style="background:var(--accent)"></i><i style="background:var(--ok-f)"></i><i style="background:var(--mag-f)"></i></span>
+      <span id="theme-name">Tokyo Night</span>
+    </button>
+    <button type="button" class="chip iconbtn" data-act="help" aria-label="단축키 도움말 열기" title="도움말 (?)">?</button>
+    </div>
+  </div>
+  <div class="bar2">
+    <nav class="nav" aria-label="디자인">
+      <a class="home" href="/">← 갤러리</a>
+      <span class="sep" aria-hidden="true">│</span>
+      <span class="designs" id="designs">
+        <a href="/d/control/">control</a>
+        <a href="/d/bento/">bento</a>
+        <a href="/d/atlas/">atlas</a>
+        <a href="/d/ledger/">ledger</a>
+        <span class="cur" aria-current="page">terminal</span>
+      </span>
+    </nav>
+    <span class="grow"></span>
+    <div class="access" id="hd-access" aria-label="접속 주소"></div>
+  </div>
+</header>
+
+<div class="banner" id="banner" role="alert"></div>
+
+<main id="main">
+  <!-- 0 · 경보 -->
+  <section class="panel" id="p-alerts" data-key="0" tabindex="-1" aria-labelledby="h-alerts">
+    <div class="ph"><h2 id="h-alerts"><span class="hk" aria-hidden="true">0</span>경보</h2><span class="pm" id="alerts-meta"></span><span class="fill"></span></div>
+    <div id="alerts-body"><p class="boot">스냅샷을 불러오는 중 <span class="cur"></span></p></div>
+  </section>
+
+  <!-- 1 · 시스템 (btop 헤더: 기록 그래프 + 현재 미터) -->
+  <section class="panel" id="p-sys" data-key="1" tabindex="-1" aria-labelledby="h-sys">
+    <div class="ph">
+      <h2 id="h-sys"><span class="hk" aria-hidden="true">1</span>시스템</h2>
+      <span class="pm" id="sys-meta"></span>
+      <span class="fill"></span>
+    </div>
+    <div class="strip">
+      <div class="bx bx-hist">
+        <h3 class="sub"><span>기록</span><span class="rule"></span><span class="meta" id="hist-meta"></span>
+          <span class="seg" role="group" aria-label="기록 범위">
+            <button type="button" data-act="range" data-range="1h" aria-pressed="true">1h</button><button type="button" data-act="range" data-range="24h" aria-pressed="false">24h</button>
+          </span>
+        </h3>
+        <div class="graph g-main" data-graph="cpu"></div>
+        <div class="taxis" id="hist-axis" aria-hidden="true"></div>
+        <div class="gsmall">
+          <div class="gcell"><div class="gh" id="gh-gpu"></div><div class="graph g-small" data-graph="gpu"></div></div>
+          <div class="gcell"><div class="gh" id="gh-mem"></div><div class="graph g-small" data-graph="mem"></div></div>
+          <div class="gcell"><div class="gh" id="gh-temp"></div><div class="graph g-small" data-graph="temp"></div></div>
+          <div class="gcell"><div class="gh" id="gh-net"></div><div class="graph g-small" data-graph="net"></div></div>
+        </div>
+      </div>
+      <div class="bx bx-now">
+        <h3 class="sub"><span>현재</span><span class="rule"></span><span class="meta" id="now-meta"></span></h3>
+        <div id="now-body"></div>
+      </div>
+    </div>
+    <div class="pf"><span><kbd>r</kbd> 기록 범위 · <kbd>4</kbd> 하드웨어 상세</span></div>
+  </section>
+
+  <!-- 2 · 서비스 -->
+  <section class="panel" id="p-svc" data-key="2" tabindex="-1" aria-labelledby="h-svc">
+    <div class="ph"><h2 id="h-svc"><span class="hk" aria-hidden="true">2</span>서비스</h2><span class="pm" id="svc-meta"></span><span class="fill"></span></div>
+    <div class="svc-tools">
+      <label class="filter">
+        <span class="pr" aria-hidden="true">/</span>
+        <span class="sr">서비스 검색</span>
+        <input id="svc-filter" type="search" autocomplete="off" spellcheck="false" placeholder="이름·호스트·포트로 거르기">
+        <button type="button" class="clr" data-act="clear-filter" aria-label="검색어 지우기" hidden>✕</button>
+      </label>
+      <div class="cats" id="svc-cats" role="group" aria-label="분류 필터"></div>
+    </div>
+    <div class="svc-head" aria-hidden="true">
+      <span>NAME</span><span>URL</span><span>EXPOSURE</span><span class="h-rt">RUNTIME</span>
+      <span class="r">LAT</span><span class="r">CPU</span><span class="r">MEM</span><span class="r h-req">REQ/24h</span>
+    </div>
+    <div class="svc-list" id="svc-list"></div>
+    <div class="pf"><span><kbd>j/k</kbd> 이동 · <kbd>⏎</kbd> 상세 · <kbd>/</kbd> 검색 · <kbd>c</kbd> 분류 · <kbd>esc</kbd> 닫기</span></div>
+  </section>
+
+  <!-- 3 · 네트워크 맵 -->
+  <section class="panel" id="p-map" data-key="3" tabindex="-1" aria-labelledby="h-map">
+    <div class="ph"><h2 id="h-map"><span class="hk" aria-hidden="true">3</span>노출 · 네트워크 맵</h2><span class="pm" id="map-meta"></span><span class="fill"></span></div>
+    <div id="map-body"></div>
+    <div class="pf"><span>대상을 누르면 서비스 상세로 이동</span></div>
+  </section>
+
+  <!-- 4 · 하드웨어 상세 -->
+  <section class="panel" id="p-hw" data-key="4" tabindex="-1" aria-labelledby="h-hw">
+    <div class="ph"><h2 id="h-hw"><span class="hk" aria-hidden="true">4</span>하드웨어 상세</h2><span class="pm" id="hw-meta"></span><span class="fill"></span></div>
+    <div class="hwgrid">
+      <div class="bx bx-cpu"><h3 class="sub"><span>cpu</span><span class="rule"></span><span class="meta" id="cpu-meta"></span></h3><div id="cpu-body"></div></div>
+      <div class="bx bx-gpu"><h3 class="sub"><span>gpu</span><span class="rule"></span><span class="meta" id="gpu-meta"></span></h3><div id="gpu-body"></div></div>
+      <div class="bx bx-mem"><h3 class="sub"><span>mem</span><span class="rule"></span><span class="meta" id="mem-meta"></span></h3><div id="mem-body"></div></div>
+      <div class="bx bx-dsk"><h3 class="sub"><span>disk</span><span class="rule"></span><span class="meta" id="dsk-meta"></span></h3><div id="dsk-body"></div></div>
+      <div class="bx bx-net"><h3 class="sub"><span>net</span><span class="rule"></span><span class="meta" id="net-meta"></span></h3><div id="net-body"></div></div>
+      <div class="bx bx-sen"><h3 class="sub"><span>sensors</span><span class="rule"></span><span class="meta" id="sen-meta"></span></h3><div id="sen-body"></div></div>
+      <div class="bx bx-prc">
+        <h3 class="sub"><span>proc</span><span class="rule"></span><span class="meta" id="prc-meta"></span>
+          <span class="seg" role="group" aria-label="프로세스 정렬">
+            <button type="button" data-act="proc" data-proc="cpu" aria-pressed="true">CPU순</button><button type="button" data-act="proc" data-proc="mem" aria-pressed="false">MEM순</button>
+          </span>
+        </h3>
+        <div class="tbl-wrap" id="prc-body"></div>
+        <div id="prc-more"></div>
+      </div>
+    </div>
+    <div class="pf"><span><kbd>t</kbd> 테마</span></div>
+  </section>
+
+  <!-- 5 · 인그레스 -->
+  <section class="panel" id="p-ing" data-key="5" tabindex="-1" aria-labelledby="h-ing">
+    <div class="ph"><h2 id="h-ing"><span class="hk" aria-hidden="true">5</span>인그레스</h2><span class="pm" id="ing-meta"></span><span class="fill"></span></div>
+    <div class="inggrid">
+      <div class="ing-l">
+        <div class="bx-block"><h3 class="sub"><span>caddy</span><span class="rule"></span><span class="meta" id="caddy-meta"></span></h3><div id="caddy-body"></div></div>
+        <div class="bx-block"><h3 class="sub"><span>cloudflare tunnel</span><span class="rule"></span><span class="meta" id="tun-meta"></span></h3><div id="tun-body"></div></div>
+        <div class="bx-block"><h3 class="sub"><span>traffic</span><span class="rule"></span><span class="meta" id="trf-meta"></span></h3><div id="trf-body"></div></div>
+        <div class="bx-block"><h3 class="sub"><span>caddy errors</span><span class="rule"></span><span class="meta" id="cerr-meta"></span></h3><div id="cerr-body"></div></div>
+      </div>
+      <div class="ing-r">
+        <div class="bx-block"><h3 class="sub"><span>top hosts</span><span class="rule"></span><span class="meta" id="hosts-meta"></span></h3><div class="tbl-wrap" id="hosts-body"></div><div id="hosts-more"></div></div>
+        <div class="bx-block"><h3 class="sub"><span>recent</span><span class="rule"></span><span class="meta" id="recent-meta"></span></h3><div class="tbl-wrap" id="recent-body"></div><div id="recent-more"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 · Tailscale -->
+  <section class="panel" id="p-ts" data-key="6" tabindex="-1" aria-labelledby="h-ts">
+    <div class="ph"><h2 id="h-ts"><span class="hk" aria-hidden="true">6</span>Tailscale</h2><span class="pm" id="ts-meta"></span><span class="fill"></span></div>
+    <div id="ts-head"></div>
+    <div class="tbl-wrap" id="ts-peers"></div>
+    <div id="ts-more"></div>
+  </section>
+
+  <!-- 7 · 열린 포트 -->
+  <section class="panel" id="p-port" data-key="7" tabindex="-1" aria-labelledby="h-port">
+    <div class="ph"><h2 id="h-port"><span class="hk" aria-hidden="true">7</span>열린 포트</h2><span class="pm" id="port-meta"></span><span class="fill"></span></div>
+    <div id="port-head"></div>
+    <div class="tbl-wrap fill-y" id="port-body"></div>
+    <div id="port-more"></div>
+  </section>
+
+  <!-- 8 · 컨테이너 · 유닛 -->
+  <section class="panel" id="p-dock" data-key="8" tabindex="-1" aria-labelledby="h-dock">
+    <div class="ph"><h2 id="h-dock"><span class="hk" aria-hidden="true">8</span>컨테이너 · systemd</h2><span class="pm" id="dock-meta"></span><span class="fill"></span></div>
+    <div class="dockgrid">
+      <div class="dk-ctr">
+        <h3 class="sub"><span>containers</span><span class="rule"></span><span class="meta" id="ctr-meta"></span></h3>
+        <div class="tbl-wrap" id="ctr-body"></div>
+        <div id="ctr-more"></div>
+      </div>
+      <div class="dk-proj">
+        <h3 class="sub"><span>compose</span><span class="rule"></span><span class="meta" id="proj-meta"></span></h3>
+        <div id="proj-body"></div>
+      </div>
+      <div class="dk-unit">
+        <h3 class="sub"><span>systemd</span><span class="rule"></span><span class="meta" id="unit-meta"></span></h3>
+        <div class="tbl-wrap scroll-y" id="unit-body"></div>
+        <button type="button" class="toggle-btn" data-act="units-all" aria-pressed="false" id="units-toggle">전체 유닛 보기</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="statusline" id="statusline">
+  <span class="sl-mode" id="sl-mode">NORMAL</span>
+  <span class="sl-host" id="sl-host">host</span>
+  <nav class="sl-wins" id="sl-wins" aria-label="패널 이동"></nav>
+  <span class="sl-spacer"></span>
+  <span class="sl-al" id="sl-al"></span>
+  <span class="sl-upd" id="sl-upd" role="status" aria-live="off"></span>
+  <span class="sl-clock" id="sl-clock" aria-hidden="true">--:--:--</span>
+</footer>
+
+<dialog class="help" id="help" aria-labelledby="help-h">
+  <button type="button" class="chip iconbtn close" data-act="help-close" aria-label="도움말 닫기">✕</button>
+  <h2 id="help-h">단축키 · 도움말</h2>
+  <div class="keys">
+    <kbd>0</kbd><span>경보</span>
+    <kbd>1</kbd><span>시스템 — 기록 그래프와 현재 CPU·GPU·메모리·온도</span>
+    <kbd>2</kbd><span>서비스 목록</span>
+    <kbd>3</kbd><span>노출 · 네트워크 맵</span>
+    <kbd>4</kbd><span>하드웨어 상세 (코어·GPU 큐·디스크·네트워크·센서·프로세스)</span>
+    <kbd>5</kbd><span>인그레스 (Caddy · Cloudflare Tunnel · 트래픽)</span>
+    <kbd>6</kbd><span>Tailscale</span>
+    <kbd>7</kbd><span>열린 포트</span>
+    <kbd>8</kbd><span>컨테이너 · systemd</span>
+  </div>
+  <h3>서비스 목록</h3>
+  <div class="keys">
+    <kbd>j</kbd><span>다음 서비스 (↓도 가능)</span>
+    <kbd>k</kbd><span>이전 서비스 (↑도 가능)</span>
+    <kbd>Enter</kbd><span>선택한 서비스 상세 펼치기/접기</span>
+    <kbd>/</kbd><span>검색 입력으로 이동</span>
+    <kbd>c</kbd><span>분류 필터 순환 (전체 → 공개 → … → 시스템 데몬)</span>
+    <kbd>Esc</kbd><span>검색 해제 · 상세 접기 · 창 닫기</span>
+  </div>
+  <h3>보기</h3>
+  <div class="keys">
+    <kbd>r</kbd><span>기록 그래프 범위 1h ↔ 24h</span>
+    <kbd>t</kbd><span>테마 순환 (Tokyo Night → Catppuccin Latte → Gruvbox)</span>
+    <kbd>?</kbd><span>이 도움말</span>
+  </div>
+  <h3>안내</h3>
+  <p>모든 기능은 마우스·터치로도 쓸 수 있습니다. 3초마다 새로 고치며, 연결이 끊기면 상단과 상태줄이 빨간색으로 바뀝니다. 이 화면은 읽기 전용입니다.</p>
+</dialog>
+
+<script src="/shared/jarvis.js"></script>
+<script src="/d/terminal/term.js"></script>
+</body>
+</html>

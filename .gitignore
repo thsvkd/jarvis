@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.omc/
+node_modules/
+*.tmp
+fixtures/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
+
+# 공개 저장소에 올리지 않는 운영 기록·실제 기기 설정
+private/
+.kickoff-prompt.txt

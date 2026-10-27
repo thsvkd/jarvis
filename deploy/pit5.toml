@@ -1,0 +1,28 @@
+# pit5(Raspberry Pi 5) 게이트웨이 설정. 설치: install -Dm644 deploy/pit5.toml ~/.config/jarvis/config.toml
+# 다른 Linux 게이트웨이처럼 systemd 사용자 유닛(deploy/jarvis.service)으로 돈다. gateway.toml 에 pit5 인그레스 감시를 더한 것.
+# 환경 변수(JARVIS_*)가 있으면 그것이 우선한다. 키 설명은 jarvis/config.py.
+
+port = 9300
+bind = "0.0.0.0"
+
+# 인그레스: Caddy(:443 tailnet, :80 터널) + Cloudflare Tunnel
+ingress_dir = "/home/pi/services/ingress"   # Caddyfile · create-public-tunnel.sh
+caddy = "pit5-caddy"
+tunnel = "pit5-public-tunnel"
+tunnel_name = "pit5-public"
+domain = "example.com"
+
+# 프로브하지 않을 호스트: admin-gate 뒤의 관리 평면은 tagged 기기(이 pit5)를 언제나 거절한다
+probe_skip = ["admin.example.com", "*.admin.example.com"]
+
+# jarvis.example.com 는 이 Caddy 가 pi5-server2 의 jarvis core 로 넘긴다(이 기기 jarvis 가 아니다). Hermes 감시도 core 가 한다.
+
+# 이 기기 Orca 페어링 코드(/api/orca)를 받아 갈 core(pi5-server2)의 tailnet IP
+core = ["100.64.0.1"]
+
+[infra_units]
+docker = "docker.service"
+containerd = "containerd.service"
+tailscale = "tailscaled.service"
+ssh = "ssh.service"
+pm2 = "pm2-pi.service"   # jarvis 는 사용자 유닛이지만 pm2 에는 다른 앱(prototype-messenger-chat)이 돈다

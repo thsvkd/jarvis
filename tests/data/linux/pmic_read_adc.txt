@@ -1,0 +1,7 @@
+     3V7_WL_SW_A current(0)=0.09471000A
+       3V3_SYS_A current(1)=0.17180000A
+     VDD_CORE_A current(7)=1.89320000A
+     3V7_WL_SW_V volt(8)=3.71200000V
+       3V3_SYS_V volt(9)=3.30700000V
+     VDD_CORE_V volt(15)=0.96900000V
+       EXT5V_V volt(24)=5.16570000V

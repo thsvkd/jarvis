@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f5f5f4">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0a0a0b">
+<meta name="description" content="Jarvis — 같은 실시간 데이터를 다섯 가지 방식으로 그린 대시보드 시안 갤러리">
+<title>Jarvis · 시안 갤러리</title>
+<link rel="icon" href="/shared/favicon.svg">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- 웹폰트는 렌더를 막지 않게 붙인다. CDN 이 막혀도 시스템 글꼴로 그대로 그린다. -->
+<link rel="stylesheet" media="print" onload="this.media='all'" crossorigin href="https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" media="print" onload="this.media='all'" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&amp;display=swap">
+<link rel="stylesheet" href="/gallery/gallery.css">
+</head>
+<body>
+<a class="skip" href="#designs">시안 목록으로 건너뛰기</a>
+
+<header class="site-head">
+  <div class="wrap">
+    <div class="topline">
+      <a class="brand" href="/" aria-label="Jarvis 시안 갤러리 처음으로">
+        <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15" class="bm-bg"/><path d="M12 38h9l5-14 8 26 6-18 3 6h9" class="bm-line"/></svg>
+        <span class="brand-text">시안 갤러리</span>
+      </a>
+      <nav class="quick" aria-label="시안 바로 열기">
+        <span class="quick-label" aria-hidden="true">바로 열기</span>
+        <ul>
+          <li><a href="/d/control/">관제실</a></li>
+          <li><a href="/d/bento/">벤토</a></li>
+          <li><a href="/d/atlas/">아틀라스</a></li>
+          <li><a href="/d/ledger/">레저</a></li>
+          <li><a href="/d/terminal/">터미널</a></li>
+        </ul>
+      </nav>
+    </div>
+
+    <div class="hero">
+      <div class="hero-text">
+        <h1>Jarvis</h1>
+        <p class="hostline dotlist" id="hostline"><span class="hl-host">host</span><span>호스트 정보를 불러오는 중…</span></p>
+      </div>
+      <div class="hero-status">
+        <div class="pill" id="pill" data-tone="muted" role="status" aria-live="polite">
+          <span class="pill-ico" aria-hidden="true"></span><span class="pill-text">연결 중…</span>
+        </div>
+        <p class="updated" id="updated"><span class="beat" id="beat" aria-hidden="true"></span><span id="updated-text">첫 스냅샷을 기다리는 중</span></p>
+        <p class="why" id="why"></p>
+      </div>
+    </div>
+
+    <section class="vitals" aria-labelledby="vitals-h">
+      <h2 id="vitals-h" class="sr-only">실시간 요약</h2>
+      <dl class="vgrid">
+        <div class="v" data-k="svc" data-tone="muted"><dt><span>서비스</span><span class="v-tag" data-f="tag"></span></dt><dd><span class="v-row"><span class="v-val" data-f="val">–</span><span class="v-gfx" data-f="gfx"></span></span><span class="v-sub" data-f="sub">&nbsp;</span></dd></div>
+        <div class="v" data-k="alerts" data-tone="muted"><dt><span>경보</span><span class="v-tag" data-f="tag"></span></dt><dd><span class="v-row"><span class="v-val" data-f="val">–</span><span class="v-gfx" data-f="gfx"></span></span><span class="v-sub" data-f="sub">&nbsp;</span></dd></div>
+        <div class="v" data-k="cpu" data-tone="muted"><dt><span>CPU</span><span class="v-tag" data-f="tag"></span></dt><dd><span class="v-row"><span class="v-val" data-f="val">–</span><span class="v-gfx" data-f="gfx"></span></span><span class="v-sub" data-f="sub">&nbsp;</span></dd></div>
+        <div class="v" data-k="gpu" data-tone="muted"><dt><span>GPU</span><span class="v-tag" data-f="tag"></span></dt><dd><span class="v-row"><span class="v-val" data-f="val">–</span><span class="v-gfx" data-f="gfx"></span></span><span class="v-sub" data-f="sub">&nbsp;</span></dd></div>
+        <div class="v" data-k="mem" data-tone="muted"><dt><span>메모리</span><span class="v-tag" data-f="tag"></span></dt><dd><span class="v-row"><span class="v-val" data-f="val">–</span><span class="v-gfx" data-f="gfx"></span></span><span class="v-sub" data-f="sub">&nbsp;</span></dd></div>
+        <div class="v" data-k="temp" data-tone="muted"><dt><span>온도</span><span class="v-tag" data-f="tag"></span></dt><dd><span class="v-row"><span class="v-val" data-f="val">–</span><span class="v-gfx" data-f="gfx"></span></span><span class="v-sub" data-f="sub">&nbsp;</span></dd></div>
+        <div class="v" data-k="power" data-tone="muted"><dt><span>전력</span><span class="v-tag" data-f="tag"></span></dt><dd><span class="v-row"><span class="v-val" data-f="val">–</span><span class="v-gfx" data-f="gfx"></span></span><span class="v-sub" data-f="sub">&nbsp;</span></dd></div>
+        <div class="v" data-k="net" data-tone="muted"><dt><span>네트워크</span><span class="v-tag" data-f="tag"></span></dt><dd><span class="v-row"><span class="v-val" data-f="val">–</span><span class="v-gfx" data-f="gfx"></span></span><span class="v-sub" data-f="sub">&nbsp;</span></dd></div>
+      </dl>
+    </section>
+
+    <div class="access">
+      <h2 class="access-label" id="access-h">접속 주소</h2>
+      <ul class="access-list" id="access" aria-labelledby="access-h"><li class="access-empty">불러오는 중…</li></ul>
+    </div>
+  </div>
+</header>
+
+<main id="designs" tabindex="-1">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-text">
+        <h2>대시보드 시안 5종</h2>
+        <p>같은 실시간 데이터를 다섯 가지 방식으로 그렸습니다. 미리보기는 각 시안의 1440×900 화면을 그대로 축소한 실제 화면이에요. 마음에 드는 하나를 골라 주세요.</p>
+      </div>
+      <div class="seg" role="group" aria-label="미리보기 배치">
+        <button type="button" data-layout="grid" aria-pressed="true">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="3.6" height="4.6" rx="1"/><rect x="6.2" y="2.5" width="3.6" height="4.6" rx="1"/><rect x="10.9" y="2.5" width="3.6" height="4.6" rx="1"/><rect x="1.5" y="8.9" width="3.6" height="4.6" rx="1"/><rect x="6.2" y="8.9" width="3.6" height="4.6" rx="1"/><rect x="10.9" y="8.9" width="3.6" height="4.6" rx="1"/></svg>
+          <span>그리드</span>
+        </button>
+        <button type="button" data-layout="two" aria-pressed="false">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="3" width="5.9" height="10" rx="1.2"/><rect x="8.6" y="3" width="5.9" height="10" rx="1.2"/></svg>
+          <span>나란히 보기</span>
+        </button>
+      </div>
+    </div>
+
+    <ol class="grid" id="grid" data-layout="grid">
+      <li class="card" id="card-control" data-slug="control" data-state="loading">
+        <div class="shot">
+          <div class="frame">
+            <div class="bar" aria-hidden="true"><span class="dots"><i></i><i></i><i></i></span><span class="path">/d/control/</span><span class="ptag"></span></div>
+            <div class="view">
+              <div class="iwrap" inert><iframe src="/d/control/?embed=1" title="Control Room(관제실) 실시간 미리보기" loading="lazy" scrolling="no" tabindex="-1"></iframe></div>
+              <a class="shot-link" href="/d/control/" tabindex="-1" aria-hidden="true"><span class="shot-cta">열기 <svg viewBox="0 0 16 16"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5"/></svg></span></a>
+              <div class="ph"><div class="ph-in"><p class="ph-title"></p><p class="ph-sub"></p><button type="button" class="btn btn-sm" data-act="retry">다시 시도</button></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="card-main">
+            <h3><span class="idx">01</span><a href="/d/control/">Control Room</a><span class="ko">관제실</span></h3>
+            <p class="concept">벽면 모니터에 띄워 두고 경보와 서비스 매트릭스를 상시 감시하는 어두운 관제 화면.</p>
+            <ul class="chips" aria-label="특징"><li>상시 감시</li><li>다크 전용</li><li>서비스 매트릭스</li></ul>
+          </div>
+          <div class="actions">
+            <a class="btn btn-primary" href="/d/control/" aria-label="Control Room 시안 열기">열기<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5"/></svg></a>
+            <a class="btn" href="/d/control/" target="_blank" rel="noopener noreferrer" aria-label="Control Room 시안 새 탭에서 열기">새 탭<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 3.5h-3v9h9v-3M9 3h4v4M13 3 7.5 8.5"/></svg></a>
+          </div>
+        </div>
+      </li>
+
+      <li class="card" id="card-bento" data-slug="bento" data-state="loading">
+        <div class="shot">
+          <div class="frame">
+            <div class="bar" aria-hidden="true"><span class="dots"><i></i><i></i><i></i></span><span class="path">/d/bento/</span><span class="ptag"></span></div>
+            <div class="view">
+              <div class="iwrap" inert><iframe src="/d/bento/?embed=1" title="Bento(벤토) 실시간 미리보기" loading="lazy" scrolling="no" tabindex="-1"></iframe></div>
+              <a class="shot-link" href="/d/bento/" tabindex="-1" aria-hidden="true"><span class="shot-cta">열기 <svg viewBox="0 0 16 16"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5"/></svg></span></a>
+              <div class="ph"><div class="ph-in"><p class="ph-title"></p><p class="ph-sub"></p><button type="button" class="btn btn-sm" data-act="retry">다시 시도</button></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="card-main">
+            <h3><span class="idx">02</span><a href="/d/bento/">Bento</a><span class="ko">벤토</span></h3>
+            <p class="concept">크기가 다른 타일에 핵심 지표를 나눠 담아 한눈에 훑어보는 요약 대시보드.</p>
+            <ul class="chips" aria-label="특징"><li>타일 레이아웃</li><li>라이트·다크</li><li>한눈 요약</li></ul>
+          </div>
+          <div class="actions">
+            <a class="btn btn-primary" href="/d/bento/" aria-label="Bento 시안 열기">열기<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5"/></svg></a>
+            <a class="btn" href="/d/bento/" target="_blank" rel="noopener noreferrer" aria-label="Bento 시안 새 탭에서 열기">새 탭<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 3.5h-3v9h9v-3M9 3h4v4M13 3 7.5 8.5"/></svg></a>
+          </div>
+        </div>
+      </li>
+
+      <li class="card" id="card-atlas" data-slug="atlas" data-state="loading">
+        <div class="shot">
+          <div class="frame">
+            <div class="bar" aria-hidden="true"><span class="dots"><i></i><i></i><i></i></span><span class="path">/d/atlas/</span><span class="ptag"></span></div>
+            <div class="view">
+              <div class="iwrap" inert><iframe src="/d/atlas/?embed=1" title="Atlas(아틀라스) 실시간 미리보기" loading="lazy" scrolling="no" tabindex="-1"></iframe></div>
+              <a class="shot-link" href="/d/atlas/" tabindex="-1" aria-hidden="true"><span class="shot-cta">열기 <svg viewBox="0 0 16 16"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5"/></svg></span></a>
+              <div class="ph"><div class="ph-in"><p class="ph-title"></p><p class="ph-sub"></p><button type="button" class="btn btn-sm" data-act="retry">다시 시도</button></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="card-main">
+            <h3><span class="idx">03</span><a href="/d/atlas/">Atlas</a><span class="ko">아틀라스</span></h3>
+            <p class="concept">인터넷에서 앱까지 이어지는 노출 경로를 지도로 펼쳐 보여 주는 화면.</p>
+            <ul class="chips" aria-label="특징"><li>네트워크 맵 중심</li><li>노출 경로</li><li>연결 구조</li></ul>
+          </div>
+          <div class="actions">
+            <a class="btn btn-primary" href="/d/atlas/" aria-label="Atlas 시안 열기">열기<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5"/></svg></a>
+            <a class="btn" href="/d/atlas/" target="_blank" rel="noopener noreferrer" aria-label="Atlas 시안 새 탭에서 열기">새 탭<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 3.5h-3v9h9v-3M9 3h4v4M13 3 7.5 8.5"/></svg></a>
+          </div>
+        </div>
+      </li>
+
+      <li class="card" id="card-ledger" data-slug="ledger" data-state="loading">
+        <div class="shot">
+          <div class="frame">
+            <div class="bar" aria-hidden="true"><span class="dots"><i></i><i></i><i></i></span><span class="path">/d/ledger/</span><span class="ptag"></span></div>
+            <div class="view">
+              <div class="iwrap" inert><iframe src="/d/ledger/?embed=1" title="Ledger(레저) 실시간 미리보기" loading="lazy" scrolling="no" tabindex="-1"></iframe></div>
+              <a class="shot-link" href="/d/ledger/" tabindex="-1" aria-hidden="true"><span class="shot-cta">열기 <svg viewBox="0 0 16 16"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5"/></svg></span></a>
+              <div class="ph"><div class="ph-in"><p class="ph-title"></p><p class="ph-sub"></p><button type="button" class="btn btn-sm" data-act="retry">다시 시도</button></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="card-main">
+            <h3><span class="idx">04</span><a href="/d/ledger/">Ledger</a><span class="ko">레저</span></h3>
+            <p class="concept">번호 붙은 절과 표로 차분히 읽어 내려가는 신문 지면형 상태 보고서.</p>
+            <ul class="chips" aria-label="특징"><li>에디토리얼 지면</li><li>세리프 타이포</li><li>표 중심</li></ul>
+          </div>
+          <div class="actions">
+            <a class="btn btn-primary" href="/d/ledger/" aria-label="Ledger 시안 열기">열기<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5"/></svg></a>
+            <a class="btn" href="/d/ledger/" target="_blank" rel="noopener noreferrer" aria-label="Ledger 시안 새 탭에서 열기">새 탭<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 3.5h-3v9h9v-3M9 3h4v4M13 3 7.5 8.5"/></svg></a>
+          </div>
+        </div>
+      </li>
+
+      <li class="card" id="card-terminal" data-slug="terminal" data-state="loading">
+        <div class="shot">
+          <div class="frame">
+            <div class="bar" aria-hidden="true"><span class="dots"><i></i><i></i><i></i></span><span class="path">/d/terminal/</span><span class="ptag"></span></div>
+            <div class="view">
+              <div class="iwrap" inert><iframe src="/d/terminal/?embed=1" title="Terminal(터미널) 실시간 미리보기" loading="lazy" scrolling="no" tabindex="-1"></iframe></div>
+              <a class="shot-link" href="/d/terminal/" tabindex="-1" aria-hidden="true"><span class="shot-cta">열기 <svg viewBox="0 0 16 16"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5"/></svg></span></a>
+              <div class="ph"><div class="ph-in"><p class="ph-title"></p><p class="ph-sub"></p><button type="button" class="btn btn-sm" data-act="retry">다시 시도</button></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="card-main">
+            <h3><span class="idx">05</span><a href="/d/terminal/">Terminal</a><span class="ko">터미널</span></h3>
+            <p class="concept">btop·k9s 에서 영감을 받아 키보드로 훑어보는 고밀도 텍스트 대시보드.</p>
+            <ul class="chips" aria-label="특징"><li>TUI 스타일</li><li>키보드 탐색</li><li>테마 3종</li></ul>
+          </div>
+          <div class="actions">
+            <a class="btn btn-primary" href="/d/terminal/" aria-label="Terminal 시안 열기">열기<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5"/></svg></a>
+            <a class="btn" href="/d/terminal/" target="_blank" rel="noopener noreferrer" aria-label="Terminal 시안 새 탭에서 열기">새 탭<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 3.5h-3v9h9v-3M9 3h4v4M13 3 7.5 8.5"/></svg></a>
+          </div>
+        </div>
+      </li>
+
+      <li class="card guide">
+        <div class="guide-in">
+          <p class="eyebrow">고르는 기준</p>
+          <h3>어떤 화면이 맞을까요?</h3>
+          <ul class="guide-list">
+            <li><a href="/d/control/"><span class="idx">01</span><span class="g-txt"><b>관제실</b><span>벽 모니터에 띄워 두고 계속 지켜볼 때</span></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5"/></svg></a></li>
+            <li><a href="/d/bento/"><span class="idx">02</span><span class="g-txt"><b>벤토</b><span>핵심 숫자만 빠르게 확인하고 싶을 때</span></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5"/></svg></a></li>
+            <li><a href="/d/atlas/"><span class="idx">03</span><span class="g-txt"><b>아틀라스</b><span>무엇이 어디로 노출되는지 경로부터 볼 때</span></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5"/></svg></a></li>
+            <li><a href="/d/ledger/"><span class="idx">04</span><span class="g-txt"><b>레저</b><span>보고서처럼 차분히 읽고 기록을 검토할 때</span></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5"/></svg></a></li>
+            <li><a href="/d/terminal/"><span class="idx">05</span><span class="g-txt"><b>터미널</b><span>키보드로 빠르게, 촘촘한 텍스트가 편할 때</span></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5"/></svg></a></li>
+          </ul>
+          <p class="guide-note">다섯 시안 모두 같은 <code>/api/snapshot</code> 을 받아 하드웨어·서비스·네트워크 맵·인그레스·Tailscale·포트·컨테이너를 똑같이 다룹니다. 다른 것은 보여 주는 방식뿐이에요.</p>
+        </div>
+      </li>
+    </ol>
+  </div>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <div class="foot-head">
+      <h2>모니터링 범위</h2>
+      <p>모든 시안이 아래 항목을 실시간으로 보여 줍니다. 숫자는 지금 이 기기의 값이에요.</p>
+    </div>
+    <div class="scope" id="scope">
+      <section class="sc"><h3>하드웨어</h3><p class="sc-live">–</p></section>
+      <section class="sc"><h3>서비스</h3><p class="sc-live">–</p></section>
+      <section class="sc"><h3>노출 경로</h3><p class="sc-live">–</p></section>
+      <section class="sc"><h3>열린 포트</h3><p class="sc-live">–</p></section>
+      <section class="sc"><h3>컨테이너 · 유닛</h3><p class="sc-live">–</p></section>
+      <section class="sc"><h3>트래픽</h3><p class="sc-live">–</p></section>
+    </div>
+    <div class="cadence" id="cadence">
+      <p>이 페이지는 3초마다 새 스냅샷을 받습니다. 미리보기 안의 시안은 10초마다 갱신돼요.</p>
+    </div>
+    <div class="colophon-wrap"><p class="colophon dotlist" id="colophon"><span>읽기 전용</span><span>LAN·Tailnet 에서만 열림</span></p></div>
+  </div>
+</footer>
+
+<p class="sr-only" id="sr-live" aria-live="polite"></p>
+<noscript><p class="noscript">이 페이지는 실시간 데이터를 그리려면 JavaScript 가 필요합니다. 시안은 위 링크로 바로 열 수 있어요.</p></noscript>
+
+<script src="/shared/jarvis.js"></script>
+<script src="/gallery/gallery.js"></script>
+</body>
+</html>

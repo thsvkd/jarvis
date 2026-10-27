@@ -1,0 +1,12 @@
+# Windows 게이트웨이 설정. 설치: %USERPROFILE%\.config\jarvis\config.toml (README 의 'Windows' 절)
+# 서비스 관리자·Docker·Caddy 수집은 없다. Orca 데스크톱 앱(%APPDATA%\orca)의 페어링 코드와 호스트 자원만 준다.
+
+port = 9300
+bind = "0.0.0.0"
+
+# 이 기기 Orca 페어링 코드(/api/orca)를 받아 갈 core(pi5-server2)의 tailnet IP
+core = ["100.64.0.1"]
+
+caddy = ""
+tunnel = ""
+docker_sock = ""

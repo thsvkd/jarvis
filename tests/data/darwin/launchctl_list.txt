@@ -1,0 +1,6 @@
+PID	Status	Label
+-	0	com.apple.SafariHistoryServiceAgent
+678	0	com.apple.Finder
+-	78	homebrew.mxcl.broken
+4321	0	pm2.thsvkd
+-	0	homebrew.mxcl.idle

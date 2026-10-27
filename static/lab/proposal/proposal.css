@@ -1,0 +1,33 @@
+/* 원본 shell.css + bento.css 토큰·카드·타입·차트 유지. 새 스타일은 공개 방식에만 사용. */
+.lab-note{display:flex;align-items:baseline;gap:8px 18px;flex-wrap:wrap;padding:14px 0 0;color:var(--text-2);font-size:var(--fs-sm)}
+.lab-note strong{font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--text)}
+.lab-note a{color:var(--accent)}
+.lab-note span{color:var(--text-3)}
+.lab-fold{margin-top:var(--sp-5);min-width:0;background:var(--tile);border-radius:var(--r-tile);box-shadow:var(--shadow);padding:0 var(--pad)}
+.lab-fold>summary{display:flex;align-items:center;gap:14px;cursor:pointer;list-style:none;min-height:66px;color:var(--text);font-size:var(--fs-lg);font-weight:var(--fw-semibold)}
+.lab-fold>summary::-webkit-details-marker{display:none}
+.lab-fold>summary small{margin-left:auto;color:var(--text-3);font-size:var(--fs-sm);font-weight:var(--fw-normal)}
+.lab-fold>summary>.ic{transition:transform var(--dur) var(--ease);width:15px;height:15px}
+.lab-fold[open]>summary>.ic{transform:rotate(180deg)}
+.lab-fold[open]{padding-bottom:var(--pad)}
+.lab-fold>.sec{padding-top:0}
+.lab-fold>.sec>.sec-head{margin-top:4px}
+#overview>.bento>.lab-fold{grid-column:1/-1;margin-top:0}
+.lab-fold>#mapTile{box-shadow:none;padding:var(--sp-3) 0 0;background:transparent}
+.lab-more,.lab-list-control{margin:18px 0;display:flex;align-items:center;gap:16px;font-size:var(--fs-md);color:var(--text-2)}
+.seg-action{background:var(--tile);border:1px solid var(--line);color:var(--text);border-radius:var(--r-xs);padding:9px 15px;cursor:pointer;font:inherit}
+.lab-overflow,.lab-healthy-hidden,.lab-group-empty,.lab-inactive{display:none!important}
+.lab-group-collapsed>.svc-grid,.lab-group-collapsed>.svc-rows{display:none!important}
+.lab-group-collapsed{padding-bottom:0}
+.lab-group-toggle{margin-left:6px;width:30px;height:30px;font-size:20px;flex:none}
+.lnav a.lab-tab-active{background:var(--thumb);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.08),0 0 0 1px var(--line)}
+body[data-lab=inbox] .lnav .wrap{padding-top:8px;padding-bottom:8px}
+body[data-lab=inbox] .lnav a{border-radius:var(--r-xs);padding:8px 12px}
+body[data-lab=inbox] .lnav{display:block}
+body[data-lab=inbox] .sh-sections{display:none}
+body[data-lab=inbox] .lnav a[aria-current=true]:not(.lab-tab-active){background:transparent;box-shadow:none;color:var(--text-2)}
+body[data-lab=rooms] #overview{padding-top:14px}
+body[data-lab=rooms] #lab-operations .t-changes .table-wrap{max-height:260px}
+body[data-lab=rooms] #overview .hero-stats{grid-template-columns:repeat(5,minmax(0,1fr))}
+@media(max-width:699px){.lab-note{font-size:11px;gap:5px 10px}.lab-note span{width:100%;font-size:11px}.lab-fold{padding-inline:var(--pad)}.lab-fold>summary{flex-wrap:wrap;gap:4px 10px;min-height:62px;padding:12px 0;font-size:16px}.lab-fold>summary small{margin-left:0;flex:1;min-width:100px;font-size:11px}.lab-fold>summary span{width:100%}.lab-list-control{flex-wrap:wrap;gap:10px}body[data-lab=rooms] #overview .hero-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.lab-group-toggle{margin-left:auto}body[data-lab=inbox] .lnav a{font-size:12px;padding:6px 9px}}
+@media(prefers-reduced-motion:reduce){.lab-fold>summary>.ic{transition:none}}

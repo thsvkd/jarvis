@@ -1,0 +1,19 @@
+# Linux 게이트웨이(core 가 모으는 기기) 설정. 설치: install -Dm644 deploy/gateway.toml ~/.config/jarvis/config.toml
+# macOS 는 deploy/macstudio.toml 에 core 한 줄과 [infra_units] pm2 = "" 를 더한다. 키 설명은 jarvis/config.py.
+
+port = 9300
+bind = "0.0.0.0"
+
+# 이 기기 Orca 페어링 코드(/api/orca)를 받아 갈 core(pi5-server2)의 tailnet IP
+core = ["100.64.0.1"]
+
+# Caddy·cloudflared 가 없는 기기는 빈 값(없으면 다운으로 보인다)
+caddy = ""
+tunnel = ""
+# docker_sock = ""   # Docker 를 쓰지 않는 기기(수집 실패 경보가 뜨지 않게). [infra_units] docker·containerd 도 빈 값
+
+# 없는 유닛은 빈 값으로 뺀다. pm2 대신 deploy/jarvis.service(systemd 사용자 유닛)로 돈다.
+[infra_units]
+pm2 = ""
+# docker = ""        # Docker 를 쓰지 않는 기기
+# containerd = ""
