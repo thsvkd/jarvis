@@ -57,7 +57,9 @@ class AccountTest(unittest.TestCase):
 @mock.patch.object(cswap_usage, "binary", return_value="/home/alice/.local/bin/cswap")
 class RunTest(unittest.TestCase):
     def test_missing(self, _):
-        with mock.patch.object(cswap_usage, "binary", return_value=None):
+        # 자동 설치를 끈다(이 기기에 Claude Code 가 있으면 실제로 설치를 시작한다)
+        with mock.patch.object(cswap_usage, "binary", return_value=None), \
+                mock.patch.object(cswap_usage.config, "CSWAP_INSTALL", False):
             self.assertIsNone(cswap_usage.read(force=True))
 
     def test_errors_hide_home(self, _):
@@ -129,3 +131,60 @@ class MergeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@mock.patch.object(cswap_usage, "_cache", None)
+class InstallTest(unittest.TestCase):
+    def setUp(self):
+        cswap_usage.install.update(state=None, error=None, at=0.0)
+        self.which = {"claude": "/home/alice/.local/bin/claude", "uv": "/home/alice/.local/bin/uv", "pipx": None, "cswap": None}
+        p = mock.patch.object(cswap_usage, "_which", side_effect=lambda n: self.which[n])
+        p.start()
+        self.addCleanup(p.stop)
+
+        class Now:  # 설치 스레드를 그 자리에서 실행한다
+            def __init__(self, target, **k):
+                self.target = target
+
+            def start(self):
+                self.target()
+        p = mock.patch.object(cswap_usage.threading, "Thread", Now)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_installs_pinned_with_uv_once(self):
+        def run(cmd, **k):
+            self.which["cswap"] = "/home/alice/.local/bin/cswap"
+            return mock.Mock(returncode=0, stderr="")
+        with mock.patch.object(cswap_usage.subprocess, "run", side_effect=run) as r:
+            self.assertEqual(cswap_usage.ensure(), "cswap 을 설치하는 중입니다(Claude 계정별 사용량)")
+        self.assertEqual(r.call_args[0][0], ["/home/alice/.local/bin/uv", "tool", "install", "claude-swap==0.28.0"])
+        self.assertEqual((cswap_usage.install["state"], cswap_usage.ensure()), ("done", None))
+
+    def test_failure_is_reported_and_retried_later(self):
+        self.which.update(uv=None, pipx="/usr/bin/pipx")
+        bad = mock.Mock(returncode=1, stderr="error: /home/alice/x not writable\n")
+        with mock.patch.object(cswap_usage.subprocess, "run", return_value=bad) as r:
+            cswap_usage.ensure()
+            err = cswap_usage.ensure()  # 6시간 안에는 다시 시도하지 않고 실패 이유만 준다
+            self.assertEqual(r.call_count, 1)
+            self.assertEqual(r.call_args[0][0][:2], ["/usr/bin/pipx", "install"])
+            self.assertIn("종료 코드 1", err)
+            self.assertNotIn("alice", err)
+            cswap_usage.install["at"] -= cswap_usage.INSTALL_RETRY_S + 1
+            cswap_usage.ensure()
+            self.assertEqual(r.call_count, 2)
+        self.assertEqual(cswap_usage.read()["error"].split("(")[0], "cswap 설치 실패")
+
+    def test_skipped(self):
+        with mock.patch.object(cswap_usage.subprocess, "run") as r:
+            self.which["claude"] = None  # Claude Code 가 없으면 cswap 이 쓸모없다
+            self.assertIsNone(cswap_usage.ensure())
+            self.assertIsNone(cswap_usage.read())
+            self.which["claude"] = "/x/claude"
+            with mock.patch.object(cswap_usage.config, "CSWAP_INSTALL", False):
+                self.assertIsNone(cswap_usage.ensure())
+        r.assert_not_called()
+        self.which.update(uv=None, pipx=None)
+        cswap_usage.ensure()  # 시작하는 호출은 '설치 중'이다(실제로는 뒤에서 돈다)
+        self.assertIn("uv·pipx", cswap_usage.ensure())

@@ -104,7 +104,7 @@
    const err=list.some(isErr),act=list.some(a=>a.attention),pk=list.map(peak).filter(v=>v!=null),mx=pk.length?Math.max(...pk):null;
    return html`<td data-label="${c.name}"><button type="button" class="ul-cell" data-cell="${d.id+":"+c.id}" data-tone="${err||act?"crit":tone(mx)}"><b>${err&&mx==null?"실패":pct(mx)}</b><span>계정 ${list.length}${err?" · 실패 포함":""}${act?" · 조치 필요":""}</span></button></td>`;
   };
-  return html`${kpi}${soon}<div class="tile ul-mx" data-mode="${S.mode}"><table><thead><tr><th scope="col">기기</th>${cols.map(c=>html`<th scope="col">${dot(c.id)}${c.name}</th>`)}</tr></thead><tbody>${rows.map(d=>html`<tr aria-busy="${String(S.busy.has(d.id))}"><th scope="row"><b>${d.host||d.id}</b> ${badge(d)}${devMeta(d)}${state(d)[2]?html`<span class="ul-muted">${state(d)[2]}</span>`:ok(d)&&!(d.providers||[]).length?html`<span class="ul-muted">로그인한 구독 계정이 없습니다.</span>`:""}${d.cswap_error?html`<span class="ul-muted">cswap: ${d.cswap_error}</span>`:""}</th>${cols.map(c=>cell(d,c))}</tr>`)}</tbody></table></div>`;
+  return html`${kpi}${soon}<div class="tile ul-mx" data-mode="${S.mode}"><table><thead><tr><th scope="col">기기</th>${cols.map(c=>html`<th scope="col">${dot(c.id)}${c.name}</th>`)}</tr></thead><tbody>${rows.map(d=>html`<tr aria-busy="${String(S.busy.has(d.id))}"><th scope="row"><b>${d.host||d.id}</b> ${badge(d)}${devMeta(d)}${state(d)[2]?html`<span class="ul-muted">${state(d)[2]}</span>`:ok(d)&&!(d.providers||[]).length?html`<span class="ul-muted">로그인한 구독 계정이 없습니다.</span>`:""}${d.cswap_error?html`<span class="ul-muted">${d.cswap_error.includes("cswap")?"":"cswap: "}${d.cswap_error}</span>`:""}</th>${cols.map(c=>cell(d,c))}</tr>`)}</tbody></table></div>`;
  }
  const dlg=$("#ulDlg");
  function dlgDraw(){

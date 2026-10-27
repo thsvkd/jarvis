@@ -91,6 +91,8 @@ VIEWERS = env_list("VIEWERS")
 PROXIES = env_list("PROXIES")
 # 그 프록시가 X-Jarvis-Proxy-Key 로 붙이는 비밀(설정 파일은 0600). 비어 있으면 proxies 를 믿지 않는다.
 PROXY_KEY = str(env("PROXY_KEY", ""))
+# cswap(claude-swap)이 없고 Claude Code 가 있으면 uv/pipx 로 고정 버전을 설치한다(AI 사용량의 Claude 계정별 값). false 로 끈다
+CSWAP_INSTALL = str(env("CSWAP_INSTALL", "true")).lower() not in ("0", "false", "no", "off")
 
 # Host 헤더 허용 목록에 더할 이름(이 기기의 IP·호스트명·tailnet 이름·모니터 라우트는 자동으로 들어간다).
 EXTRA_HOSTS = [h.lower() for h in env_list("HOSTS")]
@@ -134,7 +136,7 @@ ALLOW_NETS = ",".join(env_list("ALLOW", (
 _LIVE_KEYS = ("INGRESS_DIR", "CADDY_CONTAINER", "TUNNEL_CONTAINER", "TUNNEL_NAME", "DOMAIN",
               "CADDYFILE_CONTAINER_PATH", "HERMES_RE", "HERMES_URL",
               "EXTRA_HOSTS", "INFRA_UNITS", "WATCH_UNITS", "EXPECTED_SERVICES", "EXPECTED_UNITS", "CORE",
-              "VIEWERS", "PROXIES", "PROXY_KEY")
+              "VIEWERS", "PROXIES", "PROXY_KEY", "CSWAP_INSTALL")
 _RESTART_KEYS = ("BIND", "PORT", "ALLOW_NETS", "STATIC_DIR", "STATE_DIR", "DOCKER_SOCK", "USER_UID",
                  "SS_BIN", "PM2_BIN", "TAILSCALE_BIN", "DEVICES")
 CONFIG_RESTART_REQUIRED = []

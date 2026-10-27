@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 
+from . import config
 from .util import parse_iso, scrub_home
 
 CACHE_S = 30  # cswap 자체가 캐시하므로 짧게만 묶는다(요청마다 프로세스를 띄우지 않게)
@@ -28,12 +29,56 @@ STATUS = {
 }
 _lock = threading.Lock()
 _cache = None  # (monotonic, 결과)
+# 자동 설치: 검증한 버전으로 고정한다(서비스가 PyPI 의 최신판을 저절로 받아 실행하지 않게). 올리기는 cswap upgrade 로 사람이 한다
+PACKAGE = "claude-swap==0.28.0"
+INSTALL_RETRY_S = 6 * 3600
+INSTALL_TIMEOUT_S = 600  # 처음이면 uv 가 Python 3.12+ 까지 받는다
+install = {"state": None, "error": None, "at": 0.0}  # state: running|done|failed
+
+
+def _which(name):
+    """PATH(서비스는 짧다) 다음에 uv·pipx·Claude Code 의 기본 설치 위치 ~/.local/bin."""
+    p = os.path.join(os.path.expanduser("~"), ".local", "bin", name + (".exe" if sys.platform == "win32" else ""))
+    return shutil.which(name) or (p if os.path.isfile(p) else None)
 
 
 def binary():
-    """PATH(서비스는 짧다) 다음에 uv·pipx 의 기본 설치 위치."""
-    p = os.path.join(os.path.expanduser("~"), ".local", "bin", "cswap.exe" if sys.platform == "win32" else "cswap")
-    return shutil.which("cswap") or (p if os.path.isfile(p) else None)
+    return _which("cswap")
+
+
+def _install():
+    """uv tool install(없으면 pipx). 실패 이유는 홈 경로를 가려 남긴다."""
+    try:
+        uv, pipx = _which("uv"), _which("pipx")
+        if not (uv or pipx):
+            raise RuntimeError("uv·pipx 가 없어 cswap 을 설치할 수 없습니다")
+        cmd = [uv, "tool", "install", PACKAGE] if uv else [pipx, "install", PACKAGE]
+        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=INSTALL_TIMEOUT_S,
+                           stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if p.returncode or not binary():
+            last = (p.stderr.strip().splitlines() or ["원인 모름"])[-1]
+            raise RuntimeError(f"cswap 설치 실패(종료 코드 {p.returncode}): {last}")
+        install.update(state="done", error=None)
+        print(f"[jarvis] cswap 설치: {PACKAGE}", flush=True)
+    except subprocess.TimeoutExpired:
+        install.update(state="failed", error=f"cswap 설치가 {INSTALL_TIMEOUT_S}초 안에 끝나지 않았습니다")
+    except Exception as e:
+        install.update(state="failed", error=scrub_home(str(e))[:200] or type(e).__name__)
+
+
+def ensure():
+    """cswap 이 없으면 뒤에서 설치를 시작한다. Claude Code 가 없는 기기는 cswap 이 쓸모없어 설치하지 않는다.
+    None(설치하지 않음) 또는 화면에 붙일 문구."""
+    if not config.CSWAP_INSTALL or not _which("claude"):
+        return None
+    with _lock:
+        if install["state"] == "running":
+            return "cswap 을 설치하는 중입니다(Claude 계정별 사용량)"
+        if install["state"] is None or time.monotonic() - install["at"] > INSTALL_RETRY_S:
+            install.update(state="running", error=None, at=time.monotonic())
+            threading.Thread(target=_install, name="jarvis-cswap-install", daemon=True).start()
+            return "cswap 을 설치하는 중입니다(Claude 계정별 사용량)"
+    return install["error"]
 
 
 def _sec(iso):
@@ -110,11 +155,13 @@ def _run(exe):
 
 def read(force=False):
     """None(cswap 없음·계정 없음) 또는 {"accounts": [...], "fetched_at": 초} 또는 {"error": "..."}.
+    cswap 이 없으면 ensure() 가 설치를 시작하고 그 진행·실패를 error 로 준다.
     force 는 jarvis 의 30초 묶음만 건너뛴다(프로바이더 조회 간격은 cswap 이 정한다)."""
     global _cache
     exe = binary()
     if not exe:
-        return None
+        msg = ensure()
+        return {"error": msg} if msg else None
     asked = time.monotonic()
     # 동시에 여러 cswap 을 띄우지 않는다. 앞 요청이 끝나지 않으면(멈춘 cswap) 기다리지 않고 마지막 값을 준다
     if not _lock.acquire(timeout=TIMEOUT_S + 5):
