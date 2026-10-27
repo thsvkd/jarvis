@@ -60,6 +60,10 @@ def call(method, params=None, timeout=12):
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         if p.returncode:
             last = (p.stderr.strip().splitlines() or ["원인 모름"])[-1].replace(metadata["authToken"], "***")[:200]
+            if last.startswith("PermissionError"):
+                # Orca 가 관리자 권한(elevated)으로 돌면 파이프 소유자가 Administrators 라 일반 권한 프로세스는 쓸 수 없다
+                raise RuntimeError("Orca 가 관리자 권한으로 실행 중이라 일반 권한의 jarvis 가 Orca 로컬 파이프를 열 수 없습니다."
+                                   " Orca 를 일반 권한으로 다시 띄우거나 jarvis 예약 작업을 같은 권한으로 실행하세요")
             raise RuntimeError("Orca 로컬 파이프에 연결하지 못했습니다: " + last)
         return json.loads(p.stdout)
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
