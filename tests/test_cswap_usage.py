@@ -47,6 +47,20 @@ class AccountTest(unittest.TestCase):
         self.assertIn("API 키", key["note"])
         self.assertNotIn("org-secret", json.dumps([me, work, old]))
 
+    def test_login_expiry_warning(self):
+        row = {**ROWS["accounts"][0], "loginExpiresAt": "2026-11-05T23:41:25Z"}
+        exp = 1793922085.0
+        with mock.patch.object(cswap_usage.time, "time", return_value=exp - 2.2 * 86400):
+            a = cswap_usage.account(row)
+        self.assertEqual((a["status"], a["attention"]), ("ok", True))  # 값은 그대로 보이고 경고가 붙는다
+        self.assertIn("로그인 만료 2일 남음", a["note"])
+        with mock.patch.object(cswap_usage.time, "time", return_value=exp - 5 * 3600):
+            self.assertIn("5시간 남음", cswap_usage.account(row)["note"])
+        for now in (exp - 4 * 86400, exp + 60):  # 아직 멀었거나 이미 지났으면(그때는 cswap 이 relogin_required 를 준다) 경고하지 않는다
+            with mock.patch.object(cswap_usage.time, "time", return_value=now):
+                a = cswap_usage.account(row)
+            self.assertEqual((a["note"], a["attention"]), (None, False))
+
     def test_odd_numbers(self):
         a = cswap_usage.account({"email": "x@example.com", "usageStatus": "ok",
                                  "usage": {"fiveHour": {"pct": float("inf")}, "sevenDay": {"pct": True}}})

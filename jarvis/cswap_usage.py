@@ -14,6 +14,7 @@ import time
 from . import config
 from .util import Installer, parse_iso, scrub_home, which_local
 
+LOGIN_WARN_S = 3 * 86400  # 로그인(갱신 토큰) 만료 3일 전부터 '주의 필요'. 새 /login 만이 기한을 늘린다
 CACHE_S = 30  # cswap 자체가 캐시하므로 짧게만 묶는다(요청마다 프로세스를 띄우지 않게)
 TIMEOUT_S = 15  # Orca 와 동시에 돈다. core 의 기기당 시간 제한(70초) 안에 들어와야 한다
 # usageStatus → (화면 문구, 사람이 손봐야 하는가). ok·api_key·unavailable 은 따로 다룬다
@@ -103,6 +104,11 @@ def account(row):
         note = "API 키 계정이라 구독 한도가 없습니다."
     elif status != "ok" and not note:
         note = "사용량을 읽지 못했습니다" + (f"({reason})" if reason else "") + "."
+    left = (parse_iso(row.get("loginExpiresAt") or "") or 0) - time.time()
+    if status not in ("relogin_required", "api_key") and 0 < left <= LOGIN_WARN_S:
+        days = f"{left / 86400:.0f}일" if left >= 86400 else f"{max(1, left // 3600):.0f}시간"
+        soon = f"로그인 만료 {days} 남음. 그 계정으로 다시 /login 하세요."
+        note, attention = (note + " " + soon if note else soon), True
     windows, buckets = _windows(usage)
     plan = " · ".join(x for x in (str(row.get("alias") or "")[:40], "자동 전환 제외" if row.get("disabled") is True else "") if x)
     email = str(row.get("email") or "")[:200]

@@ -263,6 +263,8 @@ core 홈의 **AI 구독 사용량** 섹션은 기기마다 Orca 가 로그인한
 같은 프로바이더의 다른 관리 계정은 `inactiveClaudeAccounts`·`inactiveCodexAccounts` 에서 읽는다. 계정은 이메일만 내보내고 홈 경로·조직 UUID·프로바이더 계정 ID 는 넣지 않는다.
 Claude 는 그 기기에 [cswap](https://github.com/realiti4/claude-swap)(claude-swap)이 있으면 `cswap list --json`(schemaVersion 1)의 계정 목록을 쓴다.
 cswap 으로 로그인을 바꿔 끼우면 Orca 는 그 로그인을 '시스템 기본 계정' 하나로만 보기 때문이다. 토큰 갱신·조회 간격은 cswap 이 맡고 jarvis 는 자격 증명 파일을 열지 않는다.
+cswap 은 사용량을 읽을 때 만료된 접근 토큰을 갱신 토큰으로 다시 받는다(쉬는 계정 포함). 로그인 자체(갱신 토큰)는 기한이 있어
+새 `/login` 만이 늘린다: `loginExpiresAt` 3일 전부터 그 계정에 남은 기간을 붙이고 '주의 필요'로 센다.
 cswap 은 PATH 다음에 `~/.local/bin/cswap(.exe)` 에서 찾는다. 결과는 30초 묶으며, cswap 이 없거나 실패하면 Orca 값을 쓴다.
 cswap 이 없고 Claude Code(`claude`)가 있으면 사용량을 처음 읽을 때 뒤에서 `uv tool install claude-swap==0.28.0`(uv 가 없으면 pipx)으로 설치한다.
 버전은 고정한다(서비스가 PyPI 최신판을 저절로 받아 실행하지 않게. 올리기는 그 기기에서 `cswap upgrade`). 실패하면 이유를 화면에 보이고 6시간 뒤 다시 시도한다.
