@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark"><title>AI 구독 사용량 · 시안 미리보기</title>
+<script src="/app/theme-init.js"></script><script src="/lab/usage/theme.js"></script>
+<link rel="icon" href="/shared/favicon.svg"><link rel="stylesheet" href="/app/shell.css"><link rel="stylesheet" href="/app/bento.css"><link rel="stylesheet" href="/lab/usage/usage.css">
+<script defer src="/shared/jarvis.js"></script><script defer src="/lab/usage/data.js"></script><script defer src="/lab/usage/view.js"></script>
+</head>
+<body class="ul-preview">
+<nav class="ul-top wrap" aria-label="랩 탐색">
+  <a href="/lab/usage/" data-back>← 시안 갤러리</a>
+  <span class="ul-top-t" id="ulName">시안</span>
+  <span class="ul-sample">샘플 데이터 · 새로고침은 시뮬레이션</span>
+  <div class="seg ul-theme" role="group" aria-label="화면 테마"><button type="button" data-theme-set="system">시스템</button><button type="button" data-theme-set="light">라이트</button><button type="button" data-theme-set="dark">다크</button></div>
+</nav>
+<main class="wrap">
+  <section class="sec" aria-labelledby="ulTitle">
+    <div class="sec-head">
+      <h2 id="ulTitle">AI 구독 사용량</h2>
+      <p class="sec-sub" id="ulSub">Orca 서버마다 로그인한 구독 계정의 사용 한도</p>
+    </div>
+    <div class="ul-bar">
+      <div class="seg" role="group" aria-label="프로바이더" id="ulProv"></div>
+      <button type="button" class="seg-action" id="ulHot" aria-pressed="false">주의 필요만</button>
+      <button type="button" class="seg-action" id="ulAll">전체 새로고침</button>
+      <span class="dev-note" id="ulNote" role="status"></span>
+    </div>
+    <div id="ulBody"></div>
+  </section>
+</main>
+<dialog id="ulDlg" class="ul-dlg" aria-labelledby="ulDlgT"><div class="ul-dlg-h"><h3 id="ulDlgT"></h3><button type="button" class="seg-action" data-close>닫기</button></div><div id="ulDlgB"></div></dialog>
+</body>
+</html>

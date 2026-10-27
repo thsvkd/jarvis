@@ -20,7 +20,7 @@
 <body>
 <a class="sh-skip" href="#main">본문으로 건너뛰기</a>
 
-<header id="jarvis-shell" data-page="home" data-sections="devices:기기,services:서비스,hardware:하드웨어,network:네트워크,runtime:런타임"></header>
+<header id="jarvis-shell" data-page="home" data-sections="devices:기기,usage:AI 사용량,services:서비스,hardware:하드웨어,network:네트워크,runtime:런타임"></header>
 <script src="/shared/jarvis.js"></script>
 <script src="/app/shell.js"></script>
 
@@ -28,6 +28,7 @@
   <div class="wrap lnav-in">
     <a href="#overview" data-lsec="overview">개요</a>
     <a href="#devices" data-lsec="devices">기기</a>
+    <a href="#usage" data-lsec="usage">AI 사용량</a>
     <a href="#services" data-lsec="services">서비스<span class="lnav-n num" data-f="lnav.svc"></span></a>
     <a href="#hardware" data-lsec="hardware">하드웨어</a>
     <a href="#network" data-lsec="network">네트워크</a>
@@ -138,6 +139,23 @@
     </div>
     <p class="orca-help">데스크톱: Orca 의 원격 환경 추가에 코드를 붙여 넣거나 <code>orca environment add --name &lt;이름&gt; --pairing-code &lt;코드&gt;</code>. 모바일: Orca 앱으로 QR 을 찍는다. 대기 코드가 없으면 이미 페어링된 기기의 코드를 보여 준다(그 기기와 자격을 함께 쓴다).</p>
     <div class="bento" id="devList"></div>
+  </section>
+
+  <!-- ============================================================ core: Orca 서버별 AI 구독 사용량 (설정 devices 가 있을 때만) -->
+  <section id="usage" class="sec" aria-labelledby="h-usage" hidden>
+    <div class="sec-head">
+      <h2 id="h-usage">AI 구독 사용량</h2>
+      <p class="sec-sub">기기마다 Orca 가 로그인한 구독 계정의 한도 · 보는 동안 1분마다 갱신, 프로바이더 조회는 5분 간격(새로고침은 30초 간격)</p>
+    </div>
+    <div class="ul-bar">
+      <div class="seg" role="group" aria-label="프로바이더" id="ulProv"></div>
+      <button type="button" class="seg-action" id="ulHot" aria-pressed="false">주의 필요만</button>
+      <div class="seg" role="group" aria-label="표 보기 방식" id="ulMode"><button type="button" data-mode="brief">간략히</button><button type="button" data-mode="full">자세히</button></div>
+      <button type="button" class="seg-action" id="ulAll">새로고침</button>
+      <span class="dev-note" id="ulNote" role="status"></span>
+    </div>
+    <div id="ulBody"><p class="ul-muted">불러오는 중…</p></div>
+    <dialog id="ulDlg" class="ul-dlg" aria-labelledby="ulDlgT"><div class="ul-dlg-h"><h3 id="ulDlgT"></h3><button type="button" class="seg-action" data-close>닫기</button></div><div id="ulDlgB"></div></dialog>
   </section>
 
   <!-- ============================================================ 서비스 -->
@@ -541,5 +559,6 @@
 <script src="/app/focus.js"></script>
 <script src="/app/bento.js"></script>
 <script src="/app/devices.js"></script>
+<script src="/app/usage.js"></script>
 </body>
 </html>

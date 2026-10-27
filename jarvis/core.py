@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 EVERY_S = 10
 TIMEOUT_S = 5  # 연결·읽기 한 번
 CHECK_TIMEOUT_S = 70  # 업데이트 확인은 게이트웨이가 릴리스 매니페스트를 받느라 60초까지 쓴다
+USAGE_TIMEOUT_S = 70  # 사용량 새로고침은 게이트웨이 Orca 가 계정마다 프로바이더 API 를 부른다(45초 + 보관값 12초)
 DEADLINE_S = 15  # 응답 하나 전체(조금씩 흘려 보내는 응답이 스레드를 붙잡지 못하게)
 STALE_S = 3 * EVERY_S  # 이보다 오래된 스냅샷은 주지 않는다(기기 화면이 '응답 없음'을 띄우게)
 MAX_BYTES = 16 << 20  # 압축을 푼 뒤 기준. 24h history 가 수 MB 다
@@ -177,16 +178,14 @@ class Core:
         """history·changes: 그 게이트웨이 응답(json bytes)을 그대로."""
         return fetch(self.devices[i]["url"] + path)[0]
 
-    def orca_issue(self, i, scope):
-        """발급 버튼: 그 게이트웨이 POST /api/orca/issue 를 그대로 전달한다. (http 상태, 응답)."""
-        req = urllib.request.Request(self.devices[i]["url"] + "/api/orca/issue?scope=" + urllib.parse.quote(scope),
-                                     data=b"", method="POST", headers={"X-Jarvis-Action": "orca-issue"})
+    def _ask(self, i, req, timeout, unsupported):
+        """그 게이트웨이의 Orca 동작 하나를 그대로 전달한다. (http 상태, 응답). 404 는 갱신 전 게이트웨이(501)."""
         try:
-            with _open(req, timeout=TIMEOUT_S) as r:
-                return r.status, json.loads(r.read(1 << 16))
+            with _open(req, timeout=timeout) as r:
+                return r.status, json.loads(r.read(1 << 20))
         except urllib.error.HTTPError as e:
             if e.code == 404:
-                return 501, {"error": "이 기기의 jarvis 는 자동 발급을 지원하지 않습니다(갱신 필요)"}
+                return 501, {"error": f"이 기기의 jarvis 는 {unsupported} 지원하지 않습니다(갱신 필요)"}
             try:
                 return e.code, json.loads(e.read(1 << 16))
             except ValueError:
@@ -194,38 +193,39 @@ class Core:
         except Exception as e:
             return 502, {"error": f"{i} 에 닿지 못했습니다: {why(e)}"}
 
+    def orca_issue(self, i, scope):
+        """발급 버튼: 그 게이트웨이 POST /api/orca/issue 를 그대로 전달한다. (http 상태, 응답)."""
+        req = urllib.request.Request(self.devices[i]["url"] + "/api/orca/issue?scope=" + urllib.parse.quote(scope),
+                                     data=b"", method="POST", headers={"X-Jarvis-Action": "orca-issue"})
+        return self._ask(i, req, TIMEOUT_S, "자동 발급을")
+
     def orca_update_check(self, i):
         """확인 버튼. 그 게이트웨이 GET /api/orca/update. 설치나 재시작은 없다. (http 상태, 응답)."""
-        req = urllib.request.Request(self.devices[i]["url"] + "/api/orca/update")
-        try:
-            with _open(req, timeout=CHECK_TIMEOUT_S) as r:
-                return r.status, json.loads(r.read(1 << 16))
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                return 501, {"error": "이 기기의 jarvis 는 업데이트 확인을 지원하지 않습니다(갱신 필요)"}
-            try:
-                return e.code, json.loads(e.read(1 << 16))
-            except ValueError:
-                return e.code, {"error": f"HTTP {e.code}"}
-        except Exception as e:
-            return 502, {"error": f"{i} 에 닿지 못했습니다: {why(e)}"}
+        return self._ask(i, urllib.request.Request(self.devices[i]["url"] + "/api/orca/update"), CHECK_TIMEOUT_S, "업데이트 확인을")
 
     def orca_update(self, i):
         """업데이트 버튼: 그 게이트웨이 POST /api/orca/update 를 그대로 전달한다. (http 상태, 응답)."""
         req = urllib.request.Request(self.devices[i]["url"] + "/api/orca/update", data=b"", method="POST",
                                      headers={"X-Jarvis-Action": "orca-update"})
-        try:
-            with _open(req, timeout=TIMEOUT_S) as r:
-                return r.status, json.loads(r.read(1 << 16))
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                return 501, {"error": "이 기기의 jarvis 는 Orca 업데이트를 지원하지 않습니다(갱신 필요)"}
-            try:
-                return e.code, json.loads(e.read(1 << 16))
-            except ValueError:
-                return e.code, {"error": f"HTTP {e.code}"}
-        except Exception as e:
-            return 502, {"error": f"{i} 에 닿지 못했습니다: {why(e)}"}
+        return self._ask(i, req, TIMEOUT_S, "Orca 업데이트를")
+
+    def usage(self, i, force=False):
+        """AI 구독 사용량: 그 게이트웨이 GET /api/orca/usage. 모아 두지 않는다(계정 이메일이 들어 있다)."""
+        req = urllib.request.Request(self.devices[i]["url"] + "/api/orca/usage" + ("?refresh=1" if force else ""))
+        return self._ask(i, req, USAGE_TIMEOUT_S, "사용량 조회를")
+
+    def usage_all(self, force=False):
+        """모든 기기의 사용량을 동시에 묻는다. 한 대가 느리거나 실패해도 나머지는 그대로 준다."""
+        ids = list(self.devices)
+
+        def one(i):
+            code, body = self.usage(i, force)
+            with self.lock:
+                host = (self.state[i]["summary"] or {}).get("host")
+            return {**(body if isinstance(body, dict) else {"error": str(body)}), "id": i, "host": host, "status": code}
+
+        with ThreadPoolExecutor(max_workers=max(1, min(16, len(ids)))) as pool:
+            return {"generated_at": time.time(), "devices": list(pool.map(one, ids))}
 
     def orca_update_all(self):
         """기기마다 업데이트를 시작한다. 한 대 실패가 나머지를 멈추지 않는다."""

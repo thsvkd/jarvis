@@ -1129,3 +1129,78 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
 .orca-none { color: var(--text-2); font-size: var(--fs-sm); }
 .orca-reused { margin: var(--sp-2) 0 0; color: var(--text-2); font-size: var(--fs-sm); }
 @media (max-width: 520px) { .orca-codes { grid-template-columns: 1fr; } .orca-qr { margin-inline: auto; } }
+
+/* ------------------------------------------------------------------ AI 구독 사용량(core, usage.js) — 디자인 랩 04 의 C + 자세히 모드 */
+[data-sh-sec="usage"]:not([data-core]), [data-lsec="usage"]:not([data-core]) { display: none !important; }
+.ul-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: var(--gap); }
+.ul-bar .seg { flex-wrap: wrap; }
+.ul-dot { display: inline-block; width: 9px; height: 9px; border-radius: 3px; flex: none; background: var(--muted); }
+.ul-dot[data-p="claude"] { background: var(--s4); } .ul-dot[data-p="codex"] { background: var(--s1); }
+.ul-dot[data-p="grok"] { background: var(--s3); } .ul-dot[data-p="antigravity"] { background: var(--s2); }
+.ul-muted { color: var(--text-3); font-size: var(--fs-sm); }
+.ul-err { color: var(--crit-ink); font-size: var(--fs-sm); background: var(--crit-soft); padding: 8px 10px; border-radius: var(--r-xs); overflow-wrap: anywhere; }
+.ul-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; color: var(--text-3); font-size: var(--fs-sm); }
+#usage .ul-ref { padding: 4px 10px; font-size: var(--fs-xs); }
+#usage [aria-busy="true"] { opacity: .6; transition: opacity var(--dur); }
+#usage .tile { animation: none; } /* 1분마다·필터마다 다시 그리므로 등장 애니메이션을 끈다 */
+.ul-wl { color: var(--text-3); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+.ul-wins { display: grid; gap: 7px; }
+.ul-win { display: grid; grid-template-columns: 64px minmax(48px, 1fr) 40px minmax(0, auto); align-items: center; gap: 8px; font-size: var(--fs-sm); }
+.ul-win .meter { height: 7px; }
+.ul-wp { text-align: right; font-variant-numeric: tabular-nums; color: var(--tone-ink); }
+.ul-wr { color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; text-align: right; }
+.ul-extra, .ul-age { color: var(--text-2); font-size: var(--fs-xs); margin-top: 6px; }
+.ul-age { color: var(--text-3); }
+.ul-ah { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin-bottom: 8px; min-width: 0; }
+.ul-email { font-weight: var(--fw-semibold); overflow-wrap: anywhere; }
+.ul-plan { font-size: var(--fs-xs); color: var(--text-2); background: var(--tile-3); padding: 2px 7px; border-radius: var(--r-xs); }
+.ul-acct + .ul-acct { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.ul-kpi { gap: 4px; }
+.ul-kpi b { font-size: var(--fs-2xl); font-weight: var(--fw-bold); color: var(--tone-ink, var(--text)); letter-spacing: var(--ls-heading); }
+.ul-kpi .ul-kpi-s { font-size: var(--fs-xl); }
+.ul-soon, .ul-mx { margin-top: var(--gap); }
+.ul-soon ol { list-style: none; display: grid; gap: 8px; }
+.ul-soon li { display: grid; grid-template-columns: 110px 10px minmax(0, 240px) minmax(0, 150px) minmax(80px, 1fr) 42px; align-items: center; gap: 10px; font-size: var(--fs-sm); }
+.ul-when { font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+.ul-mx { overflow-x: auto; padding: 12px; }
+.ul-mx table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.ul-mx th, .ul-mx td { padding: 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+.ul-mx thead th { color: var(--text-3); font-size: var(--fs-xs); font-weight: var(--fw-semibold); white-space: nowrap; }
+.ul-mx thead .ul-dot { margin-right: 6px; }
+.ul-mx tbody th { font-weight: var(--fw-regular); min-width: 190px; }
+.ul-mx tbody th .ul-meta { margin-top: 4px; }
+.ul-mx tbody th > .ul-muted { display: block; margin-top: 4px; overflow-wrap: anywhere; }
+.ul-mx[data-mode="full"] td { min-width: 260px; }
+.ul-full .ul-acct { padding: 10px 12px; border-radius: var(--r-sm); background: var(--tile-2); }
+.ul-full .ul-acct + .ul-acct { margin-top: 8px; padding-top: 10px; border-top: 0; }
+.ul-full .ul-win { grid-template-columns: 56px minmax(40px, 1fr) 36px minmax(0, auto); gap: 6px; font-size: var(--fs-xs); }
+.ul-nil { color: var(--text-3); }
+.ul-cell { font: inherit; display: grid; gap: 2px; width: 100%; min-width: 92px; text-align: left; padding: 8px 10px; border-radius: var(--r-sm); border: 1px solid transparent; background: var(--tone-soft); color: var(--text); cursor: pointer; }
+.ul-cell:hover { border-color: var(--accent); }
+.ul-cell b { font-size: var(--fs-lg); color: var(--tone-ink); }
+.ul-cell span { font-size: var(--fs-xs); color: var(--text-2); }
+.ul-none { align-items: flex-start; margin-top: var(--gap); }
+.ul-dlg { width: min(560px, calc(100vw - 32px)); max-height: min(80vh, 760px); border: 0; border-radius: var(--r-tile); background: var(--tile); color: var(--text); box-shadow: var(--shadow-pop); padding: var(--pad); }
+.ul-dlg::backdrop { background: var(--scrim); }
+.ul-dlg-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.ul-dlg-h h3 { font-size: var(--fs-lg); }
+.ul-dlg .ul-meta { margin-bottom: 10px; }
+@media (max-width: 760px) {
+  .ul-win, .ul-full .ul-win { grid-template-columns: 60px minmax(40px, 1fr) 38px; row-gap: 2px; }
+  .ul-wr { grid-column: 2 / -1; text-align: left; }
+  .ul-soon li { grid-template-columns: 10px minmax(0, 1fr) 42px; row-gap: 4px; }
+  .ul-soon li .ul-when { grid-column: 1 / -1; order: -1; }
+  .ul-soon li .ul-wl { grid-column: 2 / -1; }
+  .ul-soon li .meter { grid-column: 2 / 3; }
+  .ul-mx { padding: 0; background: none; box-shadow: none; overflow: visible; }
+  .ul-mx table, .ul-mx tbody, .ul-mx tr, .ul-mx th, .ul-mx td { display: block; }
+  .ul-mx thead { display: none; }
+  .ul-mx tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 14px; margin-bottom: 12px; border-radius: var(--r-tile); background: var(--tile); box-shadow: var(--shadow); }
+  .ul-mx[data-mode="full"] tr { grid-template-columns: minmax(0, 1fr); }
+  .ul-mx[data-mode="full"] td { min-width: 0; }
+  .ul-mx tbody th { grid-column: 1 / -1; min-width: 0; border: 0; padding: 0 0 4px; }
+  .ul-mx td { border: 0; padding: 0; }
+  .ul-mx td::before { content: attr(data-label); display: block; font-size: var(--fs-xs); color: var(--text-3); margin-bottom: 3px; }
+  .ul-mx td.ul-nil { display: none; }
+  .ul-cell { min-width: 0; }
+}

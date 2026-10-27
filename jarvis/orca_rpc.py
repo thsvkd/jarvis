@@ -14,7 +14,7 @@ import uuid
 from . import orca
 
 METHODS = {"updater.getStatus", "updater.check", "updater.download", "updater.install", "worktree.ps",
-           "terminal.list", "orcad.terminalCensus"}
+           "terminal.list", "orcad.terminalCensus", "accounts.list"}
 MAX_FRAME = 8 << 20
 
 

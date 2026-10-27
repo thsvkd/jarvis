@@ -96,6 +96,19 @@ class CoreTest(unittest.TestCase):
         with self.assertRaises(urllib.error.URLError):
             self.core.orca("down")
 
+    def test_usage(self):
+        Gateway.routes["/api/orca/usage"] = (200, b'{"installed":true,"providers":[{"id":"claude"}]}', False)
+        Gateway.routes["/api/orca/usage?refresh=1"] = (200, b'{"installed":true,"refreshed":true,"providers":[]}', False)
+        self.assertEqual(self.core.usage("gw"), (200, {"installed": True, "providers": [{"id": "claude"}]}))
+        self.assertTrue(self.core.usage("gw", force=True)[1]["refreshed"])
+        rows = {r["id"]: r for r in self.core.usage_all()["devices"]}
+        self.assertEqual((rows["gw"]["status"], rows["gw"]["providers"]), (200, [{"id": "claude"}]))
+        self.assertEqual(rows["down"]["status"], 502)  # 한 대가 죽어도 나머지는 준다
+        del Gateway.routes["/api/orca/usage"]
+        code, body = self.core.usage("gw")
+        self.assertEqual(code, 501)
+        self.assertIn("갱신 필요", body["error"])
+
     def test_no_redirect(self):
         # 장악된 게이트웨이가 core 를 자기 자신(루프백)의 /api/orca 로 보내도 따라가지 않는다
         Gateway.routes["/api/changes"] = (302, b"/api/orca", False)
@@ -179,6 +192,20 @@ class RouteTest(unittest.TestCase):
         finally:
             server.client_kind, config.VIEWERS = kind, vw
         self.assertEqual((st, o["codes"]["mobile"]["url"]), (200, "orca://pair?code=abc"))
+
+    def test_usage_routes(self):
+        Gateway.routes["/api/orca/usage"] = (200, b'{"installed":true,"providers":[]}', False)
+        self.assertEqual(self.get("/api/devices/gw/usage"), (200, {"installed": True, "providers": []}))
+        st, o = self.get("/api/devices/usage")
+        self.assertEqual((st, o["devices"][0]["id"], o["devices"][0]["status"]), (200, "gw", 200))
+        self.assertEqual(self.get("/api/orca/usage")[0], 403)  # 게이트웨이 경로는 설정 core 만
+        # 강제 새로고침은 맞춤 헤더가 있어야 한다(다른 사이트가 이미지·링크로 부르지 못하게)
+        Gateway.routes["/api/orca/usage?refresh=1"] = (200, b'{"installed":true,"refreshed":true,"providers":[]}', False)
+        for path in ("/api/devices/usage?refresh=1", "/api/devices/gw/usage?refresh=1"):
+            self.assertEqual(self.get(path)[0], 403)
+        st, o = self.get("/api/devices/gw/usage?refresh=1", {"X-Jarvis-Action": "usage-refresh"})
+        self.assertEqual((st, o["refreshed"]), (200, True))
+        self.assertTrue(self.get("/api/devices/usage?refresh=1", {"X-Jarvis-Action": "usage-refresh"})[1]["devices"][0]["refreshed"])
 
     def test_viewers(self):
         cls = server.make_handler(FakeCollector(), self.core)

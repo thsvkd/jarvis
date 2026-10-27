@@ -103,6 +103,7 @@ node tools/check-home.mjs http://100.64.0.2:9300 /tmp/jarvis-home-check
 `/lab/`에서 기존 Bento 기반 5종과 Focus 개선판을 실시간 데이터로 비교한다. 개별 데모·후보 저장·나란히 비교를 제공하며
 기존 Bento의 디자인과 렌더러를 재사용하며 콘텐츠 순서·탭·접기만 달리한다. 운영 홈은 기존 주소 `/`에 있다.
 같은 Jarvis 서버에서 제공하므로 LAN·Tailnet 접근 제한도 동일하다. [시안별 설계·검증 방법](static/lab/README.md).
+`/lab/usage/` 는 랩 04(AI 구독 사용량 배치 A·B·C, 샘플 데이터·시뮬레이션 새로고침)다. 운영 화면은 C 를 골라 자세히 모드를 더했다.
 
 ```sh
 node tools/check-lab.mjs http://100.64.0.2:9300 /tmp/jarvis-lab-check
@@ -256,6 +257,14 @@ Mac 의 Homebrew cask 와 앱 업데이터를 함께 설치 주체로 사용하�
 공식 계약: [업데이트 RPC](https://github.com/stablyai/orca/blob/main/src/main/runtime/rpc/methods/updater.ts),
 [로컬 RPC 프레임](https://github.com/stablyai/orca/blob/main/src/cli/runtime/transport.ts),
 [macOS 재시작 감독](https://github.com/stablyai/orca/blob/main/src/cli/runtime/serve-update-supervisor.ts).
+
+core 홈의 **AI 구독 사용량** 섹션은 기기마다 Orca 가 로그인한 구독 계정(Claude·Codex·Grok·Antigravity 등)의 한도를 보여 준다.
+게이트웨이 `GET /api/orca/usage`(설정 core 만)는 Orca 로컬 RPC `accounts.list` 의 rateLimits 를 프로바이더 → 계정 → 한도 창(5시간·주간·Fable 주간·월간)으로 정리한다.
+같은 프로바이더의 다른 관리 계정은 `inactiveClaudeAccounts`·`inactiveCodexAccounts` 에서 읽는다. 계정은 이메일만 내보내고 홈 경로·조직 UUID·프로바이더 계정 ID 는 넣지 않는다.
+프로바이더 API 를 다시 부르는 `refreshUsage` 는 5분에 한 번(새로고침 버튼은 30초 간격)만 쓰고, 그 사이에는 Orca 가 가진 값을 읽는다.
+core `GET /api/devices/usage`(전체, `?refresh=1` 강제)·`/api/devices/<id>/usage` 는 모아 두지 않고 요청마다 게이트웨이에 묻는다.
+화면은 디자인 랩 04(`/lab/usage/`)의 C 안이다. 간략히(칸마다 최대 사용률, 누르면 계정 상세)와 자세히(칸 안에 계정별 한도 창 전부) 보기를 전환하며, 선택은 localStorage `jarvis.usage.mode` 에 둔다.
+공식 계약: [계정 RPC](https://github.com/stablyai/orca/blob/main/src/main/runtime/rpc/methods/accounts.ts), [사용량 형식](https://github.com/stablyai/orca/blob/main/src/shared/rate-limit-types.ts).
 
 ```sh
 JARVIS_CONFIG=/dev/null python3 -m unittest discover -s tests   # 파서·플랫폼 층·스냅샷 조립(이 기기 설정 파일과 무관하게)

@@ -20,7 +20,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from . import __version__, config, orca, orca_issue, orca_update
+from . import __version__, config, orca, orca_issue, orca_update, orca_usage
 from .core import why
 from .util import client_kind
 
@@ -151,8 +151,16 @@ def make_handler(collector, core=None):
                 return False
             return peer in ips
 
+        def _usage_force(self, u):
+            """core 의 ?refresh=1 은 게이트웨이마다 프로바이더 API 를 부른다. 맞춤 헤더를 요구해 다른 사이트가 이미지·링크로
+            대신 부르지 못하게 한다(헤더가 있는 교차 출처 요청은 preflight 가 필요하고 이 서버는 OPTIONS 에 답하지 않는다).
+            헤더 없는 refresh 는 None."""
+            if parse_qs(u.query).get("refresh") != ["1"]:
+                return False
+            return True if self.headers.get("X-Jarvis-Action") == "usage-refresh" else None
+
         def _device(self, path, u, head):
-            """core: /api/devices/<id>/(snapshot|history|changes|orca)."""
+            """core: /api/devices/<id>/(snapshot|history|changes|orca|usage)."""
             parts = path.split("/")
             if len(parts) != 5 or not core.has(parts[3]):
                 return self._json({"error": "not found"}, head, 404)
@@ -169,6 +177,12 @@ def make_handler(collector, core=None):
                     if not self._trusted(config.VIEWERS, config.PROXIES):
                         return self._json({"error": "페어링 코드는 허용된 기기(viewers)에서만 볼 수 있습니다"}, head, 403)
                     return self._json(core.orca(dev), head)
+                if what == "usage":
+                    force = self._usage_force(u)
+                    if force is None:
+                        return self._json({"error": "X-Jarvis-Action 헤더가 필요합니다"}, head, 403)
+                    code, body = core.usage(dev, force)
+                    return self._json(body, head, code)
                 if what == "history":
                     rng = (parse_qs(u.query).get("range") or ["1h"])[0]
                     if rng not in ("1h", "24h"):
@@ -272,6 +286,11 @@ def make_handler(collector, core=None):
                     if not self._trusted(config.CORE):
                         return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
                     return self._json(orca_update.check(), head)
+                if path == "/api/orca/usage":
+                    if not self._trusted(config.CORE):
+                        return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
+                    code, body = orca_usage.read(force=parse_qs(u.query).get("refresh") == ["1"])
+                    return self._json(body, head, code)
                 if path == "/api/orca":
                     if not self._trusted(config.CORE):
                         return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
@@ -288,6 +307,11 @@ def make_handler(collector, core=None):
                     return self._json(body, head, code)
                 if core and path == "/api/devices":
                     return self._json(core.list(), head)
+                if core and path == "/api/devices/usage":
+                    force = self._usage_force(u)
+                    if force is None:
+                        return self._json({"error": "X-Jarvis-Action 헤더가 필요합니다"}, head, 403)
+                    return self._json(core.usage_all(force), head)
                 if core and path.startswith("/api/devices/"):
                     return self._device(path, u, head)
                 if path == "/api/health":
