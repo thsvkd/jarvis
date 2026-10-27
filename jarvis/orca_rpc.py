@@ -59,7 +59,8 @@ def call(method, params=None, timeout=12):
                            cwd=os.path.dirname(os.path.dirname(__file__)),
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         if p.returncode:
-            raise RuntimeError("Orca 로컬 파이프에 연결하지 못했습니다")
+            last = (p.stderr.strip().splitlines() or ["원인 모름"])[-1].replace(metadata["authToken"], "***")[:200]
+            raise RuntimeError("Orca 로컬 파이프에 연결하지 못했습니다: " + last)
         return json.loads(p.stdout)
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         sock.settimeout(timeout)
