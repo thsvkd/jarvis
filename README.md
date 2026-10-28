@@ -1,7 +1,9 @@
 # Jarvis (옛 PIT5 Monitor)
 
 저장소: `~/Workspace/jarvis` (systemd 사용자 유닛 `jarvis` 의 WorkingDirectory).
-원본은 s2 의 이 저장소이고, 운영 기기(pit5 등)는 `git pull` 과 재시작만 한다.
+원본은 s2 의 이 저장소이고, 운영 기기는 GitHub main 을 받고 재시작만 한다. core 홈 기기 목록의 **jarvis 업데이트**(또는 **jarvis 모두 업데이트**)를 누르면
+각 기기가 `git pull --ff-only origin main` 을 하고, 코드가 바뀌었으면 스스로 끝나 서비스 관리자가 새 코드로 다시 띄운다(core 자신은 마지막).
+갈라졌거나 작업 트리 수정이 겹치면 받지 않고 실패를 알린다.
 
 기기 한 대를 통째로 보는 읽기 전용 대시보드. Python 수집기(표준 라이브러리 + psutil) + 정적 HTML(홈·네트워크 맵).
 Linux(지금은 pit5 = Raspberry Pi 5 에서 운영)와 macOS(Mac Studio 로 옮길 예정)에서 같은 코드로 돈다.
@@ -157,7 +159,7 @@ curl -s localhost:9300/api/health
 처음 설치:
 
 ```sh
-git clone https://github.com/thsvkd/jarvis.git ~/Workspace/jarvis && cd ~/Workspace/jarvis   # GitHub 인증이 없으면 s2 에서 git push
+git clone https://github.com/thsvkd/jarvis.git ~/Workspace/jarvis && cd ~/Workspace/jarvis   # public 저장소라 인증이 필요 없다
 install -Dm644 deploy/gateway.toml ~/.config/jarvis/config.toml     # s2 는 deploy/s2.toml(core), pit5 는 deploy/pit5.toml
 install -Dm644 deploy/jarvis.service ~/.config/systemd/user/jarvis.service
 loginctl enable-linger && systemctl --user daemon-reload && systemctl --user enable --now jarvis
@@ -219,7 +221,7 @@ Windows 는 게이트웨이로만 돈다: Orca 데스크톱 앱(`%APPDATA%\orca`
 서비스 관리자·Docker·Caddy 수집은 없다. SSH 세션에서 띄운 프로세스는 세션이 끝나면 죽으므로 예약 작업(로그온 시)으로 돌린다.
 
 ```powershell
-# 저장소: GitHub 인증이 없으면 s2 에서 git push <host>:Workspace/jarvis main (receive.denyCurrentBranch=updateInstead)
+# 저장소: git clone https://github.com/thsvkd/jarvis.git (갱신은 core 의 jarvis 업데이트 버튼. git 이 없으면 버튼이 실패를 알린다)
 winget install -e --id Python.Python.3.13 --scope user          # python 3.11+ (WindowsApps 의 python.exe 는 안내용 껍데기)
 cd $env:USERPROFILE\Workspace\jarvis
 powershell -ExecutionPolicy Bypass -File deploy\install-windows.ps1 -Python "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe"
@@ -230,7 +232,7 @@ Get-Content -Encoding UTF8 $env:LOCALAPPDATA\jarvis\jarvis.log -Tail 20
 
 ## 검증
 
-Orca 업데이트는 core 홈의 기기 목록에서 **업데이트 확인 → 업데이트** 순서로 실행한다.
+Orca 업데이트는 core 홈의 기기 목록에서 **Orca 업데이트 확인 → Orca 업데이트** 순서로 실행한다.
 확인은 설치된 버전과 공식 stable 매니페스트를 비교하며 설치 권한·런타임 지원 여부와 독립적이다.
 최신 기기의 업데이트 버튼은 비활성화된다. 진행 상태는 기기 타일에 표시하며 페어링 QR 은 페어링 버튼으로 연다.
 
