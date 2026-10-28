@@ -9,6 +9,7 @@
 import gzip
 import json
 import re
+import socket
 import threading
 import time
 import urllib.error
@@ -20,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 EVERY_S = 10
 TIMEOUT_S = 5  # 연결·읽기 한 번
 CHECK_TIMEOUT_S = 70  # 업데이트 확인은 게이트웨이가 릴리스 매니페스트를 받느라 60초까지 쓴다
+PULL_TIMEOUT_S = 100  # jarvis 갱신은 게이트웨이가 git pull 을 90초까지 기다린다
 USAGE_TIMEOUT_S = 70  # 사용량 새로고침은 게이트웨이 Orca 가 계정마다 프로바이더 API 를 부른다(45초 + 보관값 12초)
 DEADLINE_S = 15  # 응답 하나 전체(조금씩 흘려 보내는 응답이 스레드를 붙잡지 못하게)
 STALE_S = 3 * EVERY_S  # 이보다 오래된 스냅샷은 주지 않는다(기기 화면이 '응답 없음'을 띄우게)
@@ -104,7 +106,8 @@ def _summary(s):
     meta, summ, sysm = s.get("meta") or {}, s.get("summary") or {}, s.get("system") or {}
     root = next((d for m in ("/", "/System/Volumes/Data", "C:\\")  # macOS 는 사용자 데이터가 Data 볼륨, Windows 는 C:
                  for d in sysm.get("disks") or [] if isinstance(d, dict) and d.get("mount") == m), {})
-    return {"host": meta.get("host"), "version": meta.get("version"), "generated_at": meta.get("generated_at"),
+    return {"host": meta.get("host"), "version": meta.get("version"), "commit": (s.get("monitor") or {}).get("commit"),
+            "generated_at": meta.get("generated_at"),
             "status": summ.get("status"), "alerts": summ.get("alerts"), "services": summ.get("services"),
             "model": (sysm.get("host") or {}).get("model"), "cpu_pct": (sysm.get("cpu") or {}).get("usage_pct"),
             "mem_pct": (sysm.get("memory") or {}).get("usage_pct"), "disk_pct": root.get("usage_pct")}
@@ -208,6 +211,29 @@ class Core:
         req = urllib.request.Request(self.devices[i]["url"] + "/api/orca/update", data=b"", method="POST",
                                      headers={"X-Jarvis-Action": "orca-update"})
         return self._ask(i, req, TIMEOUT_S, "Orca 업데이트를")
+
+    def jarvis_update(self, i):
+        """jarvis 업데이트 버튼: 그 게이트웨이 POST /api/jarvis/update. 받은 코드가 다르면 게이트웨이가 스스로 재시작한다."""
+        req = urllib.request.Request(self.devices[i]["url"] + "/api/jarvis/update", data=b"", method="POST",
+                                     headers={"X-Jarvis-Action": "jarvis-update"})
+        return self._ask(i, req, PULL_TIMEOUT_S, "자체 갱신을")
+
+    def jarvis_update_all(self):
+        """기기마다 갱신한다. core 자신은 다른 기기가 다 끝난 뒤에 한다(먼저 재시작하면 이 요청이 끊긴다).
+        아직 요약을 못 받은 기기도 core 자신일 수 있어 마지막에 둔다."""
+        me = socket.gethostname().split(".")[0].lower()
+        with self.lock:
+            mine = {i for i, st in self.state.items()
+                    if ((st["summary"] or {}).get("host") or me).split(".")[0].lower() == me}
+
+        def one(i):
+            code, body = self.jarvis_update(i)
+            return {"id": i, "status": code, **(body if isinstance(body, dict) else {"error": str(body)})}
+
+        others = [i for i in self.devices if i not in mine]
+        with ThreadPoolExecutor(max_workers=max(1, min(8, len(others)))) as pool:
+            out = list(pool.map(one, others))
+        return out + [one(i) for i in self.devices if i in mine]
 
     def usage(self, i, force=False):
         """AI 구독 사용량: 그 게이트웨이 GET /api/orca/usage. 모아 두지 않는다(계정 이메일이 들어 있다)."""

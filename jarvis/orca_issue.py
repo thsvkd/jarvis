@@ -102,6 +102,9 @@ def start(scope, address, port):
             return 409, {"error": "이전 Orca 업데이트의 복구·세션 검증이 끝난 뒤에 발급하세요"}
         if orca_update.job and orca_update.job.get("state") == "running":
             return 409, {"error": "Orca 업데이트가 끝난 뒤에 발급하세요", "update": orca_update.snapshot()}
+        from . import self_update  # 받은 뒤 재시작하면 발급이 끊긴다
+        if self_update._lock.locked():
+            return 409, {"error": "jarvis 갱신이 끝난 뒤에 발급하세요"}
         if job and job["state"] == "failed" and time.time() - job["finished_at"] < COOLDOWN_S:
             return 429, {"error": f"직전 발급이 실패했습니다. {COOLDOWN_S // 60}분 뒤에 다시 시도하세요", "issue": job}
         st = orca.status(address)

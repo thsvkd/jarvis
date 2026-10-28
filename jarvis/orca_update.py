@@ -514,6 +514,9 @@ def start():
             return 409, {"error": "이미 업데이트하고 있습니다", "update": dict(job)}
         if orca_issue.job and orca_issue.job.get("state") == "running":
             return 409, {"error": "페어링 코드 발급이 끝난 뒤에 업데이트하세요", "issue": orca_issue.job}
+        from . import self_update  # 받은 뒤 재시작하면 이 작업이 끊긴다
+        if self_update._lock.locked():
+            return 409, {"error": "jarvis 갱신이 끝난 뒤에 업데이트하세요"}
         job = {"state": "running", "phase": "manifest", "error": None, "from_version": None, "to_version": None,
                "app": None, "skills": None, "started_at": time.time(), "finished_at": None}
         threading.Thread(target=_run, name="jarvis-orca-update", daemon=True).start()

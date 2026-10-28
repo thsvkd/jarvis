@@ -44,6 +44,7 @@ _ENV = dict(os.environ)
 _ENV["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/homebrew/bin:" + _ENV.get("PATH", "")
 _ENV.setdefault("XDG_RUNTIME_DIR", f"/run/user/{config.USER_UID}")
 _ENV["LC_ALL"] = "C"
+_ENV["GIT_TERMINAL_PROMPT"] = "0"  # 서비스·pythonw 에서는 답할 사람이 없다
 # Windows: 창 없는 pythonw 가 콘솔 프로그램을 부를 때마다 콘솔 창이 떴다 사라지지 않게 한다.
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 

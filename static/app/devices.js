@@ -1,7 +1,8 @@
 /* core 홈의 기기 목록, Orca 페어링, Orca 업데이트(설정 devices 가 있는 jarvis 에서만 보인다).
  * 페어링 코드는 원격 셸 권한이라 스냅샷에 없다. 페어링을 누를 때 그 기기 하나만 /api/devices/<id>/orca(viewers 전용)에서 받는다.
  * 업데이트 확인은 버전만 비교한다. 업데이트 진행은 타일 한 줄에만 적고, 페어링 QR 은 그 버튼을 눌렀을 때만 연다.
- * 업데이트는 각 플랫폼의 공식 패키지·업데이터를 쓰고 전역 스킬을 갱신한다. 열린 작업은 게이트웨이가 보호한다. */
+ * 업데이트는 각 플랫폼의 공식 패키지·업데이터를 쓰고 전역 스킬을 갱신한다. 열린 작업은 게이트웨이가 보호한다.
+ * jarvis 업데이트는 그 게이트웨이가 origin main 을 fast-forward 로 받고, 코드가 바뀌었으면 스스로 재시작한다. */
 (function(){
  "use strict";
  const P=window.JARVIS,{html,fmt}=P,$=s=>document.querySelector(s);
@@ -66,11 +67,11 @@
   const al=d.alerts||{};
   // 제목은 기기가 보고한 호스트명(수집 전이면 설정 id)
   return html`<header class="tile-head"><h3 class="tile-title">${d.host||d.id}</h3><span class="badge" data-tone="${tone}">${state}</span><span class="tile-aside">${d.model||""}</span></header>
-<p class="dev-stats">CPU ${fmt.pct(d.cpu_pct)} · 메모리 ${fmt.pct(d.mem_pct)} · 디스크 ${fmt.pct(d.disk_pct)} · 경보 ${al.crit??"–"}/${al.warn??"–"} · ${d.ok_at?fmt.ago(d.ok_at,now)+" 수집":"수집 전"}${d.error?" · "+d.error:""}</p>`;
+<p class="dev-stats">CPU ${fmt.pct(d.cpu_pct)} · 메모리 ${fmt.pct(d.mem_pct)} · 디스크 ${fmt.pct(d.disk_pct)} · 경보 ${al.crit??"–"}/${al.warn??"–"} · ${d.ok_at?fmt.ago(d.ok_at,now)+" 수집":"수집 전"}${d.commit?" · jarvis "+d.commit:""}${d.error?" · "+d.error:""}</p>`;
  }
  function tile(d){
   const el=document.createElement("article");el.className="tile span-6 m-6 dev-tile";el.dataset.dev=d.id;
-  P.render(el,html`<div class="dev-head"></div><p class="dev-acts"><button type="button" class="seg-action" data-orca="${d.id}">페어링</button><button type="button" class="seg-action" data-orca-check="${d.id}">업데이트 확인</button><button type="button" class="seg-action" data-orca-update="${d.id}">업데이트</button><a class="seg-action" href="${"/?device="+encodeURIComponent(d.id)}">상세 보기</a><span class="dev-note" role="status"></span></p><div class="dev-orca"></div>`);
+  P.render(el,html`<div class="dev-head"></div><p class="dev-acts"><button type="button" class="seg-action" data-orca="${d.id}">페어링</button><button type="button" class="seg-action" data-orca-check="${d.id}">Orca 업데이트 확인</button><button type="button" class="seg-action" data-orca-update="${d.id}">Orca 업데이트</button><button type="button" class="seg-action" data-jarvis-update="${d.id}">jarvis 업데이트</button><a class="seg-action" href="${"/?device="+encodeURIComponent(d.id)}">상세 보기</a><span class="dev-note" role="status"></span></p><div class="dev-orca"></div>`);
   return el;
  }
  async function load(){
@@ -82,7 +83,7 @@
    d=await r.json();
   }catch(e){setTimeout(load,30000);return;}
   const first=sec.hidden;sec.hidden=false;showNav(true);
-  const all=$("#devUpdateAll");if(all)all.hidden=false;
+  for(const b of [$("#devUpdateAll"),$("#devJarvisAll")])if(b)b.hidden=false;
  if(first&&location.hash==="#devices")sec.scrollIntoView(); // 첫 렌더의 앵커 이동은 섹션이 숨어 있을 때 지나갔다
   for(const x of d.devices){
    if(!tiles.has(x.id)){const t=tile(x);tiles.set(x.id,t);list.append(t);}
@@ -136,6 +137,16 @@
    finally{if(!keep)up.disabled=false;}
    return;
   }
+  const ju=e.target.closest("[data-jarvis-update]");
+  if(ju){
+   const id=ju.dataset.jarvisUpdate,note=tiles.get(id).querySelector(".dev-note");
+   if(!confirm(`${id} 에서 jarvis 를 GitHub main 으로 받습니다. 코드가 바뀌면 그 기기 jarvis 가 몇 초 동안 재시작됩니다. 계속할까요?`))return;
+   ju.disabled=true;note.textContent="받는 중…";note.classList.remove("dev-err");
+   try{note.textContent=jarvisText(await jarvisUpdate("/api/devices/"+encodeURIComponent(id)+"/jarvis/update"));}
+   catch(err){note.textContent=err.message||String(err);note.classList.add("dev-err");}
+   finally{ju.disabled=false;}
+   return;
+  }
   const b=e.target.closest("[data-orca]");if(!b)return;
   b.disabled=true;
   await loadOrca(b.dataset.orca);
@@ -152,6 +163,29 @@
    return o;
   }catch(err){P.render(t.querySelector(".dev-orca"),"");note.textContent=err.message||String(err);note.classList.add("dev-err");return null;}
  }
+ async function jarvisUpdate(url){
+  const r=await fetch(url,{method:"POST",headers:{"X-Jarvis-Action":"jarvis-update"},cache:"no-store"}),o=await r.json().catch(()=>({})); // 재시작 중인 core 앞의 Caddy 는 HTML 502 를 준다
+  if(!r.ok)throw new Error(o.error||("HTTP "+r.status));
+  return o;
+ }
+ const jarvisText=o=>o.restart?`jarvis ${o.running||"?"} → ${o.to} · 재시작합니다`:`jarvis ${o.to} 최신`;
+ const jAll=$("#devJarvisAll");
+ if(jAll)jAll.addEventListener("click",async()=>{
+  const note=$("#devUpdateNote");
+  if(!confirm("목록의 모든 기기에서 jarvis 를 GitHub main 으로 받고, 코드가 바뀐 기기는 jarvis 를 재시작합니다. 이 core 는 마지막에 재시작합니다. 계속할까요?"))return;
+  jAll.disabled=true;note.textContent="모든 기기에서 받는 중…";note.classList.remove("dev-err");
+  try{
+   const o=await jarvisUpdate("/api/devices/jarvis/update"),rows=o.devices||[];
+   for(const x of rows){
+    const n=tiles.get(x.id)?.querySelector(".dev-note");
+    if(n){n.textContent=x.status===200?jarvisText(x):(x.error||("HTTP "+x.status));n.classList.toggle("dev-err",x.status!==200);}
+   }
+   const bad=rows.filter(x=>x.status!==200);
+   note.textContent=`jarvis: ${rows.length-bad.length}대 완료`+(bad.length?" · 실패 "+bad.map(x=>x.id).join(", "):"");
+   note.classList.toggle("dev-err",bad.length>0);
+  }catch(err){note.textContent=err.message||String(err);note.classList.add("dev-err");}
+  jAll.disabled=false;
+ });
  const allBtn=$("#devUpdateAll"), allNote=$("#devUpdateNote");
  if(allBtn)allBtn.addEventListener("click",async()=>{
   if(!confirm("목록의 모든 기기 Orca 와 스킬을 갱신합니다. 기존 터미널의 보존 가능성을 확인하며, 네이티브 채팅 작업이나 확인 불가능한 세션이 있는 기기는 보류합니다. 계속할까요?"))return;

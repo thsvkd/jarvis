@@ -20,7 +20,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from . import __version__, config, orca, orca_issue, orca_update, orca_usage
+from . import __version__, config, orca, orca_issue, orca_update, orca_usage, self_update
 from .core import why
 from .util import client_kind
 
@@ -224,7 +224,7 @@ def make_handler(collector, core=None):
                 return self._text(421, "misdirected request", head)
             # 맞춤 헤더를 요구해 다른 사이트가 브라우저로 대신 보내지 못하게 한다(맞춤 헤더가 있으면 교차 출처 요청은
             # preflight 가 필요한데, 이 서버는 OPTIONS 에 답하지 않는다).
-            if post and self.headers.get("X-Jarvis-Action") not in ("orca-issue", "orca-update"):
+            if post and self.headers.get("X-Jarvis-Action") not in ("orca-issue", "orca-update", "jarvis-update"):
                 return self._json({"error": "X-Jarvis-Action 헤더가 필요합니다"}, head, 403)
             u = urlsplit(self.path)
             path = unquote(u.path)
@@ -253,6 +253,25 @@ def make_handler(collector, core=None):
                         if not self._trusted(config.CORE):
                             return self._json({"error": "core 로 지정한 기기만 부를 수 있습니다"}, head, 403)
                         code, body = orca_update.start()
+                        return self._json(body, head, code)
+                    if path == "/api/jarvis/update":
+                        if not self._trusted(config.CORE):
+                            return self._json({"error": "core 로 지정한 기기만 부를 수 있습니다"}, head, 403)
+                        code, body = self_update.start()
+                        if body.get("restart"):  # 응답을 보낸 뒤 끝낸다(shutdown 은 이 요청 스레드에서 부르면 안 된다)
+                            threading.Thread(target=self_update.restart, args=(self.server,), daemon=True).start()
+                        return self._json(body, head, code)
+                    if core and path == "/api/devices/jarvis/update":
+                        if not self._trusted(config.VIEWERS, config.PROXIES):
+                            return self._json({"error": "업데이트는 허용된 기기(viewers)에서만 할 수 있습니다"}, head, 403)
+                        return self._json({"devices": core.jarvis_update_all()}, head, 200)
+                    if core and path.startswith("/api/devices/") and path.endswith("/jarvis/update"):
+                        dev = path.split("/")[3]
+                        if path.count("/") != 5 or not core.has(dev):
+                            return self._json({"error": "not found"}, head, 404)
+                        if not self._trusted(config.VIEWERS, config.PROXIES):
+                            return self._json({"error": "업데이트는 허용된 기기(viewers)에서만 할 수 있습니다"}, head, 403)
+                        code, body = core.jarvis_update(dev)
                         return self._json(body, head, code)
                     if core and path == "/api/devices/orca/update":
                         if not self._trusted(config.VIEWERS, config.PROXIES):

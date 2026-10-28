@@ -69,8 +69,8 @@ def restart_helper(pid):
             f"Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{CommandLine='{inner}'}}"]
 
 
-def _restart(icon):
-    """아이콘을 내리면 main 이 서버를 닫고 끝난다. macOS 는 launchd(KeepAlive)가 곧 다시 띄운다.
+def respawn():
+    """이 프로세스가 끝난 뒤 다시 뜨게 한다. systemd·launchd(KeepAlive)·pm2 는 스스로 다시 띄운다.
     Windows 예약 작업은 끝난 뒤 5분 반복 트리거까지 기다리므로, 이 프로세스가 끝나면 작업을 다시 시작하는 도우미를 남긴다.
     (os.execv 는 쓰지 않는다: pyw 가 sys.argv 를 바꿔 두었고, Windows 에서는 작업 밖의 두 번째 인스턴스가 된다.)"""
     if sys.platform == "win32":
@@ -78,7 +78,12 @@ def _restart(icon):
             subprocess.run(restart_helper(os.getpid()), creationflags=subprocess.CREATE_NO_WINDOW, timeout=30,
                            capture_output=True)
         except (OSError, subprocess.SubprocessError) as e:  # 도우미 없이도 5분 반복 트리거가 다시 띄운다
-            print(f"[jarvis] 트레이: 재시작 도우미 실패, 반복 트리거를 기다린다: {e}", flush=True)
+            print(f"[jarvis] 재시작 도우미 실패, 반복 트리거를 기다린다: {e}", flush=True)
+
+
+def _restart(icon):
+    """아이콘을 내리면 main 이 서버를 닫고 끝난다."""
+    respawn()
     icon.stop()
 
 
