@@ -227,8 +227,10 @@ def build(raw):
         host = host.strip("[]")
         port = int(port) if port.isdigit() else None
         if host in ("host.docker.internal", "172.17.0.1", "localhost", "127.0.0.1") and port:
+            # 루프백 리스너는 localhost 로 다이얼할 때만 닿는다(host 네트워크 Caddy → ssh -L 터널 등)
+            scopes = ("docker", "all", "lan", "loopback") if host in ("localhost", "127.0.0.1") else ("docker", "all", "lan")
             for l in listeners:
-                if l["proto"] == "tcp" and l["port"] == port and l["scope"] in ("docker", "all", "lan"):
+                if l["proto"] == "tcp" and l["port"] == port and l["scope"] in scopes:
                     if l.get("pid") in pm2_by_pid:
                         return _rt_pm2(pm2_by_pid[l["pid"]])
                     if l["owner_kind"] == "container" and l["owner"] in ctr_by_name:

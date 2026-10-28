@@ -42,6 +42,23 @@ class Build(unittest.TestCase):
             for k in ("id", "status", "probes", "runtime"):
                 self.assertIn(k, s)
 
+    def test_loopback_upstream_resolves(self):
+        """host 네트워크 Caddy → 127.0.0.1 의 ssh -L 터널(루프백 리스너)도 실행 주체로 잡는다. 도커 경유 다이얼은 루프백에 닿지 않는다."""
+        now = time.time()
+        raw = {
+            "units": [unit("hermes-tunnel.service", 77)],
+            "listeners": [{"proto": "tcp", "port": 29119, "addrs": ["127.0.0.1"], "process": "ssh", "pid": 77,
+                           "owner_kind": "unit", "owner": "hermes-tunnel.service", "scope": "loopback",
+                           "reach": ["local"], "cwd": None}],
+            "caddy": {"routes": {h: {"http": False, "upstreams": [f"{dial}:29119"], "header_inject": None, "listen": [":443"]}
+                                 for h, dial in (("a.example", "127.0.0.1"), ("b.example", "host.docker.internal"))}},
+            "collected_at": {"docker": now}, "errors": {}, "self": {"started_at": now},
+        }
+        ids = {s["id"]: s for s in model.build(raw)["services"]}
+        self.assertEqual((ids["route:a.example"]["runtime"] or {}).get("name"), "hermes-tunnel.service")
+        self.assertEqual(ids["route:a.example"]["status"], "up")
+        self.assertIsNone(ids["route:b.example"]["runtime"])
+
     def test_self_upstream(self):
         """다른 기기의 :9300(pit5 Caddy → s2 core)은 이 기기 jarvis 라우트가 아니다."""
         from jarvis.util import self_upstream
