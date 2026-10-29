@@ -247,6 +247,11 @@ class Core:
                                      data=b"", method="POST", headers={"X-Jarvis-Action": "usage-login"})
         return self._ask(i, req, LOGIN_TIMEOUT_S, "다시 로그인을")
 
+    def usage_login_status(self, i, provider):
+        """다시 로그인 창이 완료를 알아채도록 그 게이트웨이 GET /api/orca/login 을 전달한다."""
+        req = urllib.request.Request(self.devices[i]["url"] + "/api/orca/login?provider=" + urllib.parse.quote(provider))
+        return self._ask(i, req, TIMEOUT_S, "다시 로그인을")
+
     def usage_all(self, force=False):
         """모든 기기의 사용량을 동시에 묻는다. 한 대가 느리거나 실패해도 나머지는 그대로 준다."""
         ids = list(self.devices)

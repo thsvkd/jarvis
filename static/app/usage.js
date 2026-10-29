@@ -1,6 +1,6 @@
 /* core 홈의 AI 구독 사용량(설정 devices 가 있는 jarvis 에서만 보인다). 디자인 랩 04 의 C(한도 레이더) + 자세히 모드.
  * /api/devices/usage 가 기기마다 게이트웨이 /api/orca/usage(Orca accounts.list 정규화)를 모아 준다. 모아 두지 않고 열 때마다 묻는다.
- * 간략히: 기기 × 프로바이더 칸에 최대 사용률, 누르면 계정별 상세. 자세히: 칸 안에 계정마다 한도 창을 모두 펼친다(행이 길어진다).
+ * 간략히: 기기 × 프로바이더 칸에 계정별 최대 사용률의 평균, 누르면 계정별 상세. 자세히: 칸 안에 계정마다 한도 창을 모두 펼친다(행이 길어진다).
  * 보기 방식은 localStorage jarvis.usage.mode 에 둔다. */
 (function(){
  "use strict";
@@ -24,6 +24,15 @@
  };
  const at=ts=>ts?new Date(ts*1000).toLocaleString("ko-KR",{month:"numeric",day:"numeric",weekday:"short",hour:"2-digit",minute:"2-digit",hour12:false})+" 리셋":"";
  const isErr=a=>a.status==="error";
+ // 확인 실패의 종류. 원문(프로바이더 응답·스택)은 접어 두고 종류와 할 일만 보인다
+ const KINDS=[
+  ["auth","로그인 만료","로그인이 만료되었거나 풀렸습니다. 다시 로그인하세요.",/delegated-refresh|auth|401|unauthori[sz]ed|sign[- ]?in|log ?in|token|credential/i],
+  ["rate","요청 제한","프로바이더가 잠시 요청을 막았습니다. 잠시 뒤 새로고침하세요.",/429|rate.?limit|too many/i],
+  ["perm","권한 문제","jarvis 가 Orca 에 접근할 권한이 없습니다.",/관리자 권한|permission|denied|403/i],
+  ["net","네트워크 오류","프로바이더에 닿지 못했습니다. 잠시 뒤 새로고침하세요.",/time.?out|timed out|network|connect|ENOTFOUND|EAI_|DNS|fetch failed|socket/i],
+  ["server","프로바이더 오류","프로바이더 서버가 오류를 냈습니다. 잠시 뒤 새로고침하세요.",/\b5\d\d\b|server error|unavailable|bad gateway/i],
+ ];
+ const kind=a=>{const t=(a.failure||"")+" "+(a.error||"");return KINDS.find(k=>k[3].test(t))||["unknown","알 수 없는 오류","사용량을 읽지 못했습니다.",null];};
  const peak=a=>{const v=[...a.windows,...a.buckets].map(w=>w.used);return isErr(a)||!v.length?null:Math.max(...v);};
  const isHot=a=>isErr(a)||a.attention===true||(peak(a)??0)>=75; // attention: 재로그인 등 사람이 손봐야 다시 읽힌다
  // 같은 구독 계정(이메일·조직)은 어느 기기에서 보든 한도가 같다. 이메일이 없는 '기본 계정'은 기기마다 따로 센다.
@@ -74,19 +83,19 @@
   return "";
  }
  function body(a){
-  if(isErr(a))return html`<p class="ul-err">${a.error||"사용량을 읽지 못했습니다."}</p>`;
+  if(isErr(a)){const k=kind(a);return html`<p class="ul-err">${k[2]}</p>${a.error?html`<details class="ul-raw"><summary>원문 보기</summary><pre>${a.error}</pre></details>`:""}`;}
   const note=a.note?html`<p class="${a.attention?"ul-err":"ul-note"}">${a.note}</p>`:""; // 마지막으로 읽은 값에 붙는 이유
   if(!a.windows.length&&!a.buckets.length)return note||html`<p class="ul-muted">${a.status==="fetching"?"사용량을 읽는 중입니다.":"아직 사용량을 읽지 않았습니다."}</p>`;
   return html`${note}<div class="ul-wins">${a.windows.map(win)}</div>${a.buckets.length?html`<p class="ul-extra">모델별 · ${a.buckets.map((b,i)=>html`${i?" · ":""}${b.name} <b>${pct(b.used)}</b>`)}</p>`:""}${extra(a.extra)}${a.credits?html`<p class="ul-extra">한도 리셋 크레딧 ${a.credits}개</p>`:""}`;
  }
- const head=a=>html`<div class="ul-ah"><b class="ul-email">${a.label}</b>${a.plan?html`<span class="ul-plan">${a.plan}</span>`:""}${a.org?html`<span class="ul-plan">${a.org}</span>`:""}${a.active?html`<span class="badge" data-tone="info">사용 중</span>`:""}${isErr(a)||a.attention?html`<span class="badge" data-tone="crit">${a.attention?"조치 필요":"확인 실패"}</span>`:""}</div>`;
- const relog=(d,id)=>html`<button type="button" class="seg-action" data-login="${d.id}" data-lp="${id}">${LOGIN[id]} 다시 로그인</button>`;
- const acct=(a,d,p)=>html`<div class="ul-acct">${head(a)}${body(a)}${(isErr(a)||a.attention)&&(d.logins||[]).includes(p.id)?relog(d,p.id):""}${a.updated_at?html`<p class="ul-age">${P.fmt.ago(a.updated_at)} 확인</p>`:""}</div>`;
+ const head=a=>html`<div class="ul-ah"><b class="ul-email">${a.label}</b>${a.plan?html`<span class="ul-plan">${a.plan}</span>`:""}${a.org?html`<span class="ul-plan">${a.org}</span>`:""}${a.active?html`<span class="badge" data-tone="info">사용 중</span>`:""}${isErr(a)||a.attention?html`<span class="badge" data-tone="crit">${isErr(a)?kind(a)[1]:"조치 필요"}</span>`:""}</div>`;
+ const relog=(d,id,again=true)=>html`<button type="button" class="seg-action" data-login="${d.id}" data-lp="${id}">${LOGIN[id]} ${again?"다시 로그인":"로그인"}</button>`;
+ const acct=(a,d,p)=>html`<div class="ul-acct">${head(a)}${body(a)}${(isErr(a)&&kind(a)[0]==="auth"||a.attention)&&(d.logins||[]).includes(p.id)?relog(d,p.id):""}${a.updated_at?html`<p class="ul-age">${P.fmt.ago(a.updated_at)} 확인</p>`:""}</div>`;
  const badge=d=>{const [t,l]=state(d);return html`<span class="badge" data-tone="${t}">${l}</span>`;};
  function devMeta(d){
   const busy=S.busy.has(d.id);
   if((d.status===200&&d.installed===false&&!(d.providers||[]).length)||d.status===501)return ""; // Orca·cswap 모두 없거나 갱신 전 jarvis 는 다시 물어도 같다
-  return html`<p class="ul-meta">${d.fetched_at?html`<span>${P.fmt.ago(d.fetched_at)} 수집</span>`:""}<button type="button" class="seg-action ul-ref" data-refresh="${d.id}" ${busy?"disabled":""}>${busy?"읽는 중…":"새로고침"}</button>${(d.logins||[]).filter(id=>!(d.providers||[]).some(p=>p.id===id)).map(id=>relog(d,id))}</p>`;
+  return html`<p class="ul-meta">${d.fetched_at?html`<span>${P.fmt.ago(d.fetched_at)} 수집</span>`:""}<button type="button" class="seg-action ul-ref" data-refresh="${d.id}" ${busy?"disabled":""}>${busy?"읽는 중…":"새로고침"}</button>${(d.logins||[]).filter(id=>!(d.providers||[]).some(p=>p.id===id)).map(id=>relog(d,id,false))}</p>`;
  }
 
  // ---------------------------------------------------------------- 화면
@@ -103,10 +112,11 @@
    const p=provs(d).find(p=>p.id===c.id),list=p?shown(d,p):[];
    if(!list.length)return html`<td data-label="${c.name}" class="ul-nil">–</td>`;
    if(S.mode==="full")return html`<td data-label="${c.name}" class="ul-full">${list.map(a=>acct(a,d,p))}</td>`;
-   const err=list.some(isErr),act=list.some(a=>a.attention),pk=list.map(peak).filter(v=>v!=null),mx=pk.length?Math.max(...pk):null;
-   return html`<td data-label="${c.name}"><button type="button" class="ul-cell" data-cell="${d.id+":"+c.id}" data-tone="${err||act?"crit":tone(mx)}"><b>${err&&mx==null?"실패":pct(mx)}</b><span>계정 ${list.length}${err?" · 실패 포함":""}${act?" · 조치 필요":""}</span></button></td>`;
+   // 칸 값은 계정마다 가장 찬 한도의 평균이다(읽지 못한 계정은 빼고 센다)
+   const err=list.some(isErr),act=list.some(a=>a.attention),pk=list.map(peak).filter(v=>v!=null),avg=pk.length?pk.reduce((x,y)=>x+y,0)/pk.length:null;
+   return html`<td data-label="${c.name}"><button type="button" class="ul-cell" data-cell="${d.id+":"+c.id}" data-tone="${err||act?"crit":tone(avg)}"><b>${err&&avg==null?kind(list.find(isErr))[1]:pct(avg)}</b><span>${pk.length>1?"평균 · ":""}계정 ${list.length}${err&&avg!=null?" · "+kind(list.find(isErr))[1]+" 포함":""}${act?" · 조치 필요":""}</span></button></td>`;
   };
-  return html`${kpi}${soon}<div class="tile ul-mx" data-mode="${S.mode}"><table><thead><tr><th scope="col">기기</th>${cols.map(c=>html`<th scope="col">${dot(c.id)}${c.name}</th>`)}</tr></thead><tbody>${rows.map(d=>html`<tr aria-busy="${String(S.busy.has(d.id))}"><th scope="row"><b>${d.host||d.id}</b> ${badge(d)}${devMeta(d)}${state(d)[2]?html`<span class="ul-muted">${state(d)[2]}</span>`:ok(d)&&!(d.providers||[]).length?html`<span class="ul-muted">로그인한 구독 계정이 없습니다.</span>`:""}${[["cswap",d.cswap_error],["caam",d.caam_error]].filter(x=>x[1]).map(([n,e])=>html`<span class="ul-muted">${e.includes(n)?"":n+": "}${e}</span>`)}</th>${cols.map(c=>cell(d,c))}</tr>`)}</tbody></table></div>`;
+  return html`${kpi}${soon}<div class="tile ul-mx" data-mode="${S.mode}"><table style="${"--n:"+cols.length}"><thead><tr><th scope="col">기기</th>${cols.map(c=>html`<th scope="col">${dot(c.id)}${c.name}</th>`)}</tr></thead><tbody>${rows.map(d=>html`<tr aria-busy="${String(S.busy.has(d.id))}"><th scope="row"><b>${d.host||d.id}</b> ${badge(d)}${devMeta(d)}${state(d)[2]?html`<span class="ul-muted">${state(d)[2]}</span>`:ok(d)&&!(d.providers||[]).length?html`<span class="ul-muted">로그인한 구독 계정이 없습니다.</span>`:""}${[["cswap",d.cswap_error],["caam",d.caam_error]].filter(x=>x[1]).map(([n,e])=>html`<span class="ul-muted">${e.includes(n)?"":n+": "}${e}</span>`)}</th>${cols.map(c=>cell(d,c))}</tr>`)}</tbody></table></div>`;
  }
  const dlg=$("#ulDlg");
  function dlgDraw(){
@@ -114,7 +124,7 @@
    const L=S.login,d=S.devs.find(x=>x.id===L.dev);
    $("#ulDlgT").textContent=(d?d.host||d.id:L.dev)+" · "+LOGIN[L.prov]+" 로그인";
    P.render($("#ulDlgB"),L.err?html`<p class="ul-err">${L.err}</p>`:!L.url?html`<p class="ul-muted">로그인 URL 을 받는 중입니다…</p>`
-    :html`<div class="ul-login"><p>아래 주소를 열어 로그인하고 일회용 코드를 넣으세요. 코드는 ${new Date(L.expires_at*1000).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",hour12:false})}까지 유효합니다.</p><p><a href="${L.url}" target="_blank" rel="noopener noreferrer">${L.url}</a></p><p class="ul-code">${L.code}</p><p class="ul-muted">이 코드는 이 기기에서 방금 시작한 로그인용입니다. 로그인을 마친 뒤 새로고침을 누르세요.</p><button type="button" class="seg-action" data-refresh="${L.dev}">새로고침</button></div>`);
+    :html`<div class="ul-login"><p>아래 주소를 열어 로그인하고 일회용 코드를 넣으세요. 코드는 ${new Date(L.expires_at*1000).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",hour12:false})}까지 유효합니다.</p><p><a href="${L.url}" target="_blank" rel="noopener noreferrer">${L.url}</a></p><p class="ul-code">${L.code}</p><p class="ul-muted">로그인을 마치면 이 창이 저절로 닫히고 사용량을 다시 읽습니다.</p></div>`);
    return;
   }
   if(!S.dlg)return;
@@ -176,7 +186,18 @@
    const r=await fetch("/api/devices/"+encodeURIComponent(dev)+"/login?provider="+prov,{method:"POST",cache:"no-store",headers:{"X-Jarvis-Action":"usage-login"}}),o=await r.json();
    if(r.ok)Object.assign(L,{url:o.url,code:o.code,expires_at:o.expires_at});else L.err=o.error||"HTTP "+r.status;
   }catch(e){L.err=e.message||String(e);}
-  if(S.login===L)dlgDraw();
+  if(S.login!==L)return;
+  dlgDraw();
+  // 로그인을 마치면(CLI 가 자격을 저장하고 끝나면) 창을 닫고 그 기기를 다시 읽는다
+  while(!L.err&&S.login===L){
+   await new Promise(r=>setTimeout(r,3000));
+   if(S.login!==L)return;
+   try{
+    const r=await fetch("/api/devices/"+encodeURIComponent(dev)+"/login?provider="+prov,{cache:"no-store"}),o=await r.json();
+    if(o.state==="done"){dlg.close();note(LOGIN[prov]+" 로그인을 확인했습니다");refreshOne(dev);return;}
+    if(o.state==="failed"||o.state==="none"){L.err="로그인이 끝나지 않았습니다(코드가 만료되었거나 취소되었습니다). 다시 시도하세요.";dlgDraw();}
+   }catch(e){} // 일시적인 실패는 다음 차례에 다시 묻는다
+  }
  }
  sec.addEventListener("click",e=>{
   const t=e.target.closest("button");if(!t)return;

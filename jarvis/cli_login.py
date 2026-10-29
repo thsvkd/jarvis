@@ -81,6 +81,17 @@ def start(provider):
     return 502, {"error": f"{provider} login 이 URL·코드를 주지 않았습니다: " + job["out"].strip()[-300:]}
 
 
+def status(provider):
+    """로그인 진행 상태: none(시작 안 함)·waiting(코드 입력을 기다림)·done(자격 저장)·failed(실패·코드 만료)."""
+    job = _jobs.get(provider)
+    if not job:
+        return {"state": "none"}
+    rc = job["proc"].poll()
+    if rc is None:
+        return {"state": "waiting" if _alive(job) else "failed"}
+    return {"state": "done" if rc == 0 else "failed"}
+
+
 def refresh_grok():
     """Orca 가 Grok 을 delegated-refresh-required 로 볼 때 뒤에서 grok 을 한 번 돌려 토큰을 갱신한다(REFRESH_S 에 한 번)."""
     global _grok_at
