@@ -245,9 +245,11 @@ class Core:
         ids = list(self.devices)
 
         def one(i):
-            code, body = self.usage(i, force)
             with self.lock:
                 host = (self.state[i]["summary"] or {}).get("host")
+                err = self.state[i]["fails"] and self.state[i]["error"]
+            # 폴링이 실패 중인 기기(꺼진 tailnet 피어)는 묻지 않는다. 물으면 70초를 기다려 섹션 전체가 늦게 뜬다
+            code, body = (502, {"error": f"{i} 에 닿지 못했습니다: {err}"}) if err else self.usage(i, force)
             return {**(body if isinstance(body, dict) else {"error": str(body)}), "id": i, "host": host, "status": code}
 
         with ThreadPoolExecutor(max_workers=max(1, min(16, len(ids)))) as pool:

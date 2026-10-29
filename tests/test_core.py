@@ -206,6 +206,8 @@ class RouteTest(unittest.TestCase):
         st, o = self.get("/api/devices/gw/usage?refresh=1", {"X-Jarvis-Action": "usage-refresh"})
         self.assertEqual((st, o["refreshed"]), (200, True))
         self.assertTrue(self.get("/api/devices/usage?refresh=1", {"X-Jarvis-Action": "usage-refresh"})[1]["devices"][0]["refreshed"])
+        self.core.state["gw"].update(fails=1, error="timed out")  # 폴링 실패 중이면 묻지 않고 바로 502
+        self.assertEqual(self.get("/api/devices/usage")[1]["devices"][0]["status"], 502)
 
     def test_viewers(self):
         cls = server.make_handler(FakeCollector(), self.core)
