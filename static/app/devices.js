@@ -168,7 +168,7 @@
   if(!r.ok)throw new Error(o.error||("HTTP "+r.status));
   return o;
  }
- const jarvisText=o=>o.restart?`jarvis ${o.running||"?"} → ${o.to} · 재시작합니다`:`jarvis ${o.to} 최신`;
+ const jarvisText=o=>o.restart?`jarvis v${o.running||"?"} → v${o.to} · 재시작합니다`:`jarvis v${o.to} 최신`;
  const jAll=$("#devJarvisAll");
  if(jAll)jAll.addEventListener("click",async()=>{
   const note=$("#devUpdateNote");

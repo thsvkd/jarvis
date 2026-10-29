@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 EVERY_S = 10
 TIMEOUT_S = 5  # 연결·읽기 한 번
 CHECK_TIMEOUT_S = 70  # 업데이트 확인은 게이트웨이가 릴리스 매니페스트를 받느라 60초까지 쓴다
-PULL_TIMEOUT_S = 100  # jarvis 갱신은 게이트웨이가 git pull 을 90초까지 기다린다
+PULL_TIMEOUT_S = 150  # jarvis 갱신은 게이트웨이가 manifest(30초)와 묶음(60초, 소켓 동작마다)을 받는다
 USAGE_TIMEOUT_S = 70  # 사용량 새로고침은 게이트웨이 Orca 가 계정마다 프로바이더 API 를 부른다(45초 + 보관값 12초)
 LOGIN_TIMEOUT_S = 40  # 게이트웨이가 CLI 의 URL·코드를 30초까지 기다린다
 SWITCH_TIMEOUT_S = 40  # 게이트웨이가 cswap switch 를 30초까지 기다린다

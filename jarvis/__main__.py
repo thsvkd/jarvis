@@ -1,17 +1,41 @@
-"""python3 -m jarvis"""
+"""python3 -m jarvis · python3 -m jarvis update [--check]"""
 
 import os
 import signal
 import sys
 import threading
+import time
 
-from . import config, orca_issue, orca_update, tray
-from .collector import Collector
-from .core import Core, devices_from
-from .server import serve
+from . import __version__, launch
+
+launch.run(__version__)  # 받아 둔 새 릴리스가 있으면 그쪽으로 넘어가고 여기로 돌아오지 않는다
+
+from . import config, orca_issue, orca_update, self_update, tray  # noqa: E402
+from .collector import Collector  # noqa: E402
+from .core import Core, devices_from  # noqa: E402
+from .server import serve  # noqa: E402
+
+
+def _confirm():
+    """HEALTHY_S 동안 돌면 새 릴리스를 확정한다. 실패하면(Windows 백신이 파일을 잡는 등) 될 때까지 다시 한다:
+    확정하지 못하면 평범한 재시작 몇 번에 멀쩡한 릴리스가 되돌려진다."""
+    time.sleep(launch.HEALTHY_S)
+    while True:
+        try:
+            with self_update._lock:  # 버튼이 새 버전을 적는 중에 옛 값을 덮어쓰지 않게
+                launch.confirm()
+            return
+        except Exception as e:
+            print(f"[jarvis] 릴리스 확정 실패, 1분 뒤 다시: {e}", flush=True)
+            time.sleep(60)
 
 
 def main():
+    if sys.argv[1:2] == ["update"]:
+        return self_update.cli(sys.argv[2:])
+    if sys.argv[1:2] == ["--version"]:
+        print(f"jarvis {__version__}" + (" (릴리스)" if launch.release() else " (저장소)"))
+        return 0
     sigs = {signal.SIGTERM, signal.SIGINT}
     masked = os.environ.get("JARVIS_TRAY") == "1" and hasattr(signal, "pthread_sigmask")
     if masked:
@@ -30,6 +54,7 @@ def main():
     if core:
         core.start()
     httpd = serve(col, core)
+    threading.Thread(target=_confirm, name="jarvis-confirm", daemon=True).start()
 
     def stop(*_):
         threading.Thread(target=httpd.shutdown, daemon=True).start()

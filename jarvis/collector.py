@@ -30,6 +30,9 @@ def _listener_shape(rows):
 
 def _git_commit():
     """배포된 코드의 커밋(짧은 해시, 커밋 안 된 수정이 있으면 -dirty). 저장소가 아니면 None."""
+    from . import launch
+    if launch.release():  # 받은 릴리스는 저장소가 아니다(git 이 상위 폴더의 다른 저장소를 찾지 않게)
+        return None
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     from .util import run
     rc, out, _ = run(["git", "-C", root, "describe", "--always", "--dirty", "--abbrev=10"], timeout=5)

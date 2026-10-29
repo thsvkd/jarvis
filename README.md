@@ -1,9 +1,16 @@
 # Jarvis (옛 PIT5 Monitor)
 
 저장소: `~/Workspace/jarvis` (systemd 사용자 유닛 `jarvis` 의 WorkingDirectory).
-원본은 s2 의 이 저장소이고, 운영 기기는 GitHub main 을 받고 재시작만 한다. core 홈 기기 목록의 **jarvis 업데이트**(또는 **jarvis 모두 업데이트**)를 누르면
-각 기기가 `git pull --ff-only origin main` 을 하고, 코드가 바뀌었으면 스스로 끝나 서비스 관리자가 새 코드로 다시 띄운다(core 자신은 마지막).
-갈라졌거나 작업 트리 수정이 겹치면 받지 않고 실패를 알린다.
+원본은 s2 의 이 저장소이고, 운영 기기는 GitHub 릴리스를 받는다(`claude update` 와 같은 방식, `jarvis/self_update.py`·`jarvis/launch.py`).
+- 릴리스: s2 에서 `jarvis/__init__.py` 의 `__version__` 을 올려 커밋한 뒤 `python3 tools/release.py`. 태그 `v<버전>` 과
+  소스 묶음·`manifest.json`(버전·주소·SHA256)을 GitHub 릴리스에 올린다.
+- 갱신: core 홈 기기 목록의 **jarvis 업데이트**(또는 **jarvis 모두 업데이트**, core 자신은 마지막) 또는 그 기기에서 `python3 -m jarvis update`
+  (`--check` 는 확인만). 새 버전이면 묶음을 받아 SHA256 을 확인하고 `~/.local/share/jarvis/versions/<버전>`
+  (Windows `%LOCALAPPDATA%\jarvis\versions`)에 풀고 `current.json` 을 바꾼 뒤 스스로 끝난다. 자동 갱신은 없다.
+- 기동: 서비스는 그대로 저장소에서 `python3 -m jarvis` 를 띄우고, 런처가 받아 둔 릴리스가 저장소보다 새로우면 그 폴더의 코드로 넘어간다
+  (s2 처럼 저장소가 같거나 새로우면 저장소가 돈다). 새 릴리스가 60초를 못 버티고 세 번째로 뜨면 이전 버전(없으면 저장소)으로 되돌리고,
+  그 버전은 다음 릴리스가 나올 때까지 다시 받지 않는다. `python3 -m jarvis --version` 이 지금 쓰는 버전을 보인다.
+- 의존 패키지(psutil 등)나 서비스 정의(plist·pyw·유닛)가 바뀌는 릴리스는 버튼만으로 반영되지 않는다. 그 기기에서 직접 손본다.
 
 기기 한 대를 통째로 보는 읽기 전용 대시보드. Python 수집기(표준 라이브러리 + psutil) + 정적 HTML(홈·네트워크 맵).
 Linux(지금은 pit5 = Raspberry Pi 5 에서 운영)와 macOS(Mac Studio 로 옮길 예정)에서 같은 코드로 돈다.
@@ -221,7 +228,7 @@ Windows 는 게이트웨이로만 돈다: Orca 데스크톱 앱(`%APPDATA%\orca`
 서비스 관리자·Docker·Caddy 수집은 없다. SSH 세션에서 띄운 프로세스는 세션이 끝나면 죽으므로 예약 작업(로그온 시)으로 돌린다.
 
 ```powershell
-# 저장소: git clone https://github.com/thsvkd/jarvis.git (갱신은 core 의 jarvis 업데이트 버튼. git 이 없으면 버튼이 실패를 알린다)
+# 저장소: git clone https://github.com/thsvkd/jarvis.git (갱신은 core 의 jarvis 업데이트 버튼이 GitHub 릴리스를 받는다)
 winget install -e --id Python.Python.3.13 --scope user          # python 3.11+ (WindowsApps 의 python.exe 는 안내용 껍데기)
 cd $env:USERPROFILE\Workspace\jarvis
 powershell -ExecutionPolicy Bypass -File deploy\install-windows.ps1 -Python "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe"

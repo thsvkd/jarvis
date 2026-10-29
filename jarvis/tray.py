@@ -14,30 +14,11 @@ import threading
 import time
 import webbrowser
 
-from . import config
+from . import __version__, config
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG = (os.path.join(os.environ.get("LOCALAPPDATA") or REPO, "jarvis", "jarvis.log") if sys.platform == "win32"
        else os.path.expanduser("~/Library/Logs/jarvis.log"))  # jarvis-win.pyw·jarvis.plist 가 출력을 보내는 곳
-
-
-def commit(repo=REPO):
-    """작업 트리 HEAD 의 짧은 해시. git 이 없는 Windows 도 있어 .git 을 직접 읽는다."""
-    g = os.path.join(repo, ".git")
-    try:
-        with open(os.path.join(g, "HEAD")) as f:
-            head = f.read().strip()
-        if not head.startswith("ref: "):
-            return head[:7]
-        ref = head[5:]
-        try:
-            with open(os.path.join(g, ref)) as f:
-                return f.read().strip()[:7]
-        except FileNotFoundError:  # gc 뒤에는 packed-refs 에만 있다
-            with open(os.path.join(g, "packed-refs")) as f:
-                return next((line[:7] for line in f if line.rstrip().endswith(" " + ref)), "")
-    except OSError:
-        return ""
 
 
 def error_text(err, n=50):
@@ -106,7 +87,7 @@ def make_icon():
 
         ok, bad = dot((46, 160, 67)), dot((230, 160, 30))  # 정상 초록, 설정 오류 호박색
         status = " · ".join(x for x in (socket.gethostname().split(".")[0],
-                                        datetime.datetime.now().strftime("%m/%d %H:%M 기동"), commit()) if x)
+                                        datetime.datetime.now().strftime("%m/%d %H:%M 기동"), "v" + __version__) if x)
         url = f"http://localhost:{config.PORT}/"
         # ponytail: core 도 이 기기와 같은 포트에서 돈다고 본다. 다르면 설정 키를 더한다.
         core_url = f"http://{config.CORE[0]}:{config.PORT}/" if config.CORE else None
