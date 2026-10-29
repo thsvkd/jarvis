@@ -95,7 +95,9 @@
  function devMeta(d){
   const busy=S.busy.has(d.id);
   if((d.status===200&&d.installed===false&&!(d.providers||[]).length)||d.status===501)return ""; // Orca·cswap 모두 없거나 갱신 전 jarvis 는 다시 물어도 같다
-  return html`<p class="ul-meta">${d.fetched_at?html`<span>${P.fmt.ago(d.fetched_at)} 수집</span>`:""}<button type="button" class="seg-action ul-ref" data-refresh="${d.id}" ${busy?"disabled":""}>${busy?"읽는 중…":"새로고침"}</button>${(d.logins||[]).filter(id=>!(d.providers||[]).some(p=>p.id===id)).map(id=>relog(d,id,false))}</p>`;
+  // 로그인을 시작하면 CLI 가 그 기기의 기존 자격을 먼저 지운다. 행이 없는 프로바이더의 로그인 버튼은
+  // Orca 를 읽어 그 로그인이 정말 없다고 안 기기에만 낸다(Orca 를 못 읽은 기기의 멀쩡한 로그인을 지우지 않게)
+  return html`<p class="ul-meta">${d.fetched_at?html`<span>${P.fmt.ago(d.fetched_at)} 수집</span>`:""}<button type="button" class="seg-action ul-ref" data-refresh="${d.id}" ${busy?"disabled":""}>${busy?"읽는 중…":"새로고침"}</button>${d.running&&!d.error?(d.logins||[]).filter(id=>!(d.providers||[]).some(p=>p.id===id)).map(id=>relog(d,id,false)):""}</p>`;
  }
 
  // ---------------------------------------------------------------- 화면
