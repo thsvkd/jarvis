@@ -975,17 +975,18 @@ def _topology(services, tunnel, ts, lan_ips):
     node("zone:tailnet", "Tailnet", "zone", 0, "up" if ts.get("backend_state") == "Running" else "down",
          detail=f"{ts.get('peers_online', 0)}/{ts.get('peers_total', 0)} online")
     node("zone:lan", "LAN", "zone", 0, detail=", ".join(lan_ips))
-    node("edge:cloudflare", "Cloudflare Edge", "edge", 1, "up" if tun_ok else "down",
-         detail=", ".join(tunnel.get("edge_locations") or []))
-    edge("zone:internet", "edge:cloudflare", "public", "HTTPS")
     by_id = {s["id"]: s for s in services}
-    cf = by_id.get("infra:cloudflared")
-    node("infra:cloudflared", "cloudflared", "infra", 2, cf["status"] if cf else "unknown",
-         detail=f"{tunnel.get('connections') or 0} conns", service_id="infra:cloudflared")
-    edge("edge:cloudflare", "infra:cloudflared", "public", "QUIC")
+    if config.TUNNEL_CONTAINER:  # 설정에서 터널을 뺀 기기는 Cloudflare 경로가 없다
+        node("edge:cloudflare", "Cloudflare Edge", "edge", 1, "up" if tun_ok else "down",
+             detail=", ".join(tunnel.get("edge_locations") or []))
+        edge("zone:internet", "edge:cloudflare", "public", "HTTPS")
+        cf = by_id.get("infra:cloudflared")
+        node("infra:cloudflared", "cloudflared", "infra", 2, cf["status"] if cf else "unknown",
+             detail=f"{tunnel.get('connections') or 0} conns", service_id="infra:cloudflared")
+        edge("edge:cloudflare", "infra:cloudflared", "public", "QUIC")
+        edge("infra:cloudflared", "infra:caddy", "public", ":80")
     cd = by_id.get("infra:caddy")
     node("infra:caddy", "Caddy", "infra", 3, cd["status"] if cd else "unknown", service_id="infra:caddy")
-    edge("infra:cloudflared", "infra:caddy", "public", ":80")
     edge("zone:tailnet", "infra:caddy", "tailnet", ":443")
     ssh = by_id.get("infra:ssh")
     if ssh:
@@ -1091,9 +1092,10 @@ def _topology_physical(st, med, fast, containers, docker_nets, services, ts, tun
     # 바깥
     node("ext:internet", "인터넷", "external")
     tun_ok = tunnel.get("ready") is not False and (tunnel.get("connections") or 0) > 0
-    node("ext:cloudflare", "Cloudflare 엣지", "external", status="up" if tun_ok else "down",
-         detail=", ".join(tunnel.get("edge_locations") or []) or None)
-    edge("ext:cloudflare", "ext:internet", "edge")
+    if config.TUNNEL_CONTAINER:
+        node("ext:cloudflare", "Cloudflare 엣지", "external", status="up" if tun_ok else "down",
+             detail=", ".join(tunnel.get("edge_locations") or []) or None)
+        edge("ext:cloudflare", "ext:internet", "edge")
 
     # LAN 세그먼트·tailnet 오버레이
     addrs = med.get("iface_addrs") or {}

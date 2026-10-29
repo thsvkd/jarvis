@@ -241,3 +241,11 @@ class ProbeSkipTest(unittest.TestCase):
         routes = {"admin.example.com": route(), "review.admin.example.com": route(), "auto-review.example.com": route()}
         self.assertEqual(list(ingress.probe_targets(routes, ["admin.example.com", "*.admin.example.com"])), ["auto-review.example.com"])
         self.assertEqual(len(ingress.probe_targets(routes, [])), 3)
+
+
+class TunnelOptional(unittest.TestCase):
+    def test_no_cloudflare_nodes_without_tunnel(self):
+        with patch.object(config, "TUNNEL_CONTAINER", ""):
+            s = model.build(raw())
+        ids = [n["id"] for k in ("topology", "topology_physical") for n in s[k]["nodes"]]
+        self.assertFalse([i for i in ids if "cloudflare" in i])
