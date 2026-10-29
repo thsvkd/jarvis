@@ -24,6 +24,7 @@ CHECK_TIMEOUT_S = 70  # 업데이트 확인은 게이트웨이가 릴리스 매�
 PULL_TIMEOUT_S = 100  # jarvis 갱신은 게이트웨이가 git pull 을 90초까지 기다린다
 USAGE_TIMEOUT_S = 70  # 사용량 새로고침은 게이트웨이 Orca 가 계정마다 프로바이더 API 를 부른다(45초 + 보관값 12초)
 LOGIN_TIMEOUT_S = 40  # 게이트웨이가 CLI 의 URL·코드를 30초까지 기다린다
+SWITCH_TIMEOUT_S = 40  # 게이트웨이가 cswap switch 를 30초까지 기다린다
 DEADLINE_S = 15  # 응답 하나 전체(조금씩 흘려 보내는 응답이 스레드를 붙잡지 못하게)
 STALE_S = 3 * EVERY_S  # 이보다 오래된 스냅샷은 주지 않는다(기기 화면이 '응답 없음'을 띄우게)
 MAX_BYTES = 16 << 20  # 압축을 푼 뒤 기준. 24h history 가 수 MB 다
@@ -251,6 +252,12 @@ class Core:
         """다시 로그인 창이 완료를 알아채도록 그 게이트웨이 GET /api/orca/login 을 전달한다."""
         req = urllib.request.Request(self.devices[i]["url"] + "/api/orca/login?provider=" + urllib.parse.quote(provider))
         return self._ask(i, req, TIMEOUT_S, "다시 로그인을")
+
+    def usage_switch(self, i, slot):
+        """이 계정 사용 버튼: 그 게이트웨이 POST /api/orca/account 를 그대로 전달한다(Claude 의 cswap 슬롯)."""
+        req = urllib.request.Request(self.devices[i]["url"] + "/api/orca/account?slot=" + urllib.parse.quote(slot),
+                                     data=b"", method="POST", headers={"X-Jarvis-Action": "usage-account"})
+        return self._ask(i, req, SWITCH_TIMEOUT_S, "계정 전환을")
 
     def usage_all(self, force=False):
         """모든 기기의 사용량을 동시에 묻는다. 한 대가 느리거나 실패해도 나머지는 그대로 준다."""

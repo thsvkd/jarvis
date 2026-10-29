@@ -37,6 +37,10 @@ class Gateway(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_POST(self):
+        Gateway.posted = (self.path, self.headers.get("X-Jarvis-Action"))
+        self.do_GET()
+
 
 def serve(handler):
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -212,6 +216,21 @@ class RouteTest(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError) as e:
                 urllib.request.urlopen(req(h))
             self.assertEqual(e.exception.code, code)
+        # 계정 전환도 viewers 만이고 맞춤 헤더가 있어야 한다. 게이트웨이에는 슬롯과 헤더를 그대로 전달한다
+        Gateway.routes["/api/orca/account?slot=2"] = (200, b'{"switched":true}', False)
+        sw = lambda h: urllib.request.Request(self.base + "/api/devices/gw/account?slot=2", data=b"", method="POST", headers=h)
+        for h in ({}, {"X-Jarvis-Action": "usage-account"}):
+            with self.assertRaises(urllib.error.HTTPError) as e:
+                urllib.request.urlopen(sw(h))
+            self.assertEqual(e.exception.code, 403)
+        kind, vw = server.client_kind, config.VIEWERS
+        server.client_kind, config.VIEWERS = (lambda ip: "tailnet"), ["127.0.0.1"]
+        try:
+            with urllib.request.urlopen(sw({"X-Jarvis-Action": "usage-account"})) as r:
+                self.assertEqual(json.loads(r.read()), {"switched": True})
+        finally:
+            server.client_kind, config.VIEWERS = kind, vw
+        self.assertEqual(Gateway.posted, ("/api/orca/account?slot=2", "usage-account"))
         self.core.state["gw"].update(fails=1, error="timed out")  # 폴링 실패 중이면 묻지 않고 바로 502
         self.assertEqual(self.get("/api/devices/usage")[1]["devices"][0]["status"], 502)
 

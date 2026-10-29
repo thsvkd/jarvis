@@ -281,6 +281,8 @@ caam 의 라이선스는 MIT 에 OpenAI·Anthropic 관련 추가 조항이 붙�
 Orca 가 없거나 실패한 기기(관리자 권한 Orca 를 쓰는 Windows 등)도 cswap 의 Claude 계정은 보인다. Codex 는 Orca 관리 계정(Orca 설정의 계정)으로 계정별 사용량이 나온다.
 프로바이더 API 를 다시 부르는 `refreshUsage` 는 5분에 한 번(새로고침 버튼은 30초 간격)만 쓰고, 그 사이에는 Orca 가 가진 값을 읽는다.
 core `GET /api/devices/usage`(전체, `?refresh=1` 강제)·`/api/devices/<id>/usage` 는 모아 두지 않고 요청마다 게이트웨이에 묻는다.
+Claude 계정 행의 **이 계정 사용**(viewers 만)은 core `POST /api/devices/<id>/account?slot=<n>` → 게이트웨이 `POST /api/orca/account`(설정 core 만) →
+`cswap switch <n> --json` 으로 그 기기의 Claude Code 로그인을 바꾼다. 슬롯 번호는 기기마다 다르다. Codex 는 jarvis 가 caam activate 를 부르지 않으므로 전환하지 않는다.
 화면은 디자인 랩 04(`/lab/usage/`)의 C 안이다. 간략히(칸마다 최대 사용률, 누르면 계정 상세)와 자세히(칸 안에 계정별 한도 창 전부) 보기를 전환하며, 선택은 localStorage `jarvis.usage.mode` 에 둔다.
 공식 계약: [계정 RPC](https://github.com/stablyai/orca/blob/main/src/main/runtime/rpc/methods/accounts.ts), [사용량 형식](https://github.com/stablyai/orca/blob/main/src/shared/rate-limit-types.ts).
 

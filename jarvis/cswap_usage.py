@@ -1,7 +1,8 @@
 """이 기기 cswap(claude-swap)이 관리하는 Claude 계정별 사용량. orca_usage 가 Claude 계정 목록으로 쓴다.
 
 `cswap list --json`(schemaVersion 1)만 읽는다: 토큰 갱신·사용량 조회 간격·캐시는 cswap 이 맡고, jarvis 는 자격 증명 파일을
-열지 않는다(갱신 토큰을 따로 돌리면 cswap·Claude Code 의 로그인이 풀릴 수 있다). 계정은 이메일·조직 이름만 내보낸다.
+열지 않는다(갱신 토큰을 따로 돌리면 cswap·Claude Code 의 로그인이 풀릴 수 있다). 계정은 이메일·조직 이름·슬롯 번호만 내보낸다.
+쓰기는 core 의 '이 계정 사용' 버튼이 부르는 `cswap switch <슬롯> --json` 하나다(자격 교체는 cswap 이 한다).
 
 공식 계약: https://github.com/realiti4/claude-swap (README 의 JSON 출력, claude_swap/json_output.py)
 """
@@ -17,6 +18,7 @@ from .util import Installer, parse_iso, scrub_home, which_local
 LOGIN_WARN_S = 3 * 86400  # 로그인(갱신 토큰) 만료 3일 전부터 '주의 필요'. 새 /login 만이 기한을 늘린다
 CACHE_S = 30  # cswap 자체가 캐시하므로 짧게만 묶는다(요청마다 프로세스를 띄우지 않게)
 TIMEOUT_S = 15  # Orca 와 동시에 돈다. core 의 기기당 시간 제한(70초) 안에 들어와야 한다
+SWITCH_TIMEOUT_S = 30  # switch 는 현재 로그인을 백업하고 macOS 는 Keychain 도 고친다. core 는 40초를 기다린다
 # usageStatus → (화면 문구, 사람이 손봐야 하는가). ok·api_key·unavailable 은 따로 다룬다
 STATUS = {
     "token_expired": ("토큰 갱신을 기다리는 중입니다(cswap 이 다시 시도합니다).", False),
@@ -112,8 +114,11 @@ def account(row):
     windows, buckets = _windows(usage)
     plan = " · ".join(x for x in (str(row.get("alias") or "")[:40], "자동 전환 제외" if row.get("disabled") is True else "") if x)
     email = str(row.get("email") or "")[:200]
+    num = row.get("number")
     return {"label": email or "이름 없는 계정", "org": str(row.get("organizationName") or "")[:80] or None,
             "active": row.get("active") is True,
+            # 슬롯 번호: 기기마다 다르다. 같은 이메일이 조직별로 여러 슬롯일 수 있어 이메일 대신 이것으로 바꾼다
+            "slot": str(num) if isinstance(num, int) and not isinstance(num, bool) and num > 0 else None,
             # 값이 있으면 그 값을 보이고 note 로 이유를 붙인다. 값도 없으면 오류로 보인다
             "status": "ok" if windows or buckets or status in ("ok", "api_key") else "error",
             "error": None if windows or buckets or status == "api_key" else note,
@@ -122,22 +127,46 @@ def account(row):
             "windows": windows, "buckets": buckets[:12], "extra": None, "credits": None, "source": "cswap"}
 
 
-def _run(exe):
+def _json(exe, *args, timeout=TIMEOUT_S):
     try:
-        p = subprocess.run([exe, "list", "--json"], capture_output=True, text=True, encoding="utf-8", timeout=TIMEOUT_S,
+        p = subprocess.run([exe, *args, "--json"], capture_output=True, text=True, encoding="utf-8", timeout=timeout,
                            stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except subprocess.TimeoutExpired:  # 메시지에 실행 경로(홈 디렉터리)가 들어 있어 그대로 내보내지 않는다
-        raise RuntimeError(f"cswap 이 {TIMEOUT_S}초 안에 답하지 않았습니다")
+        raise RuntimeError(f"cswap 이 {timeout}초 안에 답하지 않았습니다")
     except OSError as e:
         raise RuntimeError(f"cswap 을 실행하지 못했습니다({type(e).__name__})")
     try:
         body = json.loads(p.stdout)
     except ValueError:
-        raise RuntimeError(f"cswap list --json 응답을 읽지 못했습니다(종료 코드 {p.returncode})")
+        raise RuntimeError(f"cswap {args[0]} --json 응답을 읽지 못했습니다(종료 코드 {p.returncode})")
     if not isinstance(body, dict) or body.get("error"):
         err = body.get("error") if isinstance(body, dict) else None
         raise RuntimeError(scrub_home(str((err.get("message") if isinstance(err, dict) else err) or "알 수 없는 응답"))[:200])
-    return [account(r) for r in body.get("accounts") or [] if isinstance(r, dict)]
+    return body
+
+
+def _run(exe):
+    return [account(r) for r in _json(exe, "list").get("accounts") or [] if isinstance(r, dict)]
+
+
+def switch(slot):
+    """'이 계정 사용' 버튼: Claude Code 가 쓰는 계정을 cswap 슬롯 slot 으로 바꾼다. (http 상태, 응답)."""
+    global _cache
+    if not (isinstance(slot, str) and slot.isdigit() and len(slot) <= 4):
+        return 400, {"error": "slot 은 cswap 슬롯 번호여야 합니다"}
+    exe = binary()
+    if not exe:
+        return 404, {"error": "이 기기에는 cswap 이 없습니다"}
+    if not _lock.acquire(timeout=TIMEOUT_S + 5):  # list 와 겹치지 않게
+        return 503, {"error": "cswap 이 응답하지 않습니다"}
+    try:
+        body = _json(exe, "switch", slot, timeout=SWITCH_TIMEOUT_S)
+        return 200, {"switched": body.get("switched") is True}
+    except Exception as e:
+        return 409, {"error": scrub_home(str(e))[:200] or type(e).__name__}
+    finally:
+        _cache = None  # 실패해도 다음 읽기는 cswap 에 다시 묻는다
+        _lock.release()
 
 
 def read(force=False):

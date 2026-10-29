@@ -94,7 +94,9 @@
  }
  const head=a=>html`<div class="ul-ah"><b class="ul-email">${a.label}</b>${a.plan?html`<span class="ul-plan">${a.plan}</span>`:""}${a.org?html`<span class="ul-plan">${a.org}</span>`:""}${a.active?html`<span class="badge" data-tone="info">사용 중</span>`:""}${isErr(a)||a.attention?html`<span class="badge" data-tone="crit">${isErr(a)?kind(a)[1]:"조치 필요"}</span>`:""}</div>`;
  const relog=(d,id,again=true)=>html`<button type="button" class="seg-action" data-login="${d.id}" data-lp="${id}">${LOGIN[id]} ${again?"다시 로그인":"로그인"}</button>`;
- const acct=(a,d,p)=>html`<div class="ul-acct">${head(a)}${body(a)}${(isErr(a)&&kind(a)[0]==="auth"||a.attention)&&(d.logins||[]).includes(p.id)?relog(d,p.id):""}${a.updated_at?html`<p class="ul-age">${P.fmt.ago(a.updated_at)} 확인</p>`:""}</div>`;
+ // slot: 게이트웨이 cswap 의 슬롯 번호(Claude). 그 기기의 Claude Code 로그인을 이 계정으로 바꾼다
+ const useBtn=(a,d)=>a.slot&&!a.active?html`<button type="button" class="seg-action" data-use="${d.id}" data-slot="${a.slot}" data-label="${a.label}" aria-disabled="${String(S.busy.has(d.id))}">이 계정 사용</button>`:"";
+ const acct=(a,d,p)=>html`<div class="ul-acct">${head(a)}${body(a)}${useBtn(a,d)}${(isErr(a)&&kind(a)[0]==="auth"||a.attention)&&(d.logins||[]).includes(p.id)?relog(d,p.id):""}${a.updated_at?html`<p class="ul-age">${P.fmt.ago(a.updated_at)} 확인</p>`:""}</div>`;
  const badge=d=>{const [t,l]=state(d);return html`<span class="badge" data-tone="${t}">${l}</span>`;};
  function devMeta(d){
   const busy=S.busy.has(d.id);
@@ -213,6 +215,18 @@
    }catch(e){} // 일시적인 실패는 다음 차례에 다시 묻는다
   }
  }
+ async function use(dev,slot,label){
+  const d=S.devs.find(x=>x.id===dev),name=d&&d.host||dev;
+  if(S.busy.has(dev)||!confirm(name+" 의 Claude Code 로그인을 "+label+" 로 바꿀까요? 실행 중인 세션도 이 계정을 쓰게 됩니다."))return;
+  S.busy.add(dev);draw();
+  let good=false;
+  try{
+   const r=await fetch("/api/devices/"+encodeURIComponent(dev)+"/account?slot="+encodeURIComponent(slot),{method:"POST",cache:"no-store",headers:{"X-Jarvis-Action":"usage-account"}}),o=await r.json();
+   good=r.ok;note(good?name+": Claude 를 "+label+" 로 바꿨습니다":name+": "+(o.error||"HTTP "+r.status),!good);
+  }catch(e){note(e.message||String(e),true);}
+  S.busy.delete(dev);
+  if(good)refreshOne(dev);else draw();
+ }
  sec.addEventListener("click",e=>{
   const t=e.target.closest("button");if(!t||t.getAttribute("aria-disabled")==="true")return;
   if(t.dataset.prov){S.prov=t.dataset.prov;draw();return;}
@@ -220,6 +234,7 @@
   if(t.dataset.mode){S.mode=t.dataset.mode;try{localStorage.setItem(MODE_KEY,S.mode);}catch(err){}draw();return;}
   if(t.id==="ulAll"){load(true);return;}
   if(t.dataset.login){login(t.dataset.login,t.dataset.lp);return;}
+  if(t.dataset.use){use(t.dataset.use,t.dataset.slot,t.dataset.label);return;}
   if(t.dataset.refresh){if(S.login)dlg.close();refreshOne(t.dataset.refresh);return;}
   if(t.dataset.cell){const [dev,prov]=t.dataset.cell.split(":");S.dlg={dev,prov};dlgDraw();if(!dlg.open)dlg.showModal();return;}
   if(t.hasAttribute("data-close")){dlg.close();return;}

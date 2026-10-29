@@ -98,6 +98,23 @@ class RunTest(unittest.TestCase):
         with mock.patch.object(cswap_usage.subprocess, "run", return_value=proc({"schemaVersion": 1, "accounts": []})):
             self.assertIsNone(cswap_usage.read(force=True))  # 계정이 없으면 cswap 이 없는 것과 같다
 
+    def test_switch(self, _):
+        self.assertEqual([cswap_usage.account(r)["slot"] for r in ROWS["accounts"]], ["1", "2", "3", "4", "5"])
+        for bad in ("", "1;rm", "-1", "12345", None):  # 슬롯 번호 말고는 cswap 에 넘기지 않는다
+            with mock.patch.object(cswap_usage.subprocess, "run") as run:
+                self.assertEqual(cswap_usage.switch(bad)[0], 400)
+            run.assert_not_called()
+        with mock.patch.object(cswap_usage.subprocess, "run", return_value=proc({"schemaVersion": 1, "switched": True})) as run:
+            cswap_usage._cache = (1e18, {"accounts": []})
+            self.assertEqual(cswap_usage.switch("2"), (200, {"switched": True}))
+        self.assertEqual(run.call_args[0][0][1:], ["switch", "2", "--json"])
+        self.assertIsNone(cswap_usage._cache)  # 다음 읽기는 바뀐 사용 중 계정을 cswap 에 다시 묻는다
+        err = {"schemaVersion": 1, "error": {"type": "AccountNotFoundError", "message": "No account /home/alice/x"}}
+        with mock.patch.object(cswap_usage.subprocess, "run", return_value=proc(err, 1)):
+            code, body = cswap_usage.switch("9")
+        self.assertEqual(code, 409)
+        self.assertNotIn("alice", body["error"])
+
 
 class MergeTest(unittest.TestCase):
     def merged(self, orca_body, cs, ca=None):
