@@ -5,7 +5,8 @@
  * ── 페이지에 붙이는 법 ───────────────────────────────────────────────────────────
  *   <head>
  *     <script src="/app/theme-init.js"></script>        동기. 첫 페인트 전에 테마 적용 + 웹폰트 비동기 로드
- *     <link rel="stylesheet" href="/app/shell.css">      토큰 + 헤더 스타일. 페이지 CSS 보다 먼저
+ *     <link rel="stylesheet" href="/app/tokens.css">     디자인 토큰. 가장 먼저
+ *     <link rel="stylesheet" href="/app/shell.css">      헤더·공용 유틸리티 스타일. 페이지 CSS 보다 먼저
  *     <link rel="stylesheet" href="/app/<page>.css">
  *   </head>
  *   <body>
@@ -39,7 +40,7 @@
  *
  * ── 페이지와의 약속 ─────────────────────────────────────────────────────────────
  *   - 헤더 안 클래스·속성은 sh- / data-sh- 접두어. 페이지 CSS·JS 는 이것을 건드리지 않는다.
- *   - 토큰(:root 의 --bg, --text, --ok …)은 shell.css 가 정한다. 페이지는 :root 에서 같은 이름을 다른 뜻으로 재정의하지 않는다.
+ *   - 토큰(:root 의 --bg, --text, --ok …)은 tokens.css 가 정한다. 페이지는 :root 에서 같은 이름을 다른 뜻으로 재정의하지 않는다.
  *   - 홈은 경보 목록 요소에 id="alerts" 를 둔다 — 헤더 경보 팝오버의 "모두 보기" 링크 대상(/#alerts).
  *   - 테마 저장 키 localStorage "jarvis.theme"(옛 "pit5.theme" 도 읽는다) = "light"|"dark"|"system". <html data-theme> 로 적용된다.
  *

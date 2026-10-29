@@ -68,7 +68,7 @@ jarvis/          수집기 + HTTP 서버 (python3 -m jarvis)
 static/
   index.html     홈(개요, Bento)
   map/           서비스 네트워크 맵(Atlas)
-  app/           제품 자산: shell.*(공통 헤더·디자인 토큰·테마), theme-init.js, bento.*, focus-layout.js·focus.js·focus.css(운영 Focus), atlas.*
+  app/           제품 자산: tokens.css(디자인 토큰·라이트/다크 값), shell.*(공통 헤더·공용 유틸리티·테마), theme-init.js, bento.*, focus-layout.js·focus.js·focus.css(운영 Focus), atlas.*
   shared/        jarvis.js(공용 클라이언트, 전역 JARVIS), API.md(스냅샷 스키마), favicon
                  화면 설정은 localStorage `jarvis.*` 에 두고, 이름을 바꾸기 전 `pit5.*` 값도 이어 읽는다
   gallery/, d/   시안 비교 단계의 보관본

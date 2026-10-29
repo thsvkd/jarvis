@@ -1,7 +1,7 @@
 .focus-fold{margin-top:var(--sp-5);min-width:0;background:var(--tile);border-radius:var(--r-tile);box-shadow:var(--shadow);padding:0 var(--pad)}
 .focus-fold>summary{display:flex;align-items:center;gap:14px;cursor:pointer;list-style:none;min-height:66px;color:var(--text);font-size:var(--fs-lg);font-weight:var(--fw-semibold)}
 .focus-fold>summary::-webkit-details-marker{display:none}
-.focus-fold>summary small{margin-left:auto;color:var(--text-3);font-size:var(--fs-sm);font-weight:var(--fw-normal)}
+.focus-fold>summary small{margin-left:auto;color:var(--text-3);font-size:var(--fs-sm);font-weight:var(--fw-regular)}
 .focus-fold>summary>.ic{transition:transform var(--dur) var(--ease);width:15px;height:15px}
 .focus-fold[open]>summary>.ic{transform:rotate(180deg)}
 .focus-fold[open]{padding-bottom:var(--pad)}
@@ -30,7 +30,7 @@ body[data-focus-layout] .svc .svc-reason{display:-webkit-box;-webkit-line-clamp:
  body[data-focus-layout] .hero{grid-template-areas:"main" "donut" "extra";gap:14px;padding:20px}
  body[data-focus-layout] .hero-donut{gap:14px}
  body[data-focus-layout] .hero-donut .donut-wrap,body[data-focus-layout] .hero-donut .donut svg{width:78px;height:78px}
- body[data-focus-layout] .donut-n{font-size:25px}body[data-focus-layout] .donut-of{font-size:9px}
+ body[data-focus-layout] .donut-n{font-size:var(--fs-heading-sm)}body[data-focus-layout] .donut-of{font-size:var(--fs-2xs)}
  body[data-focus-layout] #focus-hero-extra{display:block;grid-area:extra;border-top:1px solid var(--line);padding-top:12px}
  body[data-focus-layout] #focus-hero-extra>summary{display:flex;justify-content:space-between;font-size:var(--fs-sm);color:var(--text-2);cursor:pointer;list-style:none}
  body[data-focus-layout] #focus-hero-extra>summary::-webkit-details-marker{display:none}
@@ -53,5 +53,5 @@ body[data-focus-layout] .focus-pinned-mode.focus-list-mode #svcGroups{grid-templ
 @media(max-width:699px){body[data-focus-layout] .focus-pinned-mode #svcGroups{grid-template-columns:repeat(2,minmax(0,1fr))}}
 body[data-focus-layout] .focus-pinned-mode.focus-list-mode #svcGroups{background:var(--tile);border-radius:var(--r-tile);box-shadow:var(--shadow);padding:0 var(--pad);gap:0}
 body[data-focus-layout] .focus-pinned-mode .srow .sr-sub,body[data-focus-layout] .focus-pinned-mode .srow .sr-met{display:none}
-@media(max-width:699px){.focus-fold{padding-inline:var(--pad)}.focus-fold>summary{flex-wrap:wrap;gap:4px 10px;min-height:62px;padding:12px 0;font-size:16px}.focus-fold>summary small{margin-left:0;flex:1;min-width:100px;font-size:11px;line-height:1.6}.focus-fold>summary span{width:100%}}
+@media(max-width:699px){.focus-fold{padding-inline:var(--pad)}.focus-fold>summary{flex-wrap:wrap;gap:4px 10px;min-height:62px;padding:12px 0;font-size:var(--fs-lg)}.focus-fold>summary small{margin-left:0;flex:1;min-width:100px;font-size:var(--fs-xs);line-height:1.6}.focus-fold>summary span{width:100%}}
 @media(prefers-reduced-motion:reduce){.focus-fold>summary>.ic{transition:none}}
