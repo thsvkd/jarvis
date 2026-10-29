@@ -229,7 +229,10 @@ class Core:
                     if ((st["summary"] or {}).get("host") or me).split(".")[0].lower() == me}
 
         def one(i):
-            code, body = self.jarvis_update(i)
+            with self.lock:
+                err = self.state[i]["fails"] and self.state[i]["error"]
+            # 폴링이 실패 중인 기기(꺼진 tailnet 피어)는 묻지 않는다. 물으면 PULL_TIMEOUT_S 를 기다려 응답 전체가 늦는다
+            code, body = (502, {"error": f"{i} 에 닿지 못했습니다: {err}"}) if err else self.jarvis_update(i)
             return {"id": i, "status": code, **(body if isinstance(body, dict) else {"error": str(body)})}
 
         others = [i for i in self.devices if i not in mine]
