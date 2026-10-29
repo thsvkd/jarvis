@@ -155,10 +155,24 @@ def normalize(snap):
     return providers
 
 
+def _dirs():
+    """사용량을 물을 Orca 폴더. 데스크톱 프로필을 먼저 본다: Windows 의 ai-setup 서버는 S4U 로 세션 0 에서 관리자 권한으로
+    돌아 일반 권한 jarvis 가 파이프를 열 수 없고, 열 수 있어도 사용량을 읽지 않는다(rateLimits 가 비어 있다)."""
+    return list(dict.fromkeys(d for d in (orca.find_dir(orca.DESKTOP_DIRS), orca.find_dir(orca.DIRS)) if d))
+
+
 def _call(refresh, timeout):
     global _last
     with _rpc:
-        snap = orca_rpc.call("accounts.list", {"refreshUsage": refresh}, timeout=timeout)
+        err = None
+        for d in _dirs():
+            try:
+                snap = orca_rpc.call("accounts.list", {"refreshUsage": refresh}, timeout=timeout, d=d)
+                break
+            except Exception as e:  # 꺼진 앱의 낡은 런타임 파일·권한 오류면 다음 Orca 를 본다
+                err = e
+        else:
+            raise err or RuntimeError("실행 중인 Orca 의 로컬 RPC 정보를 찾지 못했습니다")
     providers = normalize(snap)
     _last = (time.time(), providers)
     return providers
@@ -247,8 +261,7 @@ def read(force=False):
 def _orca(force):
     """force: 사용자가 누른 새로고침. 프로바이더에서 다시 읽은 뒤 답한다(FORCE_S 간격 안이면 보관값)."""
     global _refreshed
-    d = orca.find_dir(orca.DIRS)
-    if not d:
+    if not _dirs():
         return {"installed": False, "running": False, "providers": []}
     with _lock:  # 결정과 시각 기록만 잠근다. RPC 동안 잡고 있으면 다른 요청이 core 의 시간 제한을 넘긴다
         age = time.monotonic() - _refreshed

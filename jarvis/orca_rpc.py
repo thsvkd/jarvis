@@ -40,10 +40,11 @@ def _pipe(endpoint, request, runtime_id):
         return _response(pipe, request, runtime_id)
 
 
-def call(method, params=None, timeout=12):
+def call(method, params=None, timeout=12, d=None):
+    """d: 부를 Orca 데이터 폴더. 없으면 이 기기 Orca(orca.DIRS)."""
     if method not in METHODS:
         raise ValueError("허용되지 않은 Orca RPC")
-    d = orca.find_dir(orca.DIRS)
+    d = d or orca.find_dir(orca.DIRS)
     metadata = orca._read(d, "orca-runtime.json") if d else None
     if not metadata or not metadata.get("authToken") or not metadata.get("runtimeId"):
         raise RuntimeError("실행 중인 Orca 의 로컬 RPC 정보를 찾지 못했습니다")

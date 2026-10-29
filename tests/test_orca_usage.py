@@ -122,7 +122,7 @@ class ReadTest(unittest.TestCase):
                 return False
 
         with mock.patch.object(orca_usage.orca, "find_dir", return_value="/x"), \
-                mock.patch.object(orca_usage.orca_rpc, "call", side_effect=lambda m, p, timeout: calls.append(p["refreshUsage"]) or SNAP), \
+                mock.patch.object(orca_usage.orca_rpc, "call", side_effect=lambda m, p, timeout, d=None: calls.append(p["refreshUsage"]) or SNAP), \
                 mock.patch.object(orca_usage.threading, "Thread", Now), \
                 mock.patch.object(orca_usage, "_refreshed", 0.0), mock.patch.object(orca_usage, "_last", None), \
                 mock.patch.object(orca_usage.time, "monotonic") as mono:
@@ -137,8 +137,24 @@ class ReadTest(unittest.TestCase):
         self.assertEqual(seen, [(False, True), (False, False), (False, False), (True, False), (False, True)])
         self.refresh_grok.assert_called()  # SNAP 의 Grok 은 delegated-refresh-required 다: grok CLI 로 갱신을 맡긴다
 
+    def test_desktop_orca_first_then_server(self):
+        # Windows: 데스크톱 프로필을 먼저 묻고, 실패하면(꺼진 앱·권한) 서버 프로필을 묻는다
+        tried = []
+
+        def call(m, p, timeout, d=None):
+            tried.append(d)
+            if d == "/desk":
+                raise RuntimeError("Orca 로컬 파이프에 연결하지 못했습니다: FileNotFoundError")
+            return SNAP
+        find = lambda dirs: "/desk" if dirs is orca_usage.orca.DESKTOP_DIRS else "/srv"
+        with mock.patch.object(orca_usage.orca, "find_dir", side_effect=find), \
+                mock.patch.object(orca_usage.orca_rpc, "call", side_effect=call), \
+                mock.patch.object(orca_usage, "_refreshed", 0.0), mock.patch.object(orca_usage, "_last", None):
+            body = orca_usage._orca(False)
+        self.assertEqual((tried[:2], body["running"], len(body["providers"])), (["/desk", "/srv"], True, 4))
+
     def test_slow_forced_refresh_falls_back(self):
-        def call(m, p, timeout):
+        def call(m, p, timeout, d=None):
             if p["refreshUsage"]:
                 raise TimeoutError("timed out")
             return SNAP

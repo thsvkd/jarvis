@@ -16,6 +16,9 @@ import psutil
 
 DIRS = ("~/.config/orca", "~/Library/Application Support/orca") + \
     ((os.path.join(os.environ["APPDATA"], "orca"),) if os.environ.get("APPDATA") else ())  # Linux·macOS·Windows
+# ai-setup 이 서버(위 폴더)와 따로 둔 데스크톱 클라이언트 프로필. 사용자 세션의 앱이라 구독 사용량을 읽는다
+DESKTOP_DIRS = ("~/.config/orca-desktop", "~/Library/Application Support/orca-desktop") + \
+    ((os.path.join(os.environ["APPDATA"], "orca-desktop"),) if os.environ.get("APPDATA") else ())
 
 
 def _read(d, name):
