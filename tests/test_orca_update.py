@@ -188,6 +188,19 @@ class CheckTest(unittest.TestCase):
                     "automatic": True, "installMode": "supervised-headless-serve"}}):
             self.assertEqual(self.old[0](), (True, None))
 
+    def test_ai_setup_managed_server_is_left_to_update_ai(self):
+        with tempfile.TemporaryDirectory() as d:
+            receipt = os.path.join(d, "receipt.json")
+            with open(receipt, "w") as f:
+                json.dump({"tool_installs": {"orca_server": {"state": "configured", "service_root": d}}}, f)
+            with patch.object(orca_update, "AI_SETUP_RECEIPT", receipt):
+                self.assertFalse(orca_update._ai_setup_managed())  # 소유 표지 없음
+                with open(os.path.join(d, ".ai-setup-managed"), "w") as f:
+                    f.write("ai-setup orca server v1\n")
+                supported, reason = self.old[0]()
+        self.assertFalse(supported)
+        self.assertIn("update-ai orca", reason)
+
     def setUp(self):
         self.old = orca_update._supported, orca_update._installed, orca_update.Live.manifest, orca_update.job
         self.manifest_calls = 0

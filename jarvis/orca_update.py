@@ -180,8 +180,25 @@ def check():
             "current": version_key(installed) >= version_key(target), "error": None}
 
 
+AI_SETUP_RECEIPT = "~/.claude/.claude-code-setup.json"
+
+
+def _ai_setup_managed():
+    """ai-setup 이 띄운 Orca 서버인지: 영수증의 tool_installs.orca_server 와 service_root 의 소유 표지.
+    그 서버는 설치 폴더 밖 복사본·S4U 작업·자체 러너로 돌아 update-ai 만 안전하게 바꾼다."""
+    try:
+        with open(os.path.expanduser(AI_SETUP_RECEIPT), encoding="utf-8") as f:
+            rec = ((json.load(f).get("tool_installs") or {}).get("orca_server")) or {}
+        with open(os.path.join(rec["service_root"], ".ai-setup-managed"), encoding="utf-8") as f:
+            return f.read().strip() == "ai-setup orca server v1"
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return False
+
+
 def _supported():
     """이 프로세스가 deb Orca 를 올리고 다시 띄울 수 있는지. (가능, 이유)."""
+    if _ai_setup_managed():
+        return False, "ai-setup 이 관리하는 Orca 입니다: update-ai orca 로 갱신하세요"
     p = orca_install.profile()
     if not os.path.isfile(p["cli"]):
         return False, "공식 Orca 설치본의 CLI 를 찾지 못했습니다"
