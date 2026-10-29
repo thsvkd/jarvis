@@ -45,6 +45,17 @@ button { font: inherit; color: inherit; }
 .icon-btn:hover { box-shadow: var(--shadow-hover); }
 .icon-btn:active { transform: scale(.96); }
 .icon-btn .ic { width: 18px; height: 18px; }
+/* 표 행 안의 작은 아이콘 버튼(기기별 새로고침). 클릭 영역은 WCAG 2.5.8(24px) 이상, 터치 기기는 44px(Apple HIG) */
+.icon-btn.sm { width: 32px; height: 32px; border-radius: 10px; box-shadow: none; background: var(--tile-2); color: var(--text-2); }
+.icon-btn.sm:hover { color: var(--text); background: var(--tile-3); }
+.icon-btn.sm .ic { width: 16px; height: 16px; }
+/* 읽는 중: 아이콘이 돈다. disabled 대신 aria-disabled 라 키보드 포커스는 남는다. 동작 줄이기 설정이면 돌지 않고 흐려진다 */
+.icon-btn[aria-disabled="true"] { cursor: progress; color: var(--text-3); }
+.icon-btn[aria-disabled="true"]:active { transform: none; }
+.icon-btn[aria-busy="true"] .ic { animation: icon-spin .9s linear infinite; }
+@keyframes icon-spin { to { transform: rotate(360deg); } }
+@media (pointer: coarse) { .icon-btn, .icon-btn.sm { width: 44px; height: 44px; } }
+@media (prefers-reduced-motion: reduce) { .icon-btn[aria-busy="true"] .ic { animation: none; opacity: .5; } }
 
 .stale-banner { background: var(--tone-soft); color: var(--text); border-bottom: 1px solid var(--line); font-size: var(--fs-md); }
 .stale-banner .wrap { display: flex; align-items: baseline; gap: 10px; padding-top: 10px; padding-bottom: 10px; }
@@ -1140,7 +1151,6 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
 .ul-muted { color: var(--text-3); font-size: var(--fs-sm); }
 .ul-err { color: var(--crit-ink); font-size: var(--fs-sm); background: var(--crit-soft); padding: 8px 10px; border-radius: var(--r-xs); overflow-wrap: anywhere; }
 .ul-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; color: var(--text-3); font-size: var(--fs-sm); }
-#usage .ul-ref { padding: 4px 10px; font-size: var(--fs-xs); }
 #usage [aria-busy="true"] { opacity: .6; transition: opacity var(--dur); }
 #usage .tile { animation: none; } /* 1분마다·필터마다 다시 그리므로 등장 애니메이션을 끈다 */
 .ul-wl { color: var(--text-3); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }

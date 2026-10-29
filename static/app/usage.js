@@ -12,6 +12,10 @@
   mode:(()=>{try{return localStorage.getItem(MODE_KEY)==="full"?"full":"brief";}catch(e){return "brief";}})()};
  const WIN={session:"5시간",weekly:"주간",fable:"Fable 주간",monthly:"월간"};
  const REASON={out_of_credits:"크레딧 소진",disabled:"사용 안 함"};
+ // 새로고침 아이콘(앱 아이콘과 같은 24px 격자·선 굵기). 버튼 이름은 aria-label·title 이 같은 말로 준다
+ const REFRESH=P.raw('<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 11.5A8 8 0 0 0 6.3 6.3L4 8.5"/><path d="M4 4v4.5h4.5"/><path d="M4 12.5a8 8 0 0 0 13.7 5.2l2.3-2.2"/><path d="M20 20v-4.5h-4.5"/></svg>');
+ // 읽는 동안 disabled 대신 aria-disabled 를 쓴다: disabled 는 키보드 포커스를 버튼에서 떨어뜨린다(중복 클릭은 코드가 막는다)
+ const refBtn=(id,label,busy)=>html`<button type="button" class="icon-btn sm" data-refresh="${id}" aria-label="${label}" title="${label}" aria-busy="${String(busy)}" aria-disabled="${String(busy)}">${REFRESH}</button>`;
  const LOGIN={codex:"Codex",grok:"Grok"}; // 게이트웨이가 device-code 로그인을 띄울 수 있는 CLI
 
  // ---------------------------------------------------------------- 값
@@ -97,7 +101,7 @@
   if((d.status===200&&d.installed===false&&!(d.providers||[]).length)||d.status===501)return ""; // Orca·cswap 모두 없거나 갱신 전 jarvis 는 다시 물어도 같다
   // 로그인을 시작하면 CLI 가 그 기기의 기존 자격을 먼저 지운다. 행이 없는 프로바이더의 로그인 버튼은
   // Orca 를 읽어 그 로그인이 정말 없다고 안 기기에만 낸다(Orca 를 못 읽은 기기의 멀쩡한 로그인을 지우지 않게)
-  return html`<p class="ul-meta">${d.fetched_at?html`<span>${P.fmt.ago(d.fetched_at)} 수집</span>`:""}<button type="button" class="seg-action ul-ref" data-refresh="${d.id}" ${busy?"disabled":""}>${busy?"읽는 중…":"새로고침"}</button>${d.running&&!d.error?(d.logins||[]).filter(id=>!(d.providers||[]).some(p=>p.id===id)).map(id=>relog(d,id,false)):""}</p>`;
+  return html`<p class="ul-meta">${d.fetched_at?html`<span>${P.fmt.ago(d.fetched_at)} 수집</span>`:""}${refBtn(d.id,(d.host||d.id)+" 새로고침",busy)}${d.running&&!d.error?(d.logins||[]).filter(id=>!(d.providers||[]).some(p=>p.id===id)).map(id=>relog(d,id,false)):""}</p>`;
  }
 
  // ---------------------------------------------------------------- 화면
@@ -148,11 +152,13 @@
  function note(t,bad){const n=$("#ulNote");n.textContent=t;n.classList.toggle("dev-err",!!bad);}
 
  // ---------------------------------------------------------------- 불러오기
+ const all=$("#ulAll");P.render(all,REFRESH);
+ const allBusy=on=>["aria-busy","aria-disabled"].forEach(k=>all.setAttribute(k,String(on)));
  let timer=null;
  async function load(force){
   clearTimeout(timer);
   const mine=force&&S.devs?S.devs.map(d=>d.id).filter(i=>!S.busy.has(i)):[];
-  if(force){mine.forEach(i=>S.busy.add(i));$("#ulAll").disabled=true;note("프로바이더에서 다시 읽는 중…");if(S.devs)draw();}
+  if(force){mine.forEach(i=>S.busy.add(i));allBusy(true);note("프로바이더에서 다시 읽는 중…");if(S.devs)draw();}
   try{
    const r=await fetch("/api/devices/usage"+(force?"?refresh=1":""),{cache:"no-store",headers:force?{"X-Jarvis-Action":"usage-refresh"}:{}});
    if(r.status===404){sec.hidden=true;showNav(false);return;} // core 가 아닌 jarvis(게이트웨이)
@@ -166,12 +172,13 @@
    note(force?(n?n+"대는 읽지 못했습니다":fresh?"모두 다시 읽었습니다":"방금 읽은 값입니다(30초 뒤 다시 읽을 수 있습니다)"):"",force&&n);
   }catch(e){note("불러오지 못했습니다: "+(e.message||e),true);}
   finally{
-   if(force){mine.forEach(i=>S.busy.delete(i));$("#ulAll").disabled=false;}
+   if(force){mine.forEach(i=>S.busy.delete(i));allBusy(false);}
    if(S.devs)draw();
    timer=setTimeout(()=>{if(!document.hidden)load(false);},60000); // 숨은 탭은 멈춘다. 보이면 visibilitychange 가 다시 시작한다
   }
  }
  async function refreshOne(id){
+  if(S.busy.has(id))return;
   S.busy.add(id);draw();
   try{
    const r=await fetch("/api/devices/"+encodeURIComponent(id)+"/usage?refresh=1",{cache:"no-store",headers:{"X-Jarvis-Action":"usage-refresh"}}),o=await r.json();
@@ -202,7 +209,7 @@
   }
  }
  sec.addEventListener("click",e=>{
-  const t=e.target.closest("button");if(!t)return;
+  const t=e.target.closest("button");if(!t||t.getAttribute("aria-disabled")==="true")return;
   if(t.dataset.prov){S.prov=t.dataset.prov;draw();return;}
   if(t.id==="ulHot"){S.hot=!S.hot;draw();return;}
   if(t.dataset.mode){S.mode=t.dataset.mode;try{localStorage.setItem(MODE_KEY,S.mode);}catch(err){}draw();return;}
