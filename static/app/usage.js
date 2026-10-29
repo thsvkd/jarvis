@@ -140,6 +140,11 @@
   P.render($("#ulDlgB"),html`${devMeta(d)}${shown(d,p).map(a=>acct(a,d,p))}`);
  }
  dlg.addEventListener("close",()=>{S.dlg=null;S.login=null;});
+ // 바깥(backdrop)을 누르면 닫는다. backdrop 클릭도 대상이 dialog 라서 좌표가 상자 밖인지로 가린다(안쪽 여백 클릭은 닫지 않게)
+ dlg.addEventListener("click",e=>{
+  const r=dlg.getBoundingClientRect();
+  if(e.target===dlg&&(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom))dlg.close();
+ });
  function draw(){
   const ids=columns(false).map(c=>c.id);
   if(S.prov!=="all"&&!ids.includes(S.prov))S.prov="all";
