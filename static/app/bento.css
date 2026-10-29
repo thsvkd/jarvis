@@ -1187,6 +1187,10 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
 .ul-dlg-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .ul-dlg-h h3 { font-size: var(--fs-lg); }
 .ul-dlg .ul-meta { margin-bottom: 10px; }
+.ul-login > * + * { margin-top: 10px; }
+.ul-login a { overflow-wrap: anywhere; }
+.ul-code { font: 600 var(--fs-xl, 1.6rem)/1.2 var(--mono, monospace); letter-spacing: .08em; user-select: all; }
+.ul-acct > .seg-action { margin-top: 8px; }
 @media (max-width: 760px) {
   .ul-win, .ul-full .ul-win { grid-template-columns: 60px minmax(40px, 1fr) 38px; row-gap: 2px; }
   .ul-wr { grid-column: 2 / -1; text-align: left; }

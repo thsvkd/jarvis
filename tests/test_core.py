@@ -206,6 +206,12 @@ class RouteTest(unittest.TestCase):
         st, o = self.get("/api/devices/gw/usage?refresh=1", {"X-Jarvis-Action": "usage-refresh"})
         self.assertEqual((st, o["refreshed"]), (200, True))
         self.assertTrue(self.get("/api/devices/usage?refresh=1", {"X-Jarvis-Action": "usage-refresh"})[1]["devices"][0]["refreshed"])
+        # 다시 로그인은 viewers 만(루프백은 viewer 가 아니다), 맞춤 헤더도 있어야 한다
+        req = lambda h: urllib.request.Request(self.base + "/api/devices/gw/login?provider=codex", data=b"", method="POST", headers=h)
+        for h, code in (({}, 403), ({"X-Jarvis-Action": "usage-login"}, 403)):
+            with self.assertRaises(urllib.error.HTTPError) as e:
+                urllib.request.urlopen(req(h))
+            self.assertEqual(e.exception.code, code)
         self.core.state["gw"].update(fails=1, error="timed out")  # 폴링 실패 중이면 묻지 않고 바로 502
         self.assertEqual(self.get("/api/devices/usage")[1]["devices"][0]["status"], 502)
 

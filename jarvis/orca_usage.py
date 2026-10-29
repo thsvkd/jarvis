@@ -14,7 +14,7 @@ import math
 import threading
 import time
 
-from . import caam_usage, cswap_usage, orca, orca_rpc
+from . import caam_usage, cli_login, cswap_usage, orca, orca_rpc
 from .util import scrub_home
 
 REFRESH_S = 300
@@ -236,6 +236,11 @@ def read(force=False):
         body.setdefault("fetched_at", ca["fetched_at"])
     elif ca:
         body["caam_error"] = ca["error"]
+    if any(a.get("failure") == "delegated-refresh-required" for p in body["providers"] if p["id"] == "grok"
+           for a in p["accounts"]):
+        cli_login.refresh_grok()
+    if logins := cli_login.available():
+        body["logins"] = logins
     return 200, body
 
 

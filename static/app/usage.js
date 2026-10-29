@@ -8,10 +8,11 @@
  const sec=$("#usage");if(!sec||P.device)return; // 다른 기기를 보는 중이면 숨긴 채로 둔다
  const showNav=on=>document.querySelectorAll('[data-sh-sec="usage"],[data-lsec="usage"]').forEach(a=>a.toggleAttribute("data-core",on));
  const MODE_KEY="jarvis.usage.mode";
- const S={devs:null,prov:"all",hot:false,busy:new Set(),dlg:null,
+ const S={devs:null,prov:"all",hot:false,busy:new Set(),dlg:null,login:null,
   mode:(()=>{try{return localStorage.getItem(MODE_KEY)==="full"?"full":"brief";}catch(e){return "brief";}})()};
  const WIN={session:"5시간",weekly:"주간",fable:"Fable 주간",monthly:"월간"};
  const REASON={out_of_credits:"크레딧 소진",disabled:"사용 안 함"};
+ const LOGIN={codex:"Codex",grok:"Grok"}; // 게이트웨이가 device-code 로그인을 띄울 수 있는 CLI
 
  // ---------------------------------------------------------------- 값
  const pct=n=>n==null?"–":Math.round(n)+"%";
@@ -79,12 +80,13 @@
   return html`${note}<div class="ul-wins">${a.windows.map(win)}</div>${a.buckets.length?html`<p class="ul-extra">모델별 · ${a.buckets.map((b,i)=>html`${i?" · ":""}${b.name} <b>${pct(b.used)}</b>`)}</p>`:""}${extra(a.extra)}${a.credits?html`<p class="ul-extra">한도 리셋 크레딧 ${a.credits}개</p>`:""}`;
  }
  const head=a=>html`<div class="ul-ah"><b class="ul-email">${a.label}</b>${a.plan?html`<span class="ul-plan">${a.plan}</span>`:""}${a.org?html`<span class="ul-plan">${a.org}</span>`:""}${a.active?html`<span class="badge" data-tone="info">사용 중</span>`:""}${isErr(a)||a.attention?html`<span class="badge" data-tone="crit">${a.attention?"조치 필요":"확인 실패"}</span>`:""}</div>`;
- const acct=a=>html`<div class="ul-acct">${head(a)}${body(a)}${a.updated_at?html`<p class="ul-age">${P.fmt.ago(a.updated_at)} 확인</p>`:""}</div>`;
+ const relog=(d,id)=>html`<button type="button" class="seg-action" data-login="${d.id}" data-lp="${id}">${LOGIN[id]} 다시 로그인</button>`;
+ const acct=(a,d,p)=>html`<div class="ul-acct">${head(a)}${body(a)}${(isErr(a)||a.attention)&&(d.logins||[]).includes(p.id)?relog(d,p.id):""}${a.updated_at?html`<p class="ul-age">${P.fmt.ago(a.updated_at)} 확인</p>`:""}</div>`;
  const badge=d=>{const [t,l]=state(d);return html`<span class="badge" data-tone="${t}">${l}</span>`;};
  function devMeta(d){
   const busy=S.busy.has(d.id);
   if((d.status===200&&d.installed===false&&!(d.providers||[]).length)||d.status===501)return ""; // Orca·cswap 모두 없거나 갱신 전 jarvis 는 다시 물어도 같다
-  return html`<p class="ul-meta">${d.fetched_at?html`<span>${P.fmt.ago(d.fetched_at)} 수집</span>`:""}<button type="button" class="seg-action ul-ref" data-refresh="${d.id}" ${busy?"disabled":""}>${busy?"읽는 중…":"새로고침"}</button></p>`;
+  return html`<p class="ul-meta">${d.fetched_at?html`<span>${P.fmt.ago(d.fetched_at)} 수집</span>`:""}<button type="button" class="seg-action ul-ref" data-refresh="${d.id}" ${busy?"disabled":""}>${busy?"읽는 중…":"새로고침"}</button>${(d.logins||[]).filter(id=>!(d.providers||[]).some(p=>p.id===id)).map(id=>relog(d,id))}</p>`;
  }
 
  // ---------------------------------------------------------------- 화면
@@ -100,7 +102,7 @@
   const cell=(d,c)=>{
    const p=provs(d).find(p=>p.id===c.id),list=p?shown(d,p):[];
    if(!list.length)return html`<td data-label="${c.name}" class="ul-nil">–</td>`;
-   if(S.mode==="full")return html`<td data-label="${c.name}" class="ul-full">${list.map(acct)}</td>`;
+   if(S.mode==="full")return html`<td data-label="${c.name}" class="ul-full">${list.map(a=>acct(a,d,p))}</td>`;
    const err=list.some(isErr),act=list.some(a=>a.attention),pk=list.map(peak).filter(v=>v!=null),mx=pk.length?Math.max(...pk):null;
    return html`<td data-label="${c.name}"><button type="button" class="ul-cell" data-cell="${d.id+":"+c.id}" data-tone="${err||act?"crit":tone(mx)}"><b>${err&&mx==null?"실패":pct(mx)}</b><span>계정 ${list.length}${err?" · 실패 포함":""}${act?" · 조치 필요":""}</span></button></td>`;
   };
@@ -108,13 +110,20 @@
  }
  const dlg=$("#ulDlg");
  function dlgDraw(){
+  if(S.login){
+   const L=S.login,d=S.devs.find(x=>x.id===L.dev);
+   $("#ulDlgT").textContent=(d?d.host||d.id:L.dev)+" · "+LOGIN[L.prov]+" 로그인";
+   P.render($("#ulDlgB"),L.err?html`<p class="ul-err">${L.err}</p>`:!L.url?html`<p class="ul-muted">로그인 URL 을 받는 중입니다…</p>`
+    :html`<div class="ul-login"><p>아래 주소를 열어 로그인하고 일회용 코드를 넣으세요. 코드는 ${new Date(L.expires_at*1000).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",hour12:false})}까지 유효합니다.</p><p><a href="${L.url}" target="_blank" rel="noopener noreferrer">${L.url}</a></p><p class="ul-code">${L.code}</p><p class="ul-muted">이 코드는 이 기기에서 방금 시작한 로그인용입니다. 로그인을 마친 뒤 새로고침을 누르세요.</p><button type="button" class="seg-action" data-refresh="${L.dev}">새로고침</button></div>`);
+   return;
+  }
   if(!S.dlg)return;
   const d=S.devs.find(x=>x.id===S.dlg.dev),p=d&&provs(d).find(x=>x.id===S.dlg.prov);
   if(!p){dlg.close();return;}
   $("#ulDlgT").textContent=(d.host||d.id)+" · "+p.name;
-  P.render($("#ulDlgB"),html`${devMeta(d)}${shown(d,p).map(acct)}`);
+  P.render($("#ulDlgB"),html`${devMeta(d)}${shown(d,p).map(a=>acct(a,d,p))}`);
  }
- dlg.addEventListener("close",()=>{S.dlg=null;});
+ dlg.addEventListener("close",()=>{S.dlg=null;S.login=null;});
  function draw(){
   const ids=columns(false).map(c=>c.id);
   if(S.prov!=="all"&&!ids.includes(S.prov))S.prov="all";
@@ -161,13 +170,22 @@
   }catch(e){note((e.message||String(e)),true);}
   S.busy.delete(id);draw();
  }
+ async function login(dev,prov){
+  const L=S.login={dev,prov};dlgDraw();if(!dlg.open)dlg.showModal();
+  try{
+   const r=await fetch("/api/devices/"+encodeURIComponent(dev)+"/login?provider="+prov,{method:"POST",cache:"no-store",headers:{"X-Jarvis-Action":"usage-login"}}),o=await r.json();
+   if(r.ok)Object.assign(L,{url:o.url,code:o.code,expires_at:o.expires_at});else L.err=o.error||"HTTP "+r.status;
+  }catch(e){L.err=e.message||String(e);}
+  if(S.login===L)dlgDraw();
+ }
  sec.addEventListener("click",e=>{
   const t=e.target.closest("button");if(!t)return;
   if(t.dataset.prov){S.prov=t.dataset.prov;draw();return;}
   if(t.id==="ulHot"){S.hot=!S.hot;draw();return;}
   if(t.dataset.mode){S.mode=t.dataset.mode;try{localStorage.setItem(MODE_KEY,S.mode);}catch(err){}draw();return;}
   if(t.id==="ulAll"){load(true);return;}
-  if(t.dataset.refresh){refreshOne(t.dataset.refresh);return;}
+  if(t.dataset.login){login(t.dataset.login,t.dataset.lp);return;}
+  if(t.dataset.refresh){if(S.login)dlg.close();refreshOne(t.dataset.refresh);return;}
   if(t.dataset.cell){const [dev,prov]=t.dataset.cell.split(":");S.dlg={dev,prov};dlgDraw();if(!dlg.open)dlg.showModal();return;}
   if(t.hasAttribute("data-close")){dlg.close();return;}
   if(t.hasAttribute("data-clear")){S.prov="all";S.hot=false;draw();}

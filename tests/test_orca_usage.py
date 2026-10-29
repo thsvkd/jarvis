@@ -100,6 +100,10 @@ class ReadTest(unittest.TestCase):
             p = mock.patch.object(m, "read", return_value=None)
             p.start()
             self.addCleanup(p.stop)
+        for name, kw in (("available", {"return_value": []}), ("refresh_grok", {})):  # 이 기기의 grok·codex 를 부르지 않게
+            p = mock.patch.object(orca_usage.cli_login, name, **kw)
+            setattr(self, name, p.start())
+            self.addCleanup(p.stop)
 
     def test_refresh_interval(self):
         calls = []
@@ -131,6 +135,7 @@ class ReadTest(unittest.TestCase):
         # 처음: 보관값을 읽고 뒤에서 갱신 · 10초 뒤: 보관값 · 강제는 30초 지나야 그 자리에서 · 300초 뒤: 마지막 값 + 뒤에서 갱신
         self.assertEqual(calls, [False, True, False, False, True, True])
         self.assertEqual(seen, [(False, True), (False, False), (False, False), (True, False), (False, True)])
+        self.refresh_grok.assert_called()  # SNAP 의 Grok 은 delegated-refresh-required 다: grok CLI 로 갱신을 맡긴다
 
     def test_slow_forced_refresh_falls_back(self):
         def call(m, p, timeout):
