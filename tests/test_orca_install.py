@@ -31,14 +31,14 @@ class InstallTest(unittest.TestCase):
             self.assertEqual(orca_install.archive_contract(path, "1.4.237", "arm64"), {43, 50})
 
     def test_managed_runtime_child_is_bound_to_official_parent(self):
-        with patch.object(orca_install, "profile", return_value={"kind": "windows-user", "root": "/official"}), \
+        with patch.object(orca_install, "profile", return_value={"kind": "mac-app", "root": "/official"}), \
                 patch.object(orca_install.orca, "find_dir", return_value="/tmp/fake"), \
                 patch.object(orca_install.orca, "_read", return_value={"pid": 123}), \
                 patch.object(orca_install.psutil, "Process") as process, \
                 patch.object(orca_install.orca_rpc, "call", return_value={"appVersion": "1.4.237"}), \
                 patch.object(orca_install, "installed", return_value="1.4.237"):
             process.return_value.exe.return_value = "/profile/orcad/node"
-            parent = type("Parent", (), {"exe": lambda self: "/official/Orca.exe"})()
+            parent = type("Parent", (), {"exe": lambda self: "/official/Contents/MacOS/Orca"})()
             process.return_value.parents.return_value = [parent]
             orca_install.validate_runtime()
 

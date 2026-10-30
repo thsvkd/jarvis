@@ -6,7 +6,8 @@ electron-updater 는 headless serve 와 deb 에서 설치를 거부한다. jarvi
     sudo -n /usr/bin/apt install -y -- <검증한 deb>
 
 앱이 이미 최신이어도 스킬은 갱신한다. 설치 도중 jarvis 가 죽으면 다음 기동 때 서비스를 다시 띄운다.
-Mac·Windows 는 공식 앱의 로컬 업데이터를 쓴다. sudo 없는 Linux 도 같은 공식 deb 를 사용자 경로에 교체한다.
+Mac 은 공식 앱의 로컬 업데이터를 쓴다. Windows 는 S4U 서버를 구성한 기기만 공식 설치기로 올린다(K4).
+sudo 없는 Linux 도 같은 공식 deb 를 사용자 경로에 교체한다.
 """
 
 import base64
@@ -276,14 +277,16 @@ def _supported():
     """이 프로세스가 deb Orca 를 올리고 다시 띄울 수 있는지. (가능, 이유)."""
     if _s4u_server():
         return True, None
+    if sys.platform == "win32":  # K4: 데스크톱 앱이 서버를 겸하는 Windows 는 갱신하지 않는다
+        return False, "Windows 는 S4U 서버를 구성한 기기만 갱신합니다. 이 기기에는 S4U 서버 기록이 없습니다"
     p = orca_install.profile()
     if not os.path.isfile(p["cli"]):
         return False, "공식 Orca 설치본의 CLI 를 찾지 못했습니다"
-    if p["kind"] in ("mac-app", "windows-user"):
+    if p["kind"] == "mac-app":
         try:
             status = orca_rpc.call("updater.getStatus")
             support = status.get("support") or {}
-            if p["kind"] == "mac-app" and status.get("appVersion") == "1.4.224" \
+            if status.get("appVersion") == "1.4.224" \
                     and support.get("installMode") == "supervised-headless-serve":
                 return False, "Orca 1.4.224 macOS 서버 업데이터의 대기 충돌로 공식 서명 패키지를 통한 최초 이전이 필요합니다"
             return (True, None) if support.get("automatic") else (False, "Orca 공식 업데이터 사용 불가: " + str(support.get("reason")))
@@ -453,7 +456,7 @@ class Live:
         self.manager = orca_issue.manager(pairing=False)
         _write_mark({"stopped": True, "started": False, "at": time.time(),
                      "transaction": self.transaction,
-                     "native": orca_install.profile()["kind"] in ("mac-app", "windows-user"), "target_version": self.target,
+                     "native": orca_install.profile()["kind"] == "mac-app", "target_version": self.target,
                      "sessions": {"terminals": self.sessions.terminals, "daemons": self.sessions.daemons}})
 
     def mark_started(self):
@@ -679,7 +682,7 @@ def _run_job():
         ops = Live()
         if _s4u_server():
             result = _run_s4u()
-        elif orca_install.profile()["kind"] in ("mac-app", "windows-user"):
+        elif orca_install.profile()["kind"] == "mac-app":
             target, _ = ops.manifest()
             _expected(target)
             before = _installed()

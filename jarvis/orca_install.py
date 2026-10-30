@@ -9,7 +9,6 @@ import tempfile
 import time
 import zipfile
 import platform
-import subprocess
 import psutil
 
 from . import config, orca, orca_rpc
@@ -102,7 +101,7 @@ def validate_runtime():
     if not metadata or not metadata.get("pid"):
         raise RuntimeError("실행 중인 Orca 설치 경로를 확인할 수 없습니다")
     expected = os.path.join(p["root"], "Contents", "MacOS", "Orca") if p["kind"] == "mac-app" else \
-        os.path.join(p["root"], "Orca.exe" if p["kind"] == "windows-user" else "orca-ide")
+        os.path.join(p["root"], "orca-ide")
     process = psutil.Process(int(metadata["pid"]))
     # 새 Orca 는 로컬 RPC 를 orcad(Node) 자식으로 옮긴다. 그 감독 부모까지 같은 설치본인지 확인한다.
     processes = [process] + process.parents()[:8]
@@ -154,8 +153,7 @@ def archive_contract(path, target, arch):
 def native_contract(target, meta):
     """공식 업데이터가 받은 바로 그 패키지의 해시와 버전별 계약을 설치 전에 확인한다."""
     from .orca_update import check_file
-    cache = (os.path.expanduser("~/Library/Caches/orca-updater/pending") if sys.platform == "darwin" else
-             os.path.join(os.environ.get("LOCALAPPDATA", ""), "orca-updater", "pending"))
+    cache = os.path.expanduser("~/Library/Caches/orca-updater/pending")
     with open(os.path.join(cache, "update-info.json"), encoding="utf-8") as f:
         info = json.load(f)
     name = info.get("fileName")
@@ -163,24 +161,7 @@ def native_contract(target, meta):
         raise RuntimeError("공식 업데이터의 캐시가 이번 대상 패키지와 일치하지 않습니다")
     path = os.path.join(cache, name)
     check_file(path, meta["sha512"], meta["size"])
-    arch = "arm64" if platform.machine() in ("arm64", "aarch64") else "x64"
-    if sys.platform == "darwin":
-        return archive_contract(path, target, arch)
-    # NSIS 는 app-64.7z 에 앱을 담는다. 기존 세션이 있을 때 검사 도구가 없으면 보류한다.
-    seven = shutil.which("7z") or shutil.which("7z.exe")
-    if not seven:
-        candidate = os.path.join(os.environ.get("ProgramFiles", ""), "7-Zip", "7z.exe")
-        seven = candidate if os.path.isfile(candidate) else None
-    if not seven:
-        raise RuntimeError("열린 세션을 보존하며 Windows 패키지를 검사하려면 7-Zip 이 필요합니다")
-    with tempfile.TemporaryDirectory(prefix="jarvis-orca-compat-") as directory:
-        inner = os.path.join(directory, "app.7z")
-        with open(inner, "wb") as f:
-            subprocess.run([seven, "e", "-so", path, "$PLUGINSDIR/app-64.7z"], stdout=f,
-                           stderr=subprocess.PIPE, check=True, timeout=120)
-        p = subprocess.run([seven, "e", "-so", inner, "resources/orca-local-build.json"],
-                           capture_output=True, check=True, timeout=60)
-        return contract_versions(json.loads(p.stdout), target, arch)
+    return archive_contract(path, target, "arm64" if platform.machine() in ("arm64", "aarch64") else "x64")
 
 
 def native_update(before, target, phase, idle, prepare=None, verify=None, checkpoint=None):

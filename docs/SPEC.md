@@ -1,6 +1,6 @@
 # SPEC
 
-> 상태: 확정(2026-10-30 사용자 확인 K1). Windows 갱신 방식(K4·K10)은 확인 중이다. 범위: ai-setup 흡수의 모듈 계약과 Orca 모듈. 결정의 배경은 `2026-10-30-ai-setup-absorption.md` 가 소유한다.
+> 상태: 확정(2026-10-30 사용자 확인 K1, K4·K10 은 5라운드). 범위: ai-setup 흡수의 모듈 계약과 Orca 모듈. 결정의 배경은 `2026-10-30-ai-setup-absorption.md` 가 소유한다.
 
 ## 모듈 계약
 
@@ -33,8 +33,8 @@ jarvis 본체는 모듈을 라이브러리로 부른다. 부트스트랩과 시�
 | --- | --- | --- | --- |
 | Debian/Ubuntu | 공식 deb `/opt/Orca` | 사용자 유닛 `orca-serve.service`: `ExecStart=/opt/Orca/resources/bin/orca-ide serve --supervise --port 6768 --pairing-address <tailnet IP>`(페어링 플래그는 O7), `KillMode=process`, `Restart=on-failure`, Python 러너 없음 | `jarvis/orca_update.py` |
 | macOS | `/Applications/Orca.app` | `<앱 CLI> serve --supervise ...` 를 바로 실행하는 LaunchAgent | Orca 공식 supervised 업데이터 RPC(`jarvis/orca_update.py`) |
-| Windows(S4U) | `%LOCALAPPDATA%\Programs\orca` | S4U 예약 작업과 러너, 서비스 디렉터리의 `app\build-<식별자>` 복사본 | 설치기 `/S --updated`(`modules/orca/orca_update_windows.py`), 러너의 자동 전환. 설치 폴더의 데스크톱 앱이 열려 있으면 보류(deferred). 일반 권한이라 터미널을 셀 수 없으면 최대 300초 동안 러너의 전환을 기다린다(잠정) |
-| Windows(데스크톱 전용) | 같음 | 데스크톱 앱이 서버를 겸함 | Orca 공식 업데이터 RPC(잠정, 열린 문제 O11) |
+| Windows(S4U) | `%LOCALAPPDATA%\Programs\orca` | S4U 예약 작업과 러너, 서비스 디렉터리의 `app\build-<식별자>` 복사본 | 설치기 `/S --updated`(`modules/orca/orca_update_windows.py`), 러너의 자동 전환. 설치 폴더의 데스크톱 앱이 열려 있으면 보류(deferred). 일반 권한이라 터미널을 셀 수 없으면 최대 300초 동안 러너의 전환을 기다린다(K10) |
+| Windows(데스크톱 전용) | 같음 | 데스크톱 앱이 서버를 겸함 | 갱신하지 않는다(K4: Windows 는 S4U 하나로 통일). 계획은 package 단계를 blocked 로 보고한다 |
 
 - 기존 유닛이 같은 형태인지는 실행 파일을 realpath 로 비교해 판정하고, 페어링 플래그(`--no-pairing`·`--mobile-pairing` 등)는 판정에서 뺀다(잠정, O7). 형태가 다른 유닛은 바꾸지 않고 보고한다.
 - 설치본 버전은 PATH 의 `orca` 가 아니라 설치본의 CLI·메타데이터로 읽는다(Linux 의 PATH 첫 `orca` 는 데스크톱 shim 일 수 있다).

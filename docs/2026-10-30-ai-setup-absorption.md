@@ -1,13 +1,13 @@
 # ai-setup 흡수 설계
 
-상태: 2026-10-30 사용자 확인(4라운드). K4·K10 은 5라운드에서 확인 중이다. 작성자는 ai-setup-49 세션이고, 검토와 구현은 jarvis-a3 세션이 맡는다. jarvis-a3 의 검토 의견 R1~R11 을 반영했다.
+상태: 2026-10-30 사용자 확인(5라운드에서 K4·K10 까지 닫음). 작성자는 ai-setup-49 세션이고, 검토와 구현은 jarvis-a3 세션이 맡는다. jarvis-a3 의 검토 의견 R1~R11 을 반영했다.
 
 2026-10-30 사용자가 "둘이서 협업하여 자율적으로 진행"하라고 지시했다. 사용자 확인 전까지 두 세션은 다음 규칙을 지킨다.
 - 하지 않는 것: 커밋, push, 릴리스, 실제 기기의 Orca 서비스 중지·재시작·재설치(두 세션이 Orca 터미널 안에서 돌 수 있다), 실제 페어링, ai-setup 코드 삭제, TEST_SPEC 케이스 확정.
 - 하는 것: 이 문서 수정(ai-setup-49), jarvis 의 SSoT 골격과 Orca 모듈 이식·단위 테스트(jarvis-a3), 이식한 코드의 적대적 리뷰(ai-setup-49). 모두 작업 트리에만 둔다.
 - 잠정값: O8 은 ORCA-8 이다. O11 은 S4U 를 이미 쓰는 Windows 기기는 S4U 로, 데스크톱 전용 기기는 jarvis 의 기존 공식 업데이터 경로로 둔다(코드를 지우지 않으므로 되돌리기 쉽다). O7 은 기존 유닛의 페어링 플래그를 바꾸지 않고 형태 판정에서 뺀다.
 - 아침 보고는 이 문서 끝의 "진행 기록" 절에 적는다. 그 절은 두 세션이 함께 쓰고, 나머지 절은 ai-setup-49 가 쓴다.
-결정의 원본은 grill-board 답변이다: `~/.claude/tools/grill-board/answers/ai-setup-2026-10-30-jarvis-merge{,-r2,-r3,-r4}.json`.
+결정의 원본은 grill-board 답변이다: `~/.claude/tools/grill-board/answers/ai-setup-2026-10-30-jarvis-merge{,-r2,-r3,-r4,-r5}.json`.
 
 ## 1. 배경
 
@@ -134,7 +134,7 @@ jarvis `docs/TEST_SPEC.md` 에 옮길 후보다. 출처의 AI-n은 ai-setup TEST
 | O8 | jarvis 는 지금 앱이 최신이어도 `orca skills update --all` 을 실행한다. 그러면 사용자가 고친 소유 스킬과 소유하지 않은 Orca 스킬까지 바뀐다. ORCA-8 은 기록한 뒤 바뀌지 않은 소유 스킬만 바꾸게 한다. 추천은 ORCA-8 이었다. **닫힘(K2)**: 사용자가 "Orca 를 갱신할 때 관련 스킬·CLI 를 모두 갱신한다"로 정해 `--all` 을 유지한다. |
 | O9 | ai-setup 테스트는 pytest(monkeypatch, tmp_path)를 쓰고, jarvis 테스트는 표준 라이브러리 unittest 만 쓴다(`JARVIS_CONFIG=/dev/null python3 -m unittest discover -s tests`). 옮기는 테스트는 unittest 로 바꾸고, 단언은 약하게 만들지 않는다. Windows 전용 테스트는 kgolf 에서 돌린다. |
 | O10 | 마무리 배포는 jarvis 의 릴리스 경로를 쓴다. `tools/release.py` 가 GitHub 릴리스를 만들고, core 의 갱신 버튼이 `versions/` 로 전환한다(롤백 포함). 아직 게이트웨이가 없는 기기(thsvkd-win, grok-bot)는 처음 설치하는 경로가 따로 필요하다. |
-| O11 | Windows 를 모두 S4U 형태로 맞출지(추천, jarvis 의 windows-user 갱신 코드 삭제), S4U 가 없는 데스크톱 전용 기기에는 jarvis 의 기존 공식 업데이터 RPC 경로를 남길지 정해야 한다. |
+| O11 | 닫힘(K4): Windows 는 S4U 하나로 통일하고 jarvis 의 windows-user 갱신 코드를 지웠다. |
 | O8b | 지금 jarvis 기기에는 스킬 소유 기록이 없다. ORCA-8 을 그대로 적용하면, 갱신해도 번들 스킬이 옛 판에 머문다(예전의 `--all` 보다 퇴행). 받아들일 때 지금 판의 사본과 내용이 같은지로 소유를 판정하는 방법은 쓸 수 없다. pi5-server2 의 orca-cli·orchestration 이 `orca skills get` 출력과 달랐다. (A) 엄격한 ORCA-8: 갱신하지 않고 status 에 알린다. (B) 받아들일 때 번들 목록에 이름이 있는 스킬을 `skills_adopted` 로 기록하고, 예전처럼 갱신하되 uninstall 은 지우지 않는다. 추천은 B 였다. **닫힘(K2)**: `--all` 로 정해져 소유 기록이 없어도 갱신하므로 이 문제가 없어졌다. |
 | O12 | 영수증 동시 쓰기(jarvis 갱신과 다른 셋업이 동시에 도는 경우)에는 잠금이 없다. |
 
@@ -147,13 +147,13 @@ jarvis `docs/TEST_SPEC.md` 에 옮길 후보다. 출처의 AI-n은 ai-setup TEST
 | K1 | 이 문서의 결정 D1~D16 과 Orca 수용 케이스 ORCA-1~13(jarvis `docs/TEST_SPEC.md`)을 확정한다. | 확정 | 확정 |
 | K2 | O8: 소유 스킬 가운데 기록한 뒤 바뀌지 않았고 새 판이 싣는 것만 갱신한다(ORCA-8). 예전 jarvis 는 `skills update --all` 이었다. | ORCA-8 | **기각**: `--all` 로 모두 갱신(관련 스킬·CLI 모두) |
 | K3 | O8b: 지금 jarvis 기기에는 스킬 소유 기록이 없으므로, ORCA-8 만으로는 스킬이 옛 판에 머문다. (A) 그대로 둔다, (B) 받아들일 때 번들 이름을 `skills_adopted` 로 기록해 예전처럼 갱신하고 uninstall 은 지우지 않는다. | B | K2 로 없어짐 |
-| K4 | O11: S4U 를 쓰는 Windows 는 S4U, 데스크톱 전용 Windows 는 jarvis 의 기존 공식 업데이터 경로로 둔다. | 잠정값대로 | 확인 중(5라운드: S4U 설명 뒤 통일·유지 선택) |
+| K4 | O11: S4U 를 쓰는 Windows 는 S4U, 데스크톱 전용 Windows 는 jarvis 의 기존 공식 업데이터 경로로 둔다. | 잠정값대로 | 기각 → Windows 는 S4U 하나로 통일(5라운드). 데스크톱 전용 갱신 코드를 지웠다 |
 | K5 | O7: 기존 유닛의 페어링 플래그(`--no-pairing` 등)는 바꾸지 않고 형태 판정에서 뺀다. 새로 쓰는 유닛에는 넣지 않는다. | 잠정값대로 | 잠정값대로 |
 | K6 | POSIX 모바일 페어링 링크는 기기에 보관하지 않고 core 가 1회 발급한다(Windows 는 보관한다). ORCA-1 문구를 나눴다. | 잠정값대로 | 잠정값대로 |
 | K7 | 이미 있는 같은 형태의 서버는 `adopted: true` 로 기록해 다루고, uninstall 은 지우지 않는다. 패키지는 소유로 기록하지 않는다. | 잠정값대로 | 잠정값대로 |
 | K8 | 비대화형 갱신에서는 `sudo -n` 을 쓴다(ai-setup SPEC D3 "TTY 가 아니면 sudo 를 실행하지 않는다"의 예외). 비밀번호가 필요하면 바로 실패한다. | 허용 | 허용 |
 | K9 | uninstall 도 dry-run 이 낸 `plan_id` 를 받아야 실행한다. 막힌 단계가 있는 apply 는 deferred 가 아니라 failed 다. | 잠정값대로 | 잠정값대로 |
-| K10 | Windows 에서 서버 터미널을 셀 수 없을 때(일반 권한의 EPERM)도 전환을 300초까지 기다린다. 데스크톱 앱이 열려 있으면 강제 옵션 없이 보류한다(강제는 승인 카드가 생기면 넣는다). | 잠정값대로 | 확인 중(K4 와 함께) |
+| K10 | Windows 에서 서버 터미널을 셀 수 없을 때(일반 권한의 EPERM)도 전환을 300초까지 기다린다. 데스크톱 앱이 열려 있으면 강제 옵션 없이 보류한다(강제는 승인 카드가 생기면 넣는다). | 잠정값대로 | 잠정값대로(5라운드) |
 | K11 | 매니페스트 검증 코드 두 벌의 통합은 실기기 실측 뒤 별도 단위로 미룬다(D11 의 잠정 예외). | 잠정값대로 | 잠정값대로 |
 | K12 | 다음 단계를 허가한다: 커밋(jarvis 브랜치), pi5-s3 와 kgolf 의 실측(실제 Orca 서비스에 닿는다), ai-setup 의 Orca 코드 삭제와 ORCA-12, 릴리스, 모든 기기 배포(thsvkd-win 포함). | 순서대로 허가 | 1~5 모두 순서대로 허가 |
 | K13 | jarvis 가 0dcf2de 의 보류(S4U 서버면 `update-ai orca` 로 넘김)를 지우고 S4U Windows 의 Orca 갱신을 직접 맡는다. 이 jarvis 를 배포하기 전에 ai-setup 쪽 ORCA-12(`update-ai orca` 가 Orca 를 바꾸지 않음)를 먼저 배포해야, 두 도구가 같은 기기의 Orca 를 동시에 갱신하지 않는다. | ORCA-12 를 먼저 배포 | ORCA-12 를 먼저 배포 |
@@ -195,3 +195,4 @@ jarvis `docs/TEST_SPEC.md` 에 옮길 후보다. 출처의 AI-n은 ai-setup TEST
 - 2026-10-30 jarvis-a3: 사용자 4라운드 답을 반영했다. K2 에 따라 ORCA-8 을 `skills update --all` 로 고쳤다. `orca_install.skills()` 는 `--all` 을 실행하고, 맞춘 판을 `orca-skills-version` 에 남기며, 깐 스킬의 다이제스트를 다시 기록한다(실패해도 기록한다). plan 은 앱을 올릴 때와 맞춘 판이 설치본과 다를 때만 skills 단계를 낸다. 옮긴 `update_owned_skills` 와 AI-66 테스트 4건은 지웠다. 변이 4종(계획 조건, 소유 기록, 맞춘 판, `--all`) 모두 FAIL 로 잡힘. 전체 366건 OK(skip 8). 처음 돌린 테스트 하나가 실제 `~/.local/state/jarvis/orca-skills-version` 을 남겨 지웠고, 테스트가 상태 폴더를 임시 폴더로 바꾼 뒤에는 생기지 않는다. SSoT 3종은 authoritative(K4·K10 확인 중)로 바꿨다.
 - 2026-10-30 jarvis-a3: K12 에 따라 `orca-module` 브랜치에 커밋했다(c0c04a8, push 안 함). pi5-s3(pi5-server3) 실측: 커밋을 `/tmp/jarvis-orca-measure-c0c04a8` 에 풀어 status·plan(rc=0) → 같은 plan_id 로 apply(ssh 가 끊겨도 설치가 끊기지 않게 setsid 로 분리). 결과 done: deb 1.4.237 → 1.4.244, 번들 스킬 `--all`, 기존 `orca-serve` 유닛을 `adopted: true` 로 기록(유닛 파일 mtime 10-26 그대로). 뒤의 status 는 1.4.244·health ok, plan 은 단계가 없다(current). orca-serve active, NRestarts=0. 실측에서 apply 결과에 skills 단계가 빠진 것을 찾아, 앞 단계가 함께 처리한 단계도 결과에 남기게 고쳤다(변이 FAIL 로 잡힘).
 - 2026-10-30 jarvis-a3: kgolf 실측. 전체 테스트를 Windows 에서 처음 돌렸다. Windows 전용 테스트는 통과했고, 실패는 테스트 쪽 문제였다: mac 테스트가 플랫폼을 고정하지 않아 kgolf 의 실제 영수증을 읽음, 잠금 테스트가 fcntl 만 씀, X1 테스트가 없는 os.getuid 를 지움. 또 `test_orca_serve` 가 HOME 만 바꿔 Windows 에서는 실제 홈(USERPROFILE)에 `.config\systemd\user\orca-serve.service` 와 `Library\LaunchAgents\com.stablyai.orca.serve.plist` 를 남겼다. 둘 다 그 실행이 만든 폴더(생성 시각 10:49)라 폴더째 지웠고, 그 모듈은 Windows 에서 건너뛰며 USERPROFILE 도 바꾼다. 고친 뒤 kgolf 에서 새로 생긴 홈 파일 없음, 영수증 해시 그대로. 남은 실패 3건(`test_cli_login` 2, `test_parsers` 1)은 main 과 같은 기존 코드의 Windows 문제로 이번 범위 밖이다. status·plan rc=0(1.4.243 → 1.4.244, S4U 설치기·스킬). apply 는 데스크톱 앱이 열려 있어 deferred·rc=2, 영수증·설치본 그대로. 실측에서 고친 것: Windows 콘솔에서도 표준 출력 JSON 을 UTF-8 로 냄, 보류를 진행 로그에 "실패"가 아니라 "보류"로 적음. 전체 367건 OK(skip 8).
+- 2026-10-30 jarvis-a3: 사용자 5라운드 답(K4 `s4u_only`, 스킬 범위 해석 `ok`)을 반영했다. `orca_update._supported` 는 S4U 서버 기록이 없는 Windows 를 공식 업데이터 RPC 없이 거절하고, 실행 분기·중단 기록의 native 판정은 Mac 만 남겼다. `orca_install.native_contract` 의 Windows(7-Zip) 검사와 `validate_runtime` 의 Orca.exe 분기를 지웠다. 새 테스트 1건(S4U 없는 Windows 는 갱신하지 않음)은 가드를 지우는 변이에서 FAIL. 전체 368건 OK(skip 8). 스킬 범위는 해석대로다: CLI 는 앱과 함께 올라가고, 스킬은 `skills update --all`, 플러그인은 Orca CLI 에 명령이 없어 범위 밖이다.

@@ -208,6 +208,17 @@ class CheckTest(unittest.TestCase):
                 patch.object(orca_update.sys, "platform", "linux"):
             self.assertIsNone(orca_update._s4u_server())  # Windows 가 아니면 S4U 기록을 보지 않는다
 
+    def test_a_windows_desktop_without_an_s4u_server_is_not_updated(self):
+        """covers: ORCA-6 — K4: Windows 는 S4U 서버로만 갱신한다. 데스크톱 앱의 공식 업데이터 RPC 는 부르지 않는다."""
+        with tempfile.TemporaryDirectory() as d, patch.object(orca_update, "RECEIPT", self.s4u_receipt(d, state="configuring")), \
+                patch.object(orca_update.sys, "platform", "win32"), \
+                patch.object(orca_update.orca_install, "profile", return_value={"kind": "windows-user", "cli": "/orca.exe"}), \
+                patch.object(orca_update.os.path, "isfile", return_value=True), \
+                patch.object(orca_update.orca_rpc, "call", side_effect=AssertionError("updater RPC")):
+            supported, reason = self.old[0]()
+        self.assertFalse(supported)
+        self.assertIn("S4U", reason)
+
     def run_s4u(self, installer="ok", desktop=False, skills=None, versions=("1.4.240", "1.4.244"), switch=None):
         seen = iter(versions)
         tools = type("Tools", (), {"update_orca_windows": staticmethod(lambda expect=None: self.calls.append("installer") or installer)})
