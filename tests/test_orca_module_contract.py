@@ -340,6 +340,18 @@ class Apply(Fixture):
         self.assertIn("apt: Removing orca-ide", p.stderr)
         self.assertIn("rc=0,1", p.stderr)
 
+    def test_stdout_is_utf8_json_whatever_the_console_encoding(self):
+        """kgolf 실측: Windows 콘솔(cp949)에서 한글 JSON 이 깨졌다. 표준 출력의 계약은 UTF-8 JSON 이다."""
+        import subprocess
+        import sys as _sys
+        script = ("from jarvis import module, orca_module\n"
+                  "orca_module.status = lambda: {'module': 'orca', 'error': '데스크톱 앱이 열려 있음'}\n"
+                  "module.cli(['orca', 'status', '--json'])\n")
+        p = subprocess.run([_sys.executable, "-c", script], capture_output=True, timeout=60,
+                           cwd=str(pathlib.Path(__file__).resolve().parents[1]),
+                           env={**os.environ, "JARVIS_CONFIG": "/dev/null", "PYTHONIOENCODING": "cp949"})
+        self.assertEqual(json.loads(p.stdout.decode("utf-8")), {"module": "orca", "error": "데스크톱 앱이 열려 있음"})
+
     def test_the_module_imports_and_answers_without_pwd(self):
         """X1 — Windows 에는 pwd·os.getuid 가 없다. 그래도 모듈을 import 할 수 있다."""
         import subprocess

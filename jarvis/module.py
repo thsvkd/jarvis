@@ -63,5 +63,7 @@ def cli(argv):
         sys.stdout.flush()
         os.dup2(saved, 1)
         os.close(saved)
+    if hasattr(sys.stdout, "reconfigure"):  # 계약은 UTF-8 JSON 이다(Windows 콘솔의 기본값은 cp949 등이다)
+        sys.stdout.reconfigure(encoding="utf-8")
     print(json.dumps(out, ensure_ascii=False), flush=True)
     return code

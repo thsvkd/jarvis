@@ -715,7 +715,8 @@ def _run_job():
     except OSError:
         pass
     tail = json.dumps({k: (result or {}).get(k) for k in ("app", "skills", "from_version", "to_version")}, ensure_ascii=False)
-    print(f"[jarvis] Orca 업데이트 {'실패: ' + error if error else '완료'} {tail}", flush=True)
+    outcome = ("보류: " if deferred else "실패: ") + error if error else "완료"
+    print(f"[jarvis] Orca 업데이트 {outcome} {tail}", flush=True)
     # 기다리는 쪽(모듈 apply)은 state 가 바뀌면 표준 출력을 되돌린다: 기록·로그·잠금 해제를 모두 마친 뒤에 바꾼다
     _unlock_file()
     with _lock:
