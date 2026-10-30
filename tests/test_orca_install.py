@@ -104,3 +104,66 @@ class RecoveryTest(unittest.TestCase):
                 orca_install.recover_user_deb()
             self.assertEqual(orca_install.asar_version(root + '/opt/Orca/resources'), '1.4.230')
             self.assertFalse(os.path.exists(root + '.previous'))
+
+
+class SkillsTest(unittest.TestCase):
+    """covers: ORCA-8 — 갱신 경로(orca_update → orca_install.skills)는 번들 스킬을 모두 바꾸고, 소유 기록은 새 사본으로 다시 쓴다."""
+
+    def setUp(self):
+        import hashlib
+        import pathlib
+        import shutil
+        from jarvis import orca_module
+        self.tools = orca_module.tools()
+        self.home = pathlib.Path(tempfile.mkdtemp(prefix="jarvis-skills-"))
+        self.addCleanup(shutil.rmtree, self.home, True)
+        for name in ("orca-cli", "user-skill"):
+            (self.home / ".agents/skills" / name).mkdir(parents=True)
+            (self.home / ".agents/skills" / name / "SKILL.md").write_text("official")
+        self.receipt = self.home / ".claude/.claude-code-setup.json"
+        self.receipt.parent.mkdir()
+        self.owned = {"method": self.tools.package_plan("linux", "x86_64")["method"], "skills_state": "done",
+                      "skills_added": {"orca-cli": hashlib.sha256(b"SKILL.mdofficial").hexdigest()}}
+        self.receipt.write_text(json.dumps({"tool_installs": {"orca": self.owned}, "hooks": {"keep": 1}}))
+        self.calls = []
+        for p in (patch.object(self.tools, "home_dir", lambda: self.home),
+                        patch.object(self.tools.sys, "platform", "linux"),
+                  patch.object(orca_install, "profile", lambda: {"cli": "/opt/Orca/resources/bin/orca-ide"}),
+                  patch.object(orca_install, "installed", lambda: "1.4.244"),
+                  patch.object(orca_install.config, "STATE_DIR", str(self.home / "state")),
+                  patch.object(orca_install, "SKILLS_MARK", str(self.home / "state/orca-skills-version")),
+                  patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.home / ".config")}),
+                  patch.object(orca_install.platform, "machine", lambda: "x86_64")):
+            p.start()
+            self.addCleanup(p.stop)
+        os.environ.pop("XDG_STATE_HOME", None)
+
+    def run_cli(self, rc):
+        def run(argv, timeout=6, sudo=False):
+            self.calls.append(argv)
+            (self.home / ".agents/skills/orca-cli/SKILL.md").write_text("newer")
+            return rc, "", "npx: command not found" if rc else ""
+        return patch.object(orca_install, "run", run)
+
+    def test_updates_every_bundled_skill_and_rerecords_owned_ones(self):
+        with self.run_cli(0):
+            orca_install.skills()
+        self.assertEqual(self.calls, [["/opt/Orca/resources/bin/orca-ide", "skills", "update", "--all"]])
+        saved = json.loads(self.receipt.read_text())
+        self.assertNotEqual(saved["tool_installs"]["orca"]["skills_added"]["orca-cli"], self.owned["skills_added"]["orca-cli"])
+        self.assertEqual(saved["hooks"], {"keep": 1})
+        self.assertEqual(orca_install.skills_version(), "1.4.244")  # 같은 판에서는 다시 계획하지 않는다
+
+    def test_failure_names_the_cli_error_records_what_it_left_and_keeps_the_old_mark(self):
+        with self.run_cli(1), self.assertRaisesRegex(RuntimeError, "npx"):
+            orca_install.skills()
+        saved = json.loads(self.receipt.read_text())
+        self.assertNotEqual(saved["tool_installs"]["orca"]["skills_added"]["orca-cli"], self.owned["skills_added"]["orca-cli"])
+        self.assertIsNone(orca_install.skills_version())
+
+    def test_a_device_without_ownership_still_updates_and_keeps_its_receipt(self):
+        self.receipt.write_text(json.dumps({"tool_installs": {}}))
+        with self.run_cli(0):
+            orca_install.skills()
+        self.assertEqual(self.calls, [["/opt/Orca/resources/bin/orca-ide", "skills", "update", "--all"]])
+        self.assertEqual(json.loads(self.receipt.read_text()), {"tool_installs": {}})

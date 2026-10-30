@@ -1,0 +1,55 @@
+# SPEC
+
+> 상태: 확정(2026-10-30 사용자 확인 K1). Windows 갱신 방식(K4·K10)은 확인 중이다. 범위: ai-setup 흡수의 모듈 계약과 Orca 모듈. 결정의 배경은 `2026-10-30-ai-setup-absorption.md` 가 소유한다.
+
+## 모듈 계약
+
+jarvis 본체는 모듈을 라이브러리로 부른다. 부트스트랩과 시험은 저장소 런처를 거친 CLI 로 같은 함수를 부른다.
+
+    python -m jarvis module <이름> <status|plan|apply|uninstall> --json [--dry-run] [--plan-id <sha256>]
+
+런처를 거쳐야 `launch.CURRENT` 가 가리키는 `versions/<버전>` 의 코드만 돈다. 출력은 표준 출력의 JSON 한 개이고, 사람용 진행 로그는 표준 오류로 보낸다.
+
+| 동작 | 부작용 | 출력 | 종료 코드 |
+| --- | --- | --- | --- |
+| `status` | 없음 | `{module, installed, owned, version, latest, health: ok/degraded/down, details}` | 0 읽음(설치되지 않음 포함), 1 읽지 못함 |
+| `plan` | 없음(dry-run) | `{module, device, plan_id, action: install/update/reconfigure/uninstall, steps: [{id, summary, risk, argv}], blocked: [{step, reason}]}` | 0 계획을 세움(막힌 단계 포함), 1 세우지 못함 |
+| `apply` | 계획의 단계 | `{status: done/current/deferred/stale/failed, steps: [{id, result: ok/skipped/deferred/failed, message}]}` | 0 done·current, 1 failed(blocked 단계가 있을 때 포함), 2 deferred(기다리면 스스로 풀리는 보류: 열린 터미널·데스크톱 앱), 3 stale |
+| `uninstall` | 영수증에 기록한 것만 지움. `--dry-run` 은 아무것도 바꾸지 않고 `plan_id` 를 내며, 실제 실행은 그 `--plan-id` 가 지금 영수증과 맞을 때만 한다 | `apply` 와 같음(+`plan_id`) | 0 모두 지움, 1 실패, 2 사용자가 바꾼 항목을 남기고 영수증 보존, 3 stale |
+
+- `apply` 는 `--dry-run` 을 받지 않는다(미리 보기는 `plan` 이다). 막힌 단계가 있으면 `failed` 다. 바꾸는 단계는 목표 버전(`target`)을 갖고, 실행할 때 매니페스트가 다르면 아무것도 바꾸지 않는다.
+- 모듈과 그 자식 프로세스의 출력은 표준 오류로 간다(CLI 가 fd 1 을 돌린다).
+- `plan_id` 는 정규화한 계획 JSON(`plan_id` 를 뺀 것, 키 정렬, 구분자 `,`·`:`)의 sha256 이다. 계획에는 기기 식별자(`device`, hostname)가 들어가므로 한 기기의 승인을 다른 기기에 쓸 수 없다. 실행할 때 정해지는 값(검증한 패키지의 임시 경로 등)은 `argv` 에 `<검증한 deb>` 같은 자리표시자로 적는다. `apply` 는 실행 직전에 계획을 다시 세워 받은 `plan_id` 와 다르면 아무것도 실행하지 않고 `stale` 을 돌려준다.
+- `risk` 는 `read`·`update`·`install`·`remove`·`sudo`·`config`·`external` 중 하나다. 기본 정책은 `read`·`update` 자동, 나머지는 승인이다.
+- 영수증은 `~/.claude/.claude-code-setup.json` 이고 키(`tool_installs.*` 등)는 ai-setup 과 같다. 모듈만 쓰고, 임시 파일에 쓴 뒤 `os.replace` 로 바꾸며, 다른 키를 보존한다. 파싱할 수 없으면 쓰기 전에 멈춘다.
+
+## Orca 모듈
+
+코드는 `jarvis/modules/orca/` 다. `orca.py`(설치·스킬·uninstall), `orca_server.py`(서버·페어링·Windows 러너), `orca_windows.py`(Windows 보안 경계)는 Windows 러너가 서비스 디렉터리로 복사해 단독 실행하므로 패키지 import 없이 같은 디렉터리의 형제 모듈만 부른다.
+
+### 플랫폼별 형태
+
+| 플랫폼 | 설치본 | 서버 | 갱신 주체 |
+| --- | --- | --- | --- |
+| Debian/Ubuntu | 공식 deb `/opt/Orca` | 사용자 유닛 `orca-serve.service`: `ExecStart=/opt/Orca/resources/bin/orca-ide serve --supervise --port 6768 --pairing-address <tailnet IP>`(페어링 플래그는 O7), `KillMode=process`, `Restart=on-failure`, Python 러너 없음 | `jarvis/orca_update.py` |
+| macOS | `/Applications/Orca.app` | `<앱 CLI> serve --supervise ...` 를 바로 실행하는 LaunchAgent | Orca 공식 supervised 업데이터 RPC(`jarvis/orca_update.py`) |
+| Windows(S4U) | `%LOCALAPPDATA%\Programs\orca` | S4U 예약 작업과 러너, 서비스 디렉터리의 `app\build-<식별자>` 복사본 | 설치기 `/S --updated`(`modules/orca/orca_update_windows.py`), 러너의 자동 전환. 설치 폴더의 데스크톱 앱이 열려 있으면 보류(deferred). 일반 권한이라 터미널을 셀 수 없으면 최대 300초 동안 러너의 전환을 기다린다(잠정) |
+| Windows(데스크톱 전용) | 같음 | 데스크톱 앱이 서버를 겸함 | Orca 공식 업데이터 RPC(잠정, 열린 문제 O11) |
+
+- 기존 유닛이 같은 형태인지는 실행 파일을 realpath 로 비교해 판정하고, 페어링 플래그(`--no-pairing`·`--mobile-pairing` 등)는 판정에서 뺀다(잠정, O7). 형태가 다른 유닛은 바꾸지 않고 보고한다.
+- 설치본 버전은 PATH 의 `orca` 가 아니라 설치본의 CLI·메타데이터로 읽는다(Linux 의 PATH 첫 `orca` 는 데스크톱 shim 일 수 있다).
+- 설치본이 최신 매니페스트와 같거나 더 새로우면 최신으로 본다.
+- 패키지는 공식 매니페스트의 크기·SHA-512 를 통과한 것만 쓴다. 검증 코드는 한 벌이다.
+- 비대화형 sudo 는 `sudo -n` 으로만 시도한다.
+- Windows S4U 서버는 High 무결성이라 일반 권한의 터미널·RPC 조회가 `runtime_access_denied` 를 받는다. 이때 터미널 수는 0 이 아니라 "셀 수 없음"이고, `status` 의 `health` 는 `down` 이 아니라 `degraded` 다.
+- 페어링 링크·코드·토큰은 출력·로그·영수증에 넣지 않는다.
+
+### 기존 서버의 수용과 소유 (잠정, 사용자 확인 전)
+
+- 같은 형태의 기존 유닛(지금 jarvis 기기 전부)은 파일을 쓰지 않고 `tool_installs.orca_server` 에 `adopted: true` 로 기록한다. 갱신·상태 조회는 똑같이 다루고, uninstall 은 adopted 유닛을 지우지 않고 기록만 지운다.
+- 새로 쓴 유닛은 쓴 파일의 sha256(`service_digest`)을 기록한다. uninstall 은 파일이 그 다이제스트와 같을 때만 지우고, 다르면 남긴 채 종료 코드 2 로 영수증을 보존한다.
+- jarvis 가 설치하지 않은 패키지에는 `tool_installs.orca` 를 기록하지 않는다.
+- adopted 기기에서 데스크톱 클라이언트 페어링은 임시 서버가 필요한데, 그 프로필을 실행 중인 서버가 이미 쓰므로 서버를 멈춰야 한다. 데스크톱 프로필에 그 서버의 환경이 이미 있으면 건너뛰고, 없으면 `blocked`(실행 중인 서버를 멈춰야 함)로 둔다. 실행 중인 서버를 몰래 멈추는 경로는 없다.
+- 새로 쓰는 유닛·LaunchAgent 에는 사용자의 로그인 셸에서 얻은 `PATH`·`SHELL` 을 넣는다(Orca 터미널이 하네스를 찾도록). 쓴 뒤 `daemon-reload` 와 `enable --now` 를 한다. 실행 중인 adopted 유닛에는 아무것도 하지 않는다.
+- systemd 사용자 매니저의 linger 가 꺼져 있으면 plan 에 `config` 단계로 보이고 승인 뒤에만 켠다.
+

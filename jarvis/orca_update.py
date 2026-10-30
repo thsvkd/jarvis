@@ -13,10 +13,12 @@ import base64
 import hashlib
 import hmac
 import json
+import ntpath
 import os
 import platform
 import re
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -24,6 +26,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+
+import psutil
 
 from . import config, orca, orca_issue, orca_install, orca_rpc, orca_sessions
 from .util import run
@@ -34,6 +38,7 @@ HOSTS = {"github.com", "release-assets.githubusercontent.com", "objects.githubus
 ARCH_YML = {"arm64": "latest-linux-arm64.yml", "amd64": "latest-linux.yml"}
 MARK = os.path.join(config.STATE_DIR, "orca-update.json")
 RESULT = os.path.join(config.STATE_DIR, "orca-update-result.json")
+LOCK = os.path.join(config.STATE_DIR, "orca-update.lock")  # 프로세스 사이(gateway 버튼과 모듈 CLI apply)의 배타 잠금
 VER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 _lock = orca_issue._lock  # 발급과 갱신은 같은 재진입 잠금으로 배타적으로 시작한다.
 job = None  # {state, phase, error, from_version, to_version, app, skills, started_at, finished_at}
@@ -105,10 +110,18 @@ def check_file(path, sha512_b64, size):
         raise RuntimeError("deb 해시가 매니페스트와 다릅니다")
 
 
+def _expected(target):
+    """모듈 apply 가 승인한 목표 버전과 지금 매니페스트가 다르면 아무것도 바꾸지 않는다(승인한 계획 밖의 설치를 막는다)."""
+    expect = (job or {}).get("expect")
+    if expect and target != expect:
+        raise RuntimeError(f"계획한 Orca {expect} 와 지금 최신 {target} 이 다릅니다. 다시 계획하세요")
+
+
 def execute(ops):
     """한 기기 갱신. 앱을 올릴 때만 서비스를 멈추고, 멈추면 실패해도 다시 띄운다. 스킬은 그 다음이다."""
     ops.phase("manifest")
     target, meta = ops.manifest()
+    _expected(target)
     installed = ops.installed()
     if version_key(installed) is None or version_key(target) is None:
         raise RuntimeError(f"버전을 비교할 수 없습니다 ({installed} → {target})")
@@ -180,25 +193,89 @@ def check():
             "current": version_key(installed) >= version_key(target), "error": None}
 
 
-AI_SETUP_RECEIPT = "~/.claude/.claude-code-setup.json"
+RECEIPT = "~/.claude/.claude-code-setup.json"
 
 
-def _ai_setup_managed():
-    """ai-setup 이 띄운 Orca 서버인지: 영수증의 tool_installs.orca_server 와 service_root 의 소유 표지.
-    그 서버는 설치 폴더 밖 복사본·S4U 작업·자체 러너로 돌아 update-ai 만 안전하게 바꾼다."""
+def _s4u_server():
+    """Windows 에서 Orca 모듈(modules/orca)이 구성한 S4U 서버의 영수증 기록. 없으면 None.
+    그 서버는 설치 폴더 밖 복사본에서 돌아 설치기가 끝내지 않고, 러너가 터미널이 없을 때 새 판으로 옮긴다."""
+    if sys.platform != "win32":
+        return None
     try:
-        with open(os.path.expanduser(AI_SETUP_RECEIPT), encoding="utf-8") as f:
-            rec = ((json.load(f).get("tool_installs") or {}).get("orca_server")) or {}
-        with open(os.path.join(rec["service_root"], ".ai-setup-managed"), encoding="utf-8") as f:
-            return f.read().strip() == "ai-setup orca server v1"
-    except (OSError, ValueError, KeyError, TypeError, AttributeError):
-        return False
+        with open(os.path.expanduser(RECEIPT), encoding="utf-8") as f:
+            rec = (json.load(f).get("tool_installs") or {}).get("orca_server")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return rec if isinstance(rec, dict) and rec.get("service_manager") == "task-scheduler" and rec.get("state") == "configured" else None
+
+
+def _windows_tools():
+    """modules/orca/orca_update_windows.py(ai-setup 에서 옮긴 S4U 갱신). 형제 모듈을 import 하므로 그 폴더를 경로에 둔다."""
+    tools = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modules", "orca")
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    import orca_update_windows
+    return orca_update_windows
+
+
+def _desktop_app_open():
+    """설치 폴더의 데스크톱 앱(Orca.exe)이 떠 있는지. 설치기 `/S` 가 이 앱을 닫는다.
+    S4U 서버 복사본(app\\build-*)과 터미널 호스트(daemon-host-profiles)는 설치기가 끝내지 않으므로 세지 않는다.
+    권한이 높은 프로세스(S4U 서버)의 exe 는 일반 권한에서 읽지 못해 None 이 되고, 세지 않는다."""
+    app = os.path.normcase(os.path.join(orca_install.profile()["root"], "Orca.exe"))
+    return any(os.path.normcase(p.info.get("exe") or "") == app for p in psutil.process_iter(["exe"]))
+
+
+def _s4u_switch():
+    """설치 뒤 S4U 서버가 새 설치본의 복사본으로 옮겨 갔는지(AI-55c). 미뤘으면 그 이유를 남긴다."""
+    server, tools = _s4u_server(), _windows_tools()
+    if not server:
+        return {}
+    state = tools.orca_server.running_runner_state(server["service_root"]) or {}
+    identity = tools.orca_server.app_identity(orca_install.profile()["root"])
+    if identity and ntpath.basename(state.get("app") or "") == identity:  # Windows 경로(\ 와 / 모두)
+        return {"server": "switched"}
+    terminals = tools.orca_server.live_terminal_count(tools.orca_server.server_query_cli(server), server["server_profile"])
+    reason = tools.orca_server.terminal_count_problem(terminals) if terminals != 0 else "it did not switch in time"
+    return {"server": "pending", "server_reason": reason + "; it switches by itself once it has no live terminals"}
+
+
+def _run_s4u():
+    """S4U 서버가 있는 Windows: 공식 설치기를 `/S --updated` 로 실행하고 서버 전환을 보고한 뒤 소유 스킬을 갱신한다."""
+    before = _installed()
+    if _desktop_app_open():
+        raise orca_sessions.Deferred("Orca 데스크톱 앱이 열려 있어 갱신을 보류합니다(설치기가 앱을 닫습니다). 앱을 닫은 뒤 다시 하세요")
+    _set(phase="install", from_version=before)
+    if _windows_tools().update_orca_windows(expect=(job or {}).get("expect")) != "ok":
+        raise RuntimeError("Windows Orca 갱신 실패(진행 로그를 보세요)")
+    after = _installed()
+    result = {"app": "current" if after == before else "updated", "from_version": before, "to_version": after, "error": None,
+              **_s4u_switch()}
+    _set(phase="skills")
+    try:
+        orca_install.skills()
+        result["skills"] = "updated"
+    except Exception as e:
+        result.update(skills="failed", error=f"{type(e).__name__}: {e}"[:400])
+    return result
+
+
+_sudo_checked = [0.0, None]  # (시각, 비밀번호 없는 sudo 가 되는지)
+
+
+def _sudo_probe():
+    """status·plan·check 는 자주 부른다: sudo 가 안 되는 기기의 auth 로그에 실패가 쌓이지 않게 한 시간 묶는다.
+    이 묶음은 프로세스 안에서만 유효하다(gateway 는 묶이지만 모듈 CLI 의 plan·status 는 부를 때마다 확인한다).
+    실제 설치 직전의 확인(Live.sudo_ok)은 묶지 않는다."""
+    if _sudo_checked[1] is None or time.monotonic() - _sudo_checked[0] > 3600:
+        _sudo_checked[:] = [time.monotonic(), run(["/usr/bin/true"], sudo=True, timeout=10)[0] == 0]
+    return _sudo_checked[1]
 
 
 def _supported():
     """이 프로세스가 deb Orca 를 올리고 다시 띄울 수 있는지. (가능, 이유)."""
-    if _ai_setup_managed():
-        return False, "ai-setup 이 관리하는 Orca 입니다: update-ai orca 로 갱신하세요"
+    if _s4u_server():
+        return True, None
     p = orca_install.profile()
     if not os.path.isfile(p["cli"]):
         return False, "공식 Orca 설치본의 CLI 를 찾지 못했습니다"
@@ -225,7 +302,7 @@ def _supported():
     arch = _arch()
     if arch not in ARCH_YML:
         return False, f"지원하지 않는 아키텍처입니다 ({arch})"
-    if p["kind"] == "linux-deb" and run(["/usr/bin/true"], sudo=True, timeout=10)[0]:
+    if p["kind"] == "linux-deb" and not _sudo_probe():
         return False, "공식 deb 설치에는 비밀번호 없는 sudo 가 필요합니다"
     if p["kind"] == "linux-user-deb" and not os.access(orca_install.USER_DEB, os.W_OK):
         return False, "사용자 Orca 설치 폴더에 쓰기 권한이 없습니다"
@@ -486,6 +563,8 @@ def recover():
             return
         if not (isinstance(mark, dict) and mark.get("stopped") and not mark.get("started")):
             return
+        if not _lock_file():  # 다른 프로세스(모듈 apply)가 갱신하는 중이면 그 MARK 는 끊긴 갱신이 아니다
+            return
         # 구형 기록에도 트랜잭션을 부여해 새 작업의 기록을 지우는 일을 막는다.
         if not mark.get("transaction"):
             mark["transaction"] = uuid.uuid4().hex
@@ -513,13 +592,53 @@ def recover():
         error = f"Orca 복구 검증 실패: {type(e).__name__}: {e}"[:400]
         print(f"[jarvis] 끊긴 Orca 업데이트 뒤 재기동 실패: {type(e).__name__}: {e}", flush=True)
     finally:
+        _unlock_file()
         with _lock:
             job = {**job, "state": "failed" if error else "done", "error": error, "sessions": proof,
                    "finished_at": time.time()}
 
 
-def start():
-    """(http 상태, 응답). 받기·설치는 스레드에서 돈다."""
+_lock_fd = None
+
+
+def _lock_file():
+    """프로세스 사이의 배타 잠금(fcntl.flock / msvcrt.locking). 잡은 프로세스가 죽으면 OS 가 푼다:
+    남은 잠금을 회수하는 단계가 없으므로 두 프로세스가 함께 잡는 경쟁도 없다. 파일은 지우지 않는다."""
+    global _lock_fd
+    if _lock_fd is not None:
+        return False
+    os.makedirs(os.path.dirname(LOCK), exist_ok=True)
+    fd = os.open(LOCK, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return False
+    _lock_fd = fd
+    return True
+
+
+def _unlock_file():
+    global _lock_fd
+    fd, _lock_fd = _lock_fd, None
+    if fd is None:
+        return
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+    finally:
+        os.close(fd)  # POSIX 의 flock 은 닫으면 풀린다
+
+
+def start(expect=None):
+    """(http 상태, 응답). 받기·설치는 스레드에서 돈다. expect 를 주면 그 버전이 지금 최신일 때만 바꾼다."""
     global job
     ok, why = _supported()
     if not ok:
@@ -534,19 +653,35 @@ def start():
         from . import self_update  # 받은 뒤 재시작하면 이 작업이 끊긴다
         if self_update._lock.locked():
             return 409, {"error": "jarvis 갱신이 끝난 뒤에 업데이트하세요"}
+        if not _lock_file():
+            return 409, {"error": "다른 프로세스가 Orca 를 업데이트하고 있습니다"}
         job = {"state": "running", "phase": "manifest", "error": None, "from_version": None, "to_version": None,
-               "app": None, "skills": None, "started_at": time.time(), "finished_at": None}
-        threading.Thread(target=_run, name="jarvis-orca-update", daemon=True).start()
+               "app": None, "skills": None, "started_at": time.time(), "finished_at": None, "expect": expect}
+        try:
+            threading.Thread(target=_run, name="jarvis-orca-update", daemon=True).start()
+        except Exception:
+            _unlock_file()
+            raise
         return 202, {"update": dict(job)}
 
 
 def _run():
+    try:
+        _run_job()
+    finally:
+        _unlock_file()  # 어떤 이유로 끝나든 프로세스 사이 잠금을 푼다
+
+
+def _run_job():
     global job
-    error, result, ops = None, {}, None
+    error, result, ops, deferred = None, {}, None, False
     try:
         ops = Live()
-        if orca_install.profile()["kind"] in ("mac-app", "windows-user"):
+        if _s4u_server():
+            result = _run_s4u()
+        elif orca_install.profile()["kind"] in ("mac-app", "windows-user"):
             target, _ = ops.manifest()
+            _expected(target)
             before = _installed()
             if version_key(before) is None or version_key(target) is None:
                 raise RuntimeError("Orca 버전을 비교할 수 없습니다")
@@ -562,6 +697,7 @@ def _run():
         error = result.get("error")
     except Exception as e:
         error = f"{type(e).__name__}: {e}"[:400]
+        deferred = isinstance(e, orca_sessions.Deferred)
     finally:
         if ops is not None:
             try:
@@ -569,8 +705,8 @@ def _run():
             except Exception as e:
                 error = error or f"세션 생성 차단 해제 실패(5분 뒤 자동 해제): {type(e).__name__}"
     with _lock:
-        job = {**(job or {}), **result, "state": "failed" if error else "done", "error": error, "finished_at": time.time()}
-        done = dict(job)
+        done = {**(job or {}), **result, "state": "failed" if error else "done", "error": error, "deferred": deferred,
+                "finished_at": time.time()}
     try:
         os.makedirs(config.STATE_DIR, exist_ok=True)
         fd = os.open(RESULT, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -580,6 +716,10 @@ def _run():
         pass
     tail = json.dumps({k: (result or {}).get(k) for k in ("app", "skills", "from_version", "to_version")}, ensure_ascii=False)
     print(f"[jarvis] Orca 업데이트 {'실패: ' + error if error else '완료'} {tail}", flush=True)
+    # 기다리는 쪽(모듈 apply)은 state 가 바뀌면 표준 출력을 되돌린다: 기록·로그·잠금 해제를 모두 마친 뒤에 바꾼다
+    _unlock_file()
+    with _lock:
+        job = done
 
 
 def ensure_idle():

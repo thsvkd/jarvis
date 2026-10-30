@@ -1,4 +1,4 @@
-"""python3 -m jarvis · python3 -m jarvis update [--check]"""
+"""python3 -m jarvis · python3 -m jarvis update [--check] · python3 -m jarvis module <이름> <동작> --json"""
 
 import os
 import signal
@@ -33,6 +33,9 @@ def _confirm():
 def main():
     if sys.argv[1:2] == ["update"]:
         return self_update.cli(sys.argv[2:])
+    if sys.argv[1:2] == ["module"]:
+        from . import module
+        return module.cli(sys.argv[2:])
     if sys.argv[1:2] == ["--version"]:
         print(f"jarvis {__version__}" + (" (릴리스)" if launch.release() else " (저장소)"))
         return 0

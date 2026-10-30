@@ -16,13 +16,17 @@ from . import orca, orca_rpc
 from .util import run
 
 
+class Deferred(RuntimeError):
+    """세션을 지키려고 갱신을 미룬다(실패가 아니라 보류다). 모듈 계약의 deferred(종료 코드 2)."""
+
+
 def complete(body, key):
     scope = body.get("hostScope") if isinstance(body, dict) else None
     rows = body.get(key) if isinstance(body, dict) else None
     if not isinstance(scope, dict) or scope.get("hostIds") != ["local"] or scope.get("omittedHostIds") != [] \
             or not isinstance(rows, list) or body.get("truncated") is not False \
             or type(body.get("totalCount")) is not int or body["totalCount"] != len(rows):
-        raise RuntimeError("Orca 세션 조사 범위가 불완전하여 업데이트를 보류합니다")
+        raise Deferred("Orca 세션 조사 범위가 불완전하여 업데이트를 보류합니다")
     return rows
 
 
@@ -87,7 +91,7 @@ def assert_isolated(records):
             except (FileNotFoundError, psutil.NoSuchProcess):
                 continue
             if path == group or path.startswith(group + "/"):
-                raise RuntimeError("터미널 데몬 또는 작업이 Orca 서비스 종료 범위에 있어 업데이트를 보류합니다")
+                raise Deferred("터미널 데몬 또는 작업이 Orca 서비스 종료 범위에 있어 업데이트를 보류합니다")
 
 
 def read_contract(path):
@@ -119,7 +123,7 @@ class Sessions:
         facts = orca_rpc.call("orcad.terminalCensus", params, timeout=25)
         if not isinstance(facts, dict) or type(facts.get("liveSessions")) is not int or facts["liveSessions"] < 0 \
                 or type(facts.get("inProcessSessions")) is not int or facts["inProcessSessions"] != 0:
-            raise RuntimeError("데몬 밖 터미널 또는 확인할 수 없는 세션이 있어 업데이트를 보류합니다")
+            raise Deferred("데몬 밖 터미널 또는 확인할 수 없는 세션이 있어 업데이트를 보류합니다")
         until = facts.get("admissionClosedUntil", 0)
         self.fenced = isinstance(until, (int, float)) and until > time.time() * 1000 + 15000
         self.fence_until = until if self.fenced else 0
@@ -128,38 +132,38 @@ class Sessions:
             if not isinstance(row, dict) or any(type(row.get(k)) is not int or row[k] < 0 for k in ("liveTerminalCount", "unverifiableTerminalCount")) \
                     or type(row.get("hasAttachedPty")) is not bool or not isinstance(row.get("agents"), list) \
                     or any(not isinstance(a, dict) or not isinstance(a.get("state"), str) for a in row["agents"]):
-                raise RuntimeError("Orca 작업 상태가 불완전하여 업데이트를 보류합니다")
+                raise Deferred("Orca 작업 상태가 불완전하여 업데이트를 보류합니다")
             if row["unverifiableTerminalCount"]:
-                raise RuntimeError("확인할 수 없는 터미널이 있어 업데이트를 보류합니다")
+                raise Deferred("확인할 수 없는 터미널이 있어 업데이트를 보류합니다")
             if any(a.get("structuredHostOwned") is True and a["state"] not in ("done", "idle", "exited") for a in row["agents"]):
-                raise RuntimeError("실행 중인 네이티브 채팅 작업은 런타임과 함께 종료되므로 업데이트를 보류합니다")
+                raise Deferred("실행 중인 네이티브 채팅 작업은 런타임과 함께 종료되므로 업데이트를 보류합니다")
         listed = complete(orca_rpc.call("terminal.list", {"limit": 10000, "requireFreshPtyLiveness": True}), "terminals")
         live = {}
         for t in listed:
             if not isinstance(t, dict) or t.get("executionHostId") != "local" or not isinstance(t.get("ptyId"), str) \
                     or not isinstance(t.get("incarnationId"), str) or not t["incarnationId"] \
                     or type(t.get("connected")) is not bool:
-                raise RuntimeError("터미널의 데몬 식별 정보를 확인할 수 없습니다")
+                raise Deferred("터미널의 데몬 식별 정보를 확인할 수 없습니다")
             if t["connected"]:
                 if t["ptyId"] in live:
-                    raise RuntimeError("터미널 식별자가 중복되어 업데이트를 보류합니다")
+                    raise Deferred("터미널 식별자가 중복되어 업데이트를 보류합니다")
                 live[t["ptyId"]] = t["incarnationId"]
         if len(live) != facts["liveSessions"] or sum(w["liveTerminalCount"] for w in trees) > len(live) \
                 or any(live.get(k) != v for k, v in self.terminals.items()):
-            raise RuntimeError("조사 중 세션이 바뀌었거나 누락되어 업데이트를 보류합니다")
+            raise Deferred("조사 중 세션이 바뀌었거나 누락되어 업데이트를 보류합니다")
         panes = {f"{t.get('tabId')}:{t.get('leafId')}" for t in listed if t.get("connected") is True}
         for row in trees:
             for agent in row["agents"]:
                 if agent["state"] in ("done", "idle", "exited") or agent.get("paneKey") in panes:
                     continue
-                raise RuntimeError("에이전트가 영속 터미널에 연결되어 있는지 확인할 수 없어 업데이트를 보류합니다")
+                raise Deferred("에이전트가 영속 터미널에 연결되어 있는지 확인할 수 없어 업데이트를 보류합니다")
         records = daemon_records() if live else []
         if live and not records:
-            raise RuntimeError("세션을 유지하는 별도 터미널 데몬을 확인할 수 없습니다")
+            raise Deferred("세션을 유지하는 별도 터미널 데몬을 확인할 수 없습니다")
         assert_isolated(records)
         for record in records:
             if record["pid"] in self.daemons and record != self.daemons[record["pid"]]:
-                raise RuntimeError("조사 중 터미널 데몬의 프로세스가 바뀌었습니다")
+                raise Deferred("조사 중 터미널 데몬의 프로세스가 바뀌었습니다")
         self.terminals.update(live)
         self.daemons.update({r["pid"]: r for r in records})
         self.checked_at = time.monotonic()
@@ -167,13 +171,20 @@ class Sessions:
     def before_stop(self):
         if not self.checked_at or time.monotonic() - self.checked_at > 10 \
                 or (self.fenced and self.fence_until < time.time() * 1000 + 15000):
-            raise RuntimeError("세션 조사 뒤 시간이 지나 다시 확인해야 합니다")
+            raise Deferred("세션 조사 뒤 시간이 지나 다시 확인해야 합니다")
 
     def compatible(self, versions):
         if any(d["protocol"] not in versions for d in self.daemons.values()):
-            raise RuntimeError("새 Orca 가 기존 터미널 데몬에 재연결할 수 없어 업데이트를 보류합니다")
+            raise Deferred("새 Orca 가 기존 터미널 데몬에 재연결할 수 없어 업데이트를 보류합니다")
 
     def verify(self):
+        """바꾼 뒤의 확인이다. 여기서 확인하지 못하면 보류(Deferred)가 아니라 실패다."""
+        try:
+            return self._verify()
+        except Deferred as e:
+            raise RuntimeError(str(e)) from None
+
+    def _verify(self):
         for d in self.daemons.values():
             if process_identity(d["pid"]) != {k: d[k] for k in ("pid", "created")}:
                 raise RuntimeError("업데이트 후 기존 터미널 데몬이 유지되지 않았습니다")

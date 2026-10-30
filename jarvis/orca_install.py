@@ -12,11 +12,12 @@ import platform
 import subprocess
 import psutil
 
-from . import orca, orca_rpc
+from . import config, orca, orca_rpc
 from .util import run
 
 MAC_APP = "/Applications/Orca.app"
 USER_DEB = os.path.expanduser("~/.local/opt/orca")
+SKILLS_MARK = os.path.join(config.STATE_DIR, "orca-skills-version")  # 번들 스킬을 마지막으로 맞춘 Orca 판
 
 
 def profile():
@@ -61,10 +62,36 @@ def installed():
     return asar_version(p["resources"])
 
 
+def skills_version():
+    try:
+        with open(SKILLS_MARK, encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
 def skills():
-    rc, out, err = run([profile()["cli"], "skills", "update", "--all"], timeout=900)
+    """ORCA-8: 번들 스킬을 모두 지금 판의 사본으로 맞춘다(`skills update --all`, 사용자가 고친 스킬도 덮어쓴다).
+    맞춘 판을 남겨 같은 판에서는 다시 계획하지 않는다. modules/orca 가 깐 스킬은 새 사본의 다이제스트를 다시 기록해
+    uninstall 이 계속 우리 것으로 알아보게 한다(실패해도 남은 상태를 기록한다)."""
+    rc, out, err = run([profile()["cli"], "skills", "update", "--all"], timeout=900)  # npx 로 받는다: npx·네트워크가 없으면 실패다
+    _record_owned_skills()
     if rc:
-        raise RuntimeError((err or out).strip()[:300] or f"스킬 갱신 실패 rc={rc}")
+        raise RuntimeError("스킬 갱신 실패: " + ((err or out).strip()[:300] or f"rc={rc}"))
+    os.makedirs(config.STATE_DIR, exist_ok=True)
+    with open(SKILLS_MARK, "w", encoding="utf-8") as f:
+        f.write(installed())
+
+
+def _record_owned_skills():
+    from . import orca_module
+    t = orca_module.tools()
+    path = t.home_dir() / ".claude/.claude-code-setup.json"
+    receipt = t.read_receipt(path)
+    owned = (receipt.get("tool_installs") or {}).get("orca")
+    if isinstance(owned, dict) and owned.get("skills_added"):
+        t.record_skills(list(owned["skills_added"]), owned, *t.skill_locations(t.home_dir()))
+        t.save_receipt(path, receipt)
 
 
 def validate_runtime():

@@ -18,6 +18,10 @@ METHODS = {"updater.getStatus", "updater.check", "updater.download", "updater.in
 MAX_FRAME = 8 << 20
 
 
+class Elevated(RuntimeError):
+    """Orca 가 관리자 권한(High 무결성)으로 돌아 일반 권한으로는 묻지 못한다. 서버가 죽었다는 뜻이 아니다."""
+
+
 def _response(stream, request, runtime_id):
     while True:
         line = stream.readline(MAX_FRAME + 1)
@@ -30,7 +34,8 @@ def _response(stream, request, runtime_id):
             raise RuntimeError("Orca RPC 요청 또는 런타임이 바뀌었습니다")
         if body.get("ok") is not True:
             # 서버 오류에 인증 자료가 섞이지 않게 코드만 보낸다.
-            raise RuntimeError("Orca RPC 실패: " + str((body.get("error") or {}).get("code", "unknown")))
+            code = str((body.get("error") or {}).get("code", "unknown"))
+            raise (Elevated if code == "runtime_access_denied" else RuntimeError)("Orca RPC 실패: " + code)
         return body.get("result")
 
 
@@ -63,7 +68,7 @@ def call(method, params=None, timeout=12, d=None):
             last = (p.stderr.strip().splitlines() or ["원인 모름"])[-1].replace(metadata["authToken"], "***")[:200]
             if last.startswith("PermissionError"):
                 # Orca 가 관리자 권한(elevated)으로 돌면 파이프 소유자가 Administrators 라 일반 권한 프로세스는 쓸 수 없다
-                raise RuntimeError("Orca 가 관리자 권한으로 실행 중이라 일반 권한의 jarvis 가 Orca 로컬 파이프를 열 수 없습니다."
+                raise Elevated("Orca 가 관리자 권한으로 실행 중이라 일반 권한의 jarvis 가 Orca 로컬 파이프를 열 수 없습니다."
                                    " Orca 를 일반 권한으로 다시 띄우거나 jarvis 예약 작업을 같은 권한으로 실행하세요")
             raise RuntimeError("Orca 로컬 파이프에 연결하지 못했습니다: " + last)
         return json.loads(p.stdout)

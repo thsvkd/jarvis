@@ -249,6 +249,7 @@ Orca 업데이트는 core 홈의 기기 목록에서 **Orca 업데이트 확인 
 | sudo 없는 기존 Linux | 같은 공식 deb, `~/.local/opt/orca/opt/Orca` | Jarvis: 검증한 deb 를 별도 폴더에 풀고 경로 교체 → 서비스·실행 버전 확인. 시스템 deb 로 통일하려면 관리자 설치가 필요 |
 | macOS | `/Applications/Orca.app`, 그 앱의 CLI 를 쓰는 LaunchAgent | Orca 공식 supervised 업데이터의 check/download/install RPC → 새 버전 재연결 확인 |
 | Windows | `%LOCALAPPDATA%\Programs\orca` 사용자 설치본 | Orca 공식 업데이터의 check/download/install RPC → 새 버전 재연결 확인 |
+| Windows(S4U 서버) | 같은 설치본, Orca 모듈이 구성한 S4U 서버(설치 폴더 밖 복사본) | Jarvis: 크기·SHA-512 를 검증한 설치기를 `/S --updated` 로 실행 → 러너가 터미널이 없을 때 새 복사본으로 옮겨 간다(데스크톱 앱이 열려 있으면 보류) |
 
 앱 갱신 후 설치본의 CLI 로 전역 Orca 스킬을 갱신한다. 앱과 스킬의 결과는 따로 표시한다.
 열린 터미널은 별도 데몬이 소유하고 있으면 유지한 채 갱신한다. 다운로드 전과 설치 직전에 공개 RPC 의 전체 작업·터미널·데몬 조사를 대조한다.

@@ -188,18 +188,103 @@ class CheckTest(unittest.TestCase):
                     "automatic": True, "installMode": "supervised-headless-serve"}}):
             self.assertEqual(self.old[0](), (True, None))
 
-    def test_ai_setup_managed_server_is_left_to_update_ai(self):
-        with tempfile.TemporaryDirectory() as d:
-            receipt = os.path.join(d, "receipt.json")
-            with open(receipt, "w") as f:
-                json.dump({"tool_installs": {"orca_server": {"state": "configured", "service_root": d}}}, f)
-            with patch.object(orca_update, "AI_SETUP_RECEIPT", receipt):
-                self.assertFalse(orca_update._ai_setup_managed())  # 소유 표지 없음
-                with open(os.path.join(d, ".ai-setup-managed"), "w") as f:
-                    f.write("ai-setup orca server v1\n")
-                supported, reason = self.old[0]()
-        self.assertFalse(supported)
-        self.assertIn("update-ai orca", reason)
+    def s4u_receipt(self, d, state="configured"):
+        receipt = os.path.join(d, "receipt.json")
+        with open(receipt, "w") as f:
+            json.dump({"tool_installs": {"orca_server": {"state": state, "service_manager": "task-scheduler",
+                                                         "service_root": d, "server_profile": d}}}, f)
+        return receipt
+
+    def test_a_windows_s4u_server_is_updated_by_jarvis_not_left_to_update_ai(self):
+        """covers: ORCA-6 — 0dcf2de 의 update-ai 보류 대신 Orca 모듈의 S4U 경로를 쓴다."""
+        with tempfile.TemporaryDirectory() as d, patch.object(orca_update, "RECEIPT", self.s4u_receipt(d)), \
+                patch.object(orca_update.sys, "platform", "win32"):
+            self.assertEqual(self.old[0](), (True, None))
+            with patch.object(orca_update, "RECEIPT", self.s4u_receipt(d, state="configuring")):
+                self.assertIsNone(orca_update._s4u_server())  # 구성이 끝나지 않은 서버는 그 경로로 보내지 않는다
+        with tempfile.TemporaryDirectory() as d, patch.object(orca_update, "RECEIPT", self.s4u_receipt(d)):
+            self.assertIsNone(orca_update._s4u_server())  # Windows 가 아니면 S4U 기록을 보지 않는다
+
+    def run_s4u(self, installer="ok", desktop=False, skills=None, versions=("1.4.240", "1.4.244"), switch=None):
+        seen = iter(versions)
+        tools = type("Tools", (), {"update_orca_windows": staticmethod(lambda expect=None: self.calls.append("installer") or installer)})
+        self.calls = []
+        with patch.object(orca_update, "_desktop_app_open", return_value=desktop), \
+                patch.object(orca_update, "_windows_tools", return_value=tools), \
+                patch.object(orca_update, "_s4u_switch", return_value=switch or {"server": "switched"}), \
+                patch.object(orca_update, "_installed", side_effect=lambda: next(seen)), \
+                patch.object(orca_update.orca_install, "skills", side_effect=skills), \
+                patch.object(orca_update, "_set"):
+            return orca_update._run_s4u()
+
+    def test_the_update_job_routes_s4u_devices_and_marks_a_hold_as_deferred(self):
+        """covers: ORCA-6, ORCA-10"""
+        live = type("Live", (), {"proof": None, "sessions": type("S", (), {"release": lambda self: None})()})
+        def held():
+            raise orca_update.orca_sessions.Deferred("데스크톱 앱이 열려 있어 갱신을 보류합니다")
+        for run, state, deferred in ((lambda: {"app": "updated", "skills": "updated", "error": None}, "done", False),
+                                     (held, "failed", True)):
+            orca_update.job = {"state": "running"}
+            with tempfile.TemporaryDirectory() as d, patch.object(orca_update, "Live", live), \
+                    patch.object(orca_update, "_s4u_server", return_value={"state": "configured"}), \
+                    patch.object(orca_update, "_run_s4u", side_effect=run), \
+                    patch.object(orca_update, "RESULT", os.path.join(d, "result.json")), \
+                    patch.object(orca_update, "LOCK", os.path.join(d, "orca-update.lock")), \
+                    patch.object(orca_update.config, "STATE_DIR", d):
+                orca_update._run()
+            self.assertEqual((orca_update.job["state"], orca_update.job["deferred"]), (state, deferred))
+
+    def test_s4u_update_runs_the_installer_then_owned_skills(self):
+        """covers: ORCA-6"""
+        out = self.run_s4u()
+        self.assertEqual((out["app"], out["skills"], out["from_version"], out["to_version"]), ("updated", "updated", "1.4.240", "1.4.244"))
+        self.assertEqual(self.calls, ["installer"])
+
+    def test_s4u_switch_reports_a_server_left_on_the_previous_copy_and_why(self):
+        """covers: ORCA-6 (AI-55c) — 서버가 새 판으로 옮겨 갔는지, 미뤘다면 그 이유를 결과에 남긴다."""
+        import types
+        state = {"app": r"C:\svc\app\build-old"}
+        server = types.SimpleNamespace(
+            running_runner_state=lambda root: state, app_identity=lambda root: "build-new",
+            server_query_cli=lambda record: "orca.exe", live_terminal_count=lambda cli, profile: 2,
+            terminal_count_problem=lambda n: f"it has {n} live terminals")
+        with patch.object(orca_update, "_s4u_server", return_value={"service_root": "C:\\svc", "server_profile": "p"}), \
+                patch.object(orca_update, "_windows_tools", return_value=types.SimpleNamespace(orca_server=server)), \
+                patch.object(orca_update.orca_install, "profile", return_value={"root": "C:\\inst"}):
+            pending = orca_update._s4u_switch()
+            state["app"] = r"C:\svc\app\build-new"
+            switched = orca_update._s4u_switch()
+        self.assertEqual(pending["server"], "pending")
+        self.assertIn("2 live terminals", pending["server_reason"])
+        self.assertEqual(switched, {"server": "switched"})
+
+    def test_only_the_installed_desktop_app_holds_the_update(self):
+        """covers: ORCA-6 — S4U 복사본·터미널 호스트·읽지 못한 exe(권한이 높은 서버)는 설치기가 끝내지 않으므로 세지 않는다."""
+        import types
+        root = os.path.join("C:", "Users", "u", "AppData", "Local", "Programs", "orca")
+        others = [os.path.join("C:", "Users", "u", "AppData", "Local", "ai-setup", "orca-server", "app", "build-1", "Orca.exe"),
+                  os.path.join("C:", "Users", "u", "AppData", "Local", "Orca", "daemon-host-profiles", "5e28", "build-8", "Orca.exe"),
+                  None]
+        procs = lambda exes: [types.SimpleNamespace(info={"exe": e}) for e in exes]  # noqa: E731
+        with patch.object(orca_update.orca_install, "profile", return_value={"root": root}):
+            with patch.object(orca_update.psutil, "process_iter", return_value=procs(others)):
+                self.assertFalse(orca_update._desktop_app_open())
+            with patch.object(orca_update.psutil, "process_iter", return_value=procs(others + [os.path.join(root, "Orca.exe")])):
+                self.assertTrue(orca_update._desktop_app_open())
+
+    def test_s4u_update_is_held_while_the_desktop_app_is_open(self):
+        """covers: ORCA-6, ORCA-10 — 설치기 `/S` 가 설치 폴더의 데스크톱 앱을 닫으므로 보류(deferred)한다."""
+        with self.assertRaises(orca_update.orca_sessions.Deferred):
+            self.run_s4u(desktop=True)
+        self.assertEqual(self.calls, [])
+
+    def test_s4u_installer_failure_fails_and_a_skills_failure_is_partial(self):
+        """covers: ORCA-6"""
+        with self.assertRaises(RuntimeError):
+            self.run_s4u(installer="failed")
+        out = self.run_s4u(skills=RuntimeError("npx 없음"))
+        self.assertEqual((out["app"], out["skills"]), ("updated", "failed"))
+        self.assertIn("npx", out["error"])
 
     def setUp(self):
         self.old = orca_update._supported, orca_update._installed, orca_update.Live.manifest, orca_update.job
@@ -340,6 +425,59 @@ class StartGuardTest(unittest.TestCase):
             self.assertEqual(status, 409)
             with open(marker) as f:
                 self.assertEqual(json.load(f)["transaction"], "previous")
+
+    def test_a_second_process_cannot_start_while_another_holds_the_lock(self):
+        """covers: ORCA-5 — gateway 버튼과 모듈 CLI apply 가 동시에 갱신하지 못한다. 잡은 프로세스가 끝나면 OS 가 푼다."""
+        import subprocess
+        import sys as _sys
+        with tempfile.TemporaryDirectory() as d:
+            lock = os.path.join(d, "orca-update.lock")
+            holder = subprocess.Popen([_sys.executable, "-c",
+                                       "import fcntl, os, sys, time; fd = os.open(sys.argv[1], os.O_CREAT | os.O_RDWR);"
+                                       " fcntl.flock(fd, fcntl.LOCK_EX); print('locked', flush=True); time.sleep(30)", lock],
+                                      stdout=subprocess.PIPE, text=True)
+            try:
+                self.assertEqual(holder.stdout.readline().strip(), "locked")
+                with patch.object(orca_update, "LOCK", lock), patch.object(orca_update, "MARK", os.path.join(d, "m.json")), \
+                        patch.object(orca_update, "_supported", return_value=(True, None)), \
+                        patch.object(orca_update, "job", None), patch.object(orca_update.threading, "Thread") as thread:
+                    code, body = orca_update.start()
+                    self.assertEqual(code, 409)
+                    self.assertIn("다른 프로세스", body["error"])
+                    holder.kill()
+                    holder.wait()
+                    code, _ = orca_update.start(expect="1.4.244")
+                    self.assertEqual((code, orca_update.job["expect"]), (202, "1.4.244"))
+                    thread.assert_called_once()
+                    self.assertFalse(orca_update._lock_file())  # 이 프로세스가 잡고 있다
+                    orca_update._unlock_file()
+                    self.assertTrue(orca_update._lock_file())
+                    orca_update._unlock_file()
+            finally:
+                holder.kill()
+                holder.wait()
+
+    def test_recovery_leaves_a_mark_alone_while_another_process_updates(self):
+        """N3 — 모듈 apply 가 설치하는 중에 gateway 가 다시 떠도, 그 MARK 를 끊긴 갱신으로 보고 orca-serve 를 띄우지 않는다."""
+        with tempfile.TemporaryDirectory() as d:
+            mark = os.path.join(d, "m.json")
+            with open(mark, "w") as f:
+                json.dump({"stopped": True, "transaction": "t"}, f)
+            with patch.object(orca_update, "LOCK", os.path.join(d, "orca-update.lock")), patch.object(orca_update, "MARK", mark), \
+                    patch.object(orca_update, "job", None), \
+                    patch.object(orca_update, "_lock_file", return_value=False), \
+                    patch.object(orca_update.orca_issue, "_start", side_effect=AssertionError("orca-serve started")):
+                orca_update.recover()
+                self.assertIsNone(orca_update.job)
+
+    def test_an_update_whose_target_moved_changes_nothing(self):
+        """covers: ORCA-13 — 승인한 목표 버전과 지금 매니페스트가 다르면 받지도 멈추지도 않는다."""
+        ops = Ops(installed="1.4.220", target="1.4.232")
+        with patch.object(orca_update, "job", {"expect": "1.4.231"}):
+            with self.assertRaisesRegex(RuntimeError, "다시 계획"):
+                orca_update.execute(ops)
+        self.assertNotIn("download", ops.calls)
+        self.assertNotIn("stop", ops.calls)
 
     def test_unsupported_does_not_start_a_job(self):
         old = orca_update._supported, orca_update.job

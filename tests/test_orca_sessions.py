@@ -84,6 +84,17 @@ class GuardTest(unittest.TestCase):
         with patch.object(sessions, "process_identity", return_value={"pid": 123, "created": 12.5}), self.assertRaisesRegex(RuntimeError, "PTY"):
             guard.verify()
 
+    def test_an_incomplete_inventory_after_the_update_is_a_failure_not_a_hold(self):
+        """covers: ORCA-10 (X3) — 보류(Deferred)는 바꾸기 전에만 성립한다. 바꾼 뒤 확인하지 못하면 실패다."""
+        guard = sessions.Sessions(); guard.capture()
+        self.body["terminal.list"] = dict(self.body["terminal.list"], truncated=True)
+        with patch.object(sessions, "process_identity", return_value={"pid": 123, "created": 12.5}):
+            with self.assertRaises(RuntimeError) as caught:
+                guard.verify()
+        self.assertNotIsInstance(caught.exception, sessions.Deferred)
+        with self.assertRaises(sessions.Deferred):  # 같은 상태를 바꾸기 전에 만나면 보류다
+            sessions.Sessions().capture()
+
     def test_reused_daemon_pid_is_not_a_success(self):
         guard = sessions.Sessions(); guard.capture()
         with patch.object(sessions, "process_identity", return_value={"pid": 123, "created": 99}), self.assertRaisesRegex(RuntimeError, "데몬"):
