@@ -11,6 +11,7 @@ from . import __version__, launch
 launch.run(__version__)  # 받아 둔 새 릴리스가 있으면 그쪽으로 넘어가고 여기로 돌아오지 않는다
 
 from . import config, orca_issue, orca_update, self_update, tray  # noqa: E402
+from .util import hide_child_consoles  # noqa: E402
 from .collector import Collector  # noqa: E402
 from .core import Core, devices_from  # noqa: E402
 from .server import serve  # noqa: E402
@@ -31,6 +32,7 @@ def _confirm():
 
 
 def main():
+    hide_child_consoles()
     if sys.argv[1:2] == ["update"]:
         return self_update.cli(sys.argv[2:])
     if sys.argv[1:2] == ["module"]:

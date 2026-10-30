@@ -49,6 +49,25 @@ _ENV["GIT_TERMINAL_PROMPT"] = "0"  # 서비스·pythonw 에서는 답할 사람�
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
+def hide_child_consoles():
+    """콘솔 없이(pythonw) 돌 때만 모든 자식 프로세스에 CREATE_NO_WINDOW 를 붙인다. ai-setup 에서 옮긴 Orca 모듈처럼
+    플래그 없이 powershell·schtasks·orca CLI 를 부르는 곳까지 한 번에 막는다. 콘솔에서 돌면(터미널·ssh) 자식이 그 콘솔을
+    그대로 쓰게 두고, 새 콘솔이나 분리를 고른 호출은 건드리지 않는다."""
+    if not _NO_WINDOW:
+        return
+    import ctypes
+    if ctypes.windll.kernel32.GetConsoleWindow():
+        return
+    init = subprocess.Popen.__init__
+
+    def no_window(self, *args, creationflags=0, **kwargs):
+        if not creationflags & (subprocess.CREATE_NEW_CONSOLE | subprocess.DETACHED_PROCESS):
+            creationflags |= _NO_WINDOW
+        init(self, *args, creationflags=creationflags, **kwargs)
+
+    subprocess.Popen.__init__ = no_window
+
+
 def run(args, timeout=6, sudo=False):
     """(returncode, stdout, stderr). 실패해도 예외를 올리지 않는다."""
     if sudo:

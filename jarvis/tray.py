@@ -46,8 +46,11 @@ def restart_helper(pid):
     inner = "powershell -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand " + \
         base64.b64encode(script.encode("utf-16-le")).decode()
     # 작업의 job 안에 남으면 작업이 계속 '실행 중'으로 보여 시작이 막히므로, WMI 로 job 밖에서 띄운다.
+    # WMI 는 콘솔 창을 보이게 만든다(-WindowStyle Hidden 은 뜬 뒤에야 숨긴다). ShowWindow=0 으로 처음부터 숨긴다.
+    hidden = "New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ShowWindow=[uint16]0}"
     return ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-            f"Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{CommandLine='{inner}'}}"]
+            "Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments "
+            f"@{{CommandLine='{inner}'; ProcessStartupInformation=({hidden})}}"]
 
 
 def respawn():
