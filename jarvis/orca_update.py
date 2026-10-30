@@ -198,20 +198,21 @@ RECEIPT = "~/.claude/.claude-code-setup.json"
 
 
 def _s4u_record():
-    """영수증의 S4U 서버 기록과, 쓸 수 없으면 그 이유. (기록, None) 또는 (None, 이유)."""
+    """영수증의 S4U 서버 기록과, 쓸 수 없으면 그 이유와 다음 할 일. (기록, None) 또는 (None, 이유).
+    데스크톱 전용 기기에서는 앱이 서버이므로 Orca 를 지우라고 안내하지 않는다(설치본을 둔 채 S4U 를 구성할 수 있다)."""
     try:
         with open(os.path.expanduser(RECEIPT), encoding="utf-8") as f:
             rec = (json.load(f).get("tool_installs") or {}).get("orca_server")
     except FileNotFoundError:
         rec = None
     except (OSError, ValueError, AttributeError):
-        return None, "영수증을 읽지 못했습니다"
+        return None, "영수증(~/.claude/.claude-code-setup.json)을 읽지 못했습니다. 영수증을 고친 뒤 다시 확인하세요"
     if not isinstance(rec, dict) or rec.get("service_manager") != "task-scheduler":
-        return None, "S4U 서버 기록이 없습니다"
+        return None, "S4U 서버 기록이 없습니다. 설치본은 그대로 두고 S4U 서버를 구성하면 갱신합니다"
     if rec.get("state") != "configured":
-        return None, f"S4U 서버 구성이 끝나지 않았습니다(state={rec.get('state')})"
+        return None, f"S4U 서버 구성이 끝나지 않았습니다(state={rec.get('state')}). 구성을 마저 끝내면 갱신합니다"
     if not all(isinstance(rec.get(k), str) and rec[k] for k in ("service_root", "server_profile")):
-        return None, "S4U 서버 기록에 service_root·server_profile 이 없습니다"
+        return None, "S4U 서버 기록에 service_root·server_profile 이 없습니다. 영수증의 S4U 서버 기록을 확인하세요"
     return rec, None
 
 
@@ -290,8 +291,7 @@ def _supported():
     """이 프로세스가 deb Orca 를 올리고 다시 띄울 수 있는지. (가능, 이유)."""
     if sys.platform == "win32":  # K4: 데스크톱 앱이 서버를 겸하는 Windows 는 갱신하지 않는다
         problem = _s4u_record()[1]
-        return (True, None) if problem is None else (False, f"Windows 는 S4U 서버로만 갱신합니다: {problem}. "
-                                                            "Orca 를 지운 뒤 `python -m jarvis module orca plan --json` 으로 다시 설치하면 S4U 서버까지 구성합니다")
+        return (True, None) if problem is None else (False, f"Windows 는 S4U 서버로만 갱신합니다: {problem}")
     p = orca_install.profile()
     if not os.path.isfile(p["cli"]):
         return False, "공식 Orca 설치본의 CLI 를 찾지 못했습니다"

@@ -298,6 +298,16 @@ class Apply(Fixture):
             with mock.patch.object(orca_module.orca_update, "check", lambda: self.CURRENT):
                 self.assertEqual(orca_module.plan()["steps"], [])
 
+    def test_a_windows_s4u_device_plans_its_skills(self):
+        """covers: ORCA-6, ORCA-8 — S4U 서버가 있는 Windows 는 갱신과 함께, 최신이어도 판이 다르면 스킬을 맞춘다."""
+        (self.home / "state/orca-skills-version").write_text("1.4.239")
+        outdated = {"supported": True, "latest": "1.4.242", "current": False, "reason": None, "error": None}
+        with mock.patch.object(orca_module.sys, "platform", "win32"), \
+                mock.patch.object(orca_module.orca_update, "_s4u_server", lambda: {"state": "configured"}):
+            for check, steps in ((outdated, ["package", "skills"]), (self.CURRENT, ["skills"])):
+                with mock.patch.object(orca_module.orca_update, "check", lambda: check):
+                    self.assertEqual([s["id"] for s in orca_module.plan()["steps"]], steps)
+
     def test_windows_plans_have_no_posix_server_step_and_install_passes_the_target(self):
         """covers: ORCA-1 (X2) — Windows 설치는 옮긴 설치기가 S4U 서버까지 한다. 목표 버전을 넘긴다."""
         calls = []

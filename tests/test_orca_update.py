@@ -222,14 +222,15 @@ class CheckTest(unittest.TestCase):
             partial = os.path.join(d, "partial.json")
             with open(partial, "w") as f:
                 json.dump({"tool_installs": {"orca_server": {"state": "configured", "service_manager": "task-scheduler"}}}, f)
-            for receipt, problem in ((os.path.join(d, "none.json"), "S4U 서버 기록이 없습니다"),
-                                     (self.s4u_receipt(d, state="configuring"), "S4U 서버 구성이 끝나지 않았습니다(state=configuring)"),
-                                     (partial, "S4U 서버 기록에 service_root·server_profile 이 없습니다"),
-                                     (broken, "영수증을 읽지 못했습니다")):
+            # 이유마다 다음 할 일이 다르다. 데스크톱 전용 기기에서 앱은 서버이므로 지우라고 하지 않는다
+            for receipt, problem in ((os.path.join(d, "none.json"), "S4U 서버 기록이 없습니다. 설치본은 그대로 두고 S4U 서버를 구성하면"),
+                                     (self.s4u_receipt(d, state="configuring"), "S4U 서버 구성이 끝나지 않았습니다(state=configuring). 구성을 마저"),
+                                     (partial, "S4U 서버 기록에 service_root·server_profile 이 없습니다. 영수증의 S4U 서버 기록을"),
+                                     (broken, "영수증(~/.claude/.claude-code-setup.json)을 읽지 못했습니다. 영수증을 고친 뒤")):
                 ok, reason = supported(receipt)
                 self.assertFalse(ok)
-                self.assertTrue(reason.startswith(f"Windows 는 S4U 서버로만 갱신합니다: {problem}. "), reason)
-                self.assertIn("module orca plan --json", reason)
+                self.assertTrue(reason.startswith(f"Windows 는 S4U 서버로만 갱신합니다: {problem}"), reason)
+                self.assertNotIn("지운", reason)
 
     def test_the_windows_job_never_falls_back_to_another_path(self):
         """covers: ORCA-6 — start() 뒤에 S4U 기록이 사라져도 deb·공식 업데이터 경로로 가지 않고 실패한다(K4)."""
