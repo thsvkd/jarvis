@@ -54,11 +54,23 @@ class GuardTest(unittest.TestCase):
         sessions.Sessions().capture()
 
     def test_unknown_or_partial_terminal_coverage_blocks(self):
-        for change in ({"truncated": True}, {"totalCount": 2}, {"hostScope": {"hostIds": ["local"], "omittedHostIds": ["ssh-1"]}}):
+        for change in ({"truncated": True}, {"totalCount": 2}, {"hostScope": {"hostIds": ["local"], "omittedHostIds": ["ssh-1"]}},
+                       {"hostScope": {"hostIds": ["local"], "omittedHostIds": ["ssh:a", "local"]}},
+                       {"hostScope": {"hostIds": ["local"], "omittedHostIds": None}}):
             original = self.body["terminal.list"]
             self.body["terminal.list"] = {**original, **change}
             with self.subTest(change=change), self.assertRaises(RuntimeError):
                 sessions.Sessions().capture()
+            self.body["terminal.list"] = original
+
+    def test_omitted_remote_hosts_do_not_block(self):
+        """covers: ORCA-5 — 원격 Orca 서버(runtime:)와 SSH 호스트(ssh:)의 세션은 로컬 갱신이 끊지 않는다(thsvkd-mac 실측의 보류)."""
+        original = self.body["terminal.list"]
+        self.body["terminal.list"] = {**original, "hostScope": {"hostIds": ["local"],
+                                                                "omittedHostIds": ["runtime:20b6", "ssh:ssh-1786241644969-pm691k"]}}
+        try:
+            sessions.Sessions().capture()
+        finally:
             self.body["terminal.list"] = original
 
     def test_terminal_count_mismatch_blocks(self):

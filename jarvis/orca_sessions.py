@@ -20,10 +20,18 @@ class Deferred(RuntimeError):
     """세션을 지키려고 갱신을 미룬다(실패가 아니라 보류다). 모듈 계약의 deferred(종료 코드 2)."""
 
 
+REMOTE_HOSTS = ("runtime:", "ssh:")
+
+
 def complete(body, key):
+    """로컬 호스트를 빠짐없이 조사했는지. 원격 호스트(runtime·ssh)는 조사에서 빠져도 된다:
+    runtime 세션은 다른 기기의 Orca 서버에 있고, ssh 세션은 원격의 relay 가 로컬 앱 재시작 뒤에도
+    relayGracePeriodSeconds(기본 10800초) 동안 붙들고 있다가 다시 붙는다(Orca 1.4.244 main 번들)."""
     scope = body.get("hostScope") if isinstance(body, dict) else None
     rows = body.get(key) if isinstance(body, dict) else None
-    if not isinstance(scope, dict) or scope.get("hostIds") != ["local"] or scope.get("omittedHostIds") != [] \
+    omitted = scope.get("omittedHostIds") if isinstance(scope, dict) else None
+    if not isinstance(scope, dict) or scope.get("hostIds") != ["local"] or not isinstance(omitted, list) \
+            or not all(isinstance(h, str) and h.startswith(REMOTE_HOSTS) for h in omitted) \
             or not isinstance(rows, list) or body.get("truncated") is not False \
             or type(body.get("totalCount")) is not int or body["totalCount"] != len(rows):
         raise Deferred("Orca 세션 조사 범위가 불완전하여 업데이트를 보류합니다")
