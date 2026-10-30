@@ -21,6 +21,27 @@ class InstallTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "대상 버전"):
                 orca_install.archive_contract(path, "1.4.237", "arm64")
 
+    def test_mac_reads_the_contract_of_the_package_the_updater_downloaded(self):
+        """covers: ORCA-5 — Mac 은 공식 업데이터 캐시의 ZIP 이 대상의 해시와 같을 때만 그 계약을 읽는다."""
+        import base64
+        import hashlib
+        with tempfile.TemporaryDirectory() as cache:
+            name = "Orca-1.4.244-arm64-mac.zip"
+            with zipfile.ZipFile(os.path.join(cache, name), "w") as z:
+                z.writestr("Orca.app/Contents/Resources/orca-local-build.json", json.dumps({
+                    "version": "1.4.244", "appId": "com.stablyai.orca", "architecture": "arm64",
+                    "daemonProtocolVersion": 50, "attachableDaemonProtocolVersions": [43, 50]}))
+            with open(os.path.join(cache, name), "rb") as f:
+                body = f.read()
+            meta = {"name": name, "sha512": base64.b64encode(hashlib.sha512(body).digest()).decode(), "size": len(body)}
+            with open(os.path.join(cache, "update-info.json"), "w") as f:
+                json.dump({"fileName": name, "sha512": meta["sha512"]}, f)
+            with patch.object(orca_install.os.path, "expanduser", lambda p: cache), \
+                    patch.object(orca_install.platform, "machine", lambda: "arm64"):
+                self.assertEqual(orca_install.native_contract("1.4.244", meta), {43, 50})
+                with self.assertRaisesRegex(RuntimeError, "캐시"):
+                    orca_install.native_contract("1.4.244", {**meta, "sha512": "other"})
+
     def test_native_target_contract_covers_old_daemon(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "incoming.zip")

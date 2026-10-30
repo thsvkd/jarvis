@@ -1,4 +1,4 @@
-"""플랫폼마다 공식 설치본 하나를 읽는다. Mac·Windows 갱신은 Orca 자체 업데이터에 맡긴다."""
+"""플랫폼마다 공식 설치본 하나를 읽는다. Mac 갱신은 Orca 자체 업데이터에 맡긴다(Windows 는 S4U 설치기, orca_update)."""
 import json
 import os
 import plistlib

@@ -197,17 +197,28 @@ def check():
 RECEIPT = "~/.claude/.claude-code-setup.json"
 
 
-def _s4u_server():
-    """Windows 에서 Orca 모듈(modules/orca)이 구성한 S4U 서버의 영수증 기록. 없으면 None.
-    그 서버는 설치 폴더 밖 복사본에서 돌아 설치기가 끝내지 않고, 러너가 터미널이 없을 때 새 판으로 옮긴다."""
-    if sys.platform != "win32":
-        return None
+def _s4u_record():
+    """영수증의 S4U 서버 기록과, 쓸 수 없으면 그 이유. (기록, None) 또는 (None, 이유)."""
     try:
         with open(os.path.expanduser(RECEIPT), encoding="utf-8") as f:
             rec = (json.load(f).get("tool_installs") or {}).get("orca_server")
+    except FileNotFoundError:
+        rec = None
     except (OSError, ValueError, AttributeError):
-        return None
-    return rec if isinstance(rec, dict) and rec.get("service_manager") == "task-scheduler" and rec.get("state") == "configured" else None
+        return None, "영수증을 읽지 못했습니다"
+    if not isinstance(rec, dict) or rec.get("service_manager") != "task-scheduler":
+        return None, "S4U 서버 기록이 없습니다"
+    if rec.get("state") != "configured":
+        return None, f"S4U 서버 구성이 끝나지 않았습니다(state={rec.get('state')})"
+    if not all(isinstance(rec.get(k), str) and rec[k] for k in ("service_root", "server_profile")):
+        return None, "S4U 서버 기록에 service_root·server_profile 이 없습니다"
+    return rec, None
+
+
+def _s4u_server():
+    """Windows 에서 Orca 모듈(modules/orca)이 구성한 S4U 서버의 영수증 기록. 없으면 None.
+    그 서버는 설치 폴더 밖 복사본에서 돌아 설치기가 끝내지 않고, 러너가 터미널이 없을 때 새 판으로 옮긴다."""
+    return _s4u_record()[0] if sys.platform == "win32" else None
 
 
 def _windows_tools():
@@ -227,11 +238,9 @@ def _desktop_app_open():
     return any(os.path.normcase(p.info.get("exe") or "") == app for p in psutil.process_iter(["exe"]))
 
 
-def _s4u_switch():
+def _s4u_switch(server):
     """설치 뒤 S4U 서버가 새 설치본의 복사본으로 옮겨 갔는지(AI-55c). 미뤘으면 그 이유를 남긴다."""
-    server, tools = _s4u_server(), _windows_tools()
-    if not server:
-        return {}
+    tools = _windows_tools()
     state = tools.orca_server.running_runner_state(server["service_root"]) or {}
     identity = tools.orca_server.app_identity(orca_install.profile()["root"])
     if identity and ntpath.basename(state.get("app") or "") == identity:  # Windows 경로(\ 와 / 모두)
@@ -242,7 +251,11 @@ def _s4u_switch():
 
 
 def _run_s4u():
-    """S4U 서버가 있는 Windows: 공식 설치기를 `/S --updated` 로 실행하고 서버 전환을 보고한 뒤 소유 스킬을 갱신한다."""
+    """Windows: 공식 설치기를 `/S --updated` 로 실행하고 서버 전환을 보고한 뒤 번들 스킬을 갱신한다.
+    start() 뒤에 기록이 사라졌으면(영수증 재작성 등) 다른 경로로 떨어지지 않고 실패한다(K4)."""
+    server, problem = _s4u_record()
+    if not server:
+        raise RuntimeError(f"Windows 는 S4U 서버로만 갱신합니다: {problem}")
     before = _installed()
     if _desktop_app_open():
         raise orca_sessions.Deferred("Orca 데스크톱 앱이 열려 있어 갱신을 보류합니다(설치기가 앱을 닫습니다). 앱을 닫은 뒤 다시 하세요")
@@ -251,7 +264,7 @@ def _run_s4u():
         raise RuntimeError("Windows Orca 갱신 실패(진행 로그를 보세요)")
     after = _installed()
     result = {"app": "current" if after == before else "updated", "from_version": before, "to_version": after, "error": None,
-              **_s4u_switch()}
+              **_s4u_switch(server)}
     _set(phase="skills")
     try:
         orca_install.skills()
@@ -275,10 +288,10 @@ def _sudo_probe():
 
 def _supported():
     """이 프로세스가 deb Orca 를 올리고 다시 띄울 수 있는지. (가능, 이유)."""
-    if _s4u_server():
-        return True, None
     if sys.platform == "win32":  # K4: 데스크톱 앱이 서버를 겸하는 Windows 는 갱신하지 않는다
-        return False, "Windows 는 S4U 서버를 구성한 기기만 갱신합니다. 이 기기에는 S4U 서버 기록이 없습니다"
+        problem = _s4u_record()[1]
+        return (True, None) if problem is None else (False, f"Windows 는 S4U 서버로만 갱신합니다: {problem}. "
+                                                            "Orca 를 지운 뒤 `python -m jarvis module orca plan --json` 으로 다시 설치하면 S4U 서버까지 구성합니다")
     p = orca_install.profile()
     if not os.path.isfile(p["cli"]):
         return False, "공식 Orca 설치본의 CLI 를 찾지 못했습니다"
@@ -680,7 +693,7 @@ def _run_job():
     error, result, ops, deferred = None, {}, None, False
     try:
         ops = Live()
-        if _s4u_server():
+        if sys.platform == "win32":
             result = _run_s4u()
         elif orca_install.profile()["kind"] == "mac-app":
             target, _ = ops.manifest()

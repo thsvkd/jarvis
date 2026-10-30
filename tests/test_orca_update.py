@@ -209,21 +209,63 @@ class CheckTest(unittest.TestCase):
             self.assertIsNone(orca_update._s4u_server())  # Windows 가 아니면 S4U 기록을 보지 않는다
 
     def test_a_windows_desktop_without_an_s4u_server_is_not_updated(self):
-        """covers: ORCA-6 — K4: Windows 는 S4U 서버로만 갱신한다. 데스크톱 앱의 공식 업데이터 RPC 는 부르지 않는다."""
-        with tempfile.TemporaryDirectory() as d, patch.object(orca_update, "RECEIPT", self.s4u_receipt(d, state="configuring")), \
+        """covers: ORCA-6 — K4: Windows 는 S4U 서버로만 갱신한다. 설치본·업데이터 RPC 를 보기 전에 이유와 다음 할 일을 돌려준다."""
+        def supported(receipt):
+            with patch.object(orca_update, "RECEIPT", receipt), patch.object(orca_update.sys, "platform", "win32"), \
+                    patch.object(orca_update.orca_install, "profile", side_effect=AssertionError("profile")), \
+                    patch.object(orca_update.orca_rpc, "call", side_effect=AssertionError("updater RPC")):
+                return self.old[0]()
+        with tempfile.TemporaryDirectory() as d:
+            broken = os.path.join(d, "broken.json")
+            with open(broken, "w") as f:
+                f.write("{")
+            partial = os.path.join(d, "partial.json")
+            with open(partial, "w") as f:
+                json.dump({"tool_installs": {"orca_server": {"state": "configured", "service_manager": "task-scheduler"}}}, f)
+            for receipt, problem in ((os.path.join(d, "none.json"), "S4U 서버 기록이 없습니다"),
+                                     (self.s4u_receipt(d, state="configuring"), "S4U 서버 구성이 끝나지 않았습니다(state=configuring)"),
+                                     (partial, "S4U 서버 기록에 service_root·server_profile 이 없습니다"),
+                                     (broken, "영수증을 읽지 못했습니다")):
+                ok, reason = supported(receipt)
+                self.assertFalse(ok)
+                self.assertTrue(reason.startswith(f"Windows 는 S4U 서버로만 갱신합니다: {problem}. "), reason)
+                self.assertIn("module orca plan --json", reason)
+
+    def test_the_windows_job_never_falls_back_to_another_path(self):
+        """covers: ORCA-6 — start() 뒤에 S4U 기록이 사라져도 deb·공식 업데이터 경로로 가지 않고 실패한다(K4)."""
+        live = type("Live", (), {"proof": None, "sessions": type("S", (), {"release": lambda self: None})()})
+        orca_update.job = {"state": "running"}
+        with tempfile.TemporaryDirectory() as d, patch.object(orca_update, "Live", live), \
                 patch.object(orca_update.sys, "platform", "win32"), \
-                patch.object(orca_update.orca_install, "profile", return_value={"kind": "windows-user", "cli": "/orca.exe"}), \
-                patch.object(orca_update.os.path, "isfile", return_value=True), \
-                patch.object(orca_update.orca_rpc, "call", side_effect=AssertionError("updater RPC")):
-            supported, reason = self.old[0]()
-        self.assertFalse(supported)
-        self.assertIn("S4U", reason)
+                patch.object(orca_update, "RECEIPT", os.path.join(d, "none.json")), \
+                patch.object(orca_update, "execute", side_effect=AssertionError("deb")), \
+                patch.object(orca_update.orca_install, "native_update", side_effect=AssertionError("updater RPC")), \
+                patch.object(orca_update, "_windows_tools", side_effect=AssertionError("installer")), \
+                patch.object(orca_update, "RESULT", os.path.join(d, "result.json")), \
+                patch.object(orca_update, "LOCK", os.path.join(d, "orca-update.lock")), \
+                patch.object(orca_update.config, "STATE_DIR", d):
+            orca_update._run()
+        self.assertEqual(orca_update.job["state"], "failed")
+        self.assertIn("S4U 서버로만 갱신합니다", orca_update.job["error"])
+
+    def test_only_a_mac_interruption_is_recorded_as_a_native_update(self):
+        """covers: ORCA-5 — 끊긴 갱신의 복구는 native 기록으로 경로를 고른다. Windows 는 이 기록을 남기지 않는다(K4)."""
+        from unittest.mock import MagicMock
+        marks = []
+        with patch.object(orca_update.orca_sessions, "Sessions", MagicMock), \
+                patch.object(orca_update.orca_issue, "manager", return_value=None), \
+                patch.object(orca_update, "_write_mark", side_effect=marks.append):
+            for kind in ("mac-app", "windows-user", "linux-deb"):
+                with patch.object(orca_update.orca_install, "profile", return_value={"kind": kind}):
+                    orca_update.Live().mark_stopped()
+        self.assertEqual([m["native"] for m in marks], [True, False, False])
 
     def run_s4u(self, installer="ok", desktop=False, skills=None, versions=("1.4.240", "1.4.244"), switch=None):
         seen = iter(versions)
         tools = type("Tools", (), {"update_orca_windows": staticmethod(lambda expect=None: self.calls.append("installer") or installer)})
         self.calls = []
         with patch.object(orca_update, "_desktop_app_open", return_value=desktop), \
+                patch.object(orca_update, "_s4u_record", return_value=({"service_root": "C:\\svc", "server_profile": "p"}, None)), \
                 patch.object(orca_update, "_windows_tools", return_value=tools), \
                 patch.object(orca_update, "_s4u_switch", return_value=switch or {"server": "switched"}), \
                 patch.object(orca_update, "_installed", side_effect=lambda: next(seen)), \
@@ -240,7 +282,7 @@ class CheckTest(unittest.TestCase):
                                      (held, "failed", True)):
             orca_update.job = {"state": "running"}
             with tempfile.TemporaryDirectory() as d, patch.object(orca_update, "Live", live), \
-                    patch.object(orca_update, "_s4u_server", return_value={"state": "configured"}), \
+                    patch.object(orca_update.sys, "platform", "win32"), \
                     patch.object(orca_update, "_run_s4u", side_effect=run), \
                     patch.object(orca_update, "RESULT", os.path.join(d, "result.json")), \
                     patch.object(orca_update, "LOCK", os.path.join(d, "orca-update.lock")), \
@@ -262,12 +304,12 @@ class CheckTest(unittest.TestCase):
             running_runner_state=lambda root: state, app_identity=lambda root: "build-new",
             server_query_cli=lambda record: "orca.exe", live_terminal_count=lambda cli, profile: 2,
             terminal_count_problem=lambda n: f"it has {n} live terminals")
-        with patch.object(orca_update, "_s4u_server", return_value={"service_root": "C:\\svc", "server_profile": "p"}), \
-                patch.object(orca_update, "_windows_tools", return_value=types.SimpleNamespace(orca_server=server)), \
+        record = {"service_root": "C:\\svc", "server_profile": "p"}
+        with patch.object(orca_update, "_windows_tools", return_value=types.SimpleNamespace(orca_server=server)), \
                 patch.object(orca_update.orca_install, "profile", return_value={"root": "C:\\inst"}):
-            pending = orca_update._s4u_switch()
+            pending = orca_update._s4u_switch(record)
             state["app"] = r"C:\svc\app\build-new"
-            switched = orca_update._s4u_switch()
+            switched = orca_update._s4u_switch(record)
         self.assertEqual(pending["server"], "pending")
         self.assertIn("2 live terminals", pending["server_reason"])
         self.assertEqual(switched, {"server": "switched"})

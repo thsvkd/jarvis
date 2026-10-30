@@ -283,6 +283,21 @@ class Apply(Fixture):
         self.assertEqual([(s["id"], s["result"]) for s in out["steps"]], [("package", "skipped"), ("skills", "ok")])
         self.assertEqual(out["status"], "failed")
 
+    def test_a_windows_device_without_an_s4u_server_plans_no_skills(self):
+        """covers: ORCA-6 — K4: S4U 서버가 없는 Windows 는 패키지를 막힌 단계로만 보고하고 스킬도 맞추지 않는다."""
+        (self.home / "state/orca-skills-version").write_text("1.4.239")
+        blocked = {"supported": False, "latest": "1.4.242", "current": False, "reason": "Windows 는 S4U 서버로만 갱신합니다", "error": None}
+        with mock.patch.object(orca_module.sys, "platform", "win32"), \
+                mock.patch.object(orca_module.orca_update, "_s4u_server", lambda: None), \
+                mock.patch.object(orca_module.orca_install, "skills", side_effect=AssertionError("skills")):
+            with mock.patch.object(orca_module.orca_update, "check", lambda: blocked):
+                pl = orca_module.plan()
+                out = orca_module.apply(pl["plan_id"])
+            self.assertEqual(([s["id"] for s in pl["steps"]], [b["step"] for b in pl["blocked"]]), (["package"], ["package"]))
+            self.assertEqual((out["status"], [s["result"] for s in out["steps"]]), ("failed", ["skipped"]))
+            with mock.patch.object(orca_module.orca_update, "check", lambda: self.CURRENT):
+                self.assertEqual(orca_module.plan()["steps"], [])
+
     def test_windows_plans_have_no_posix_server_step_and_install_passes_the_target(self):
         """covers: ORCA-1 (X2) — Windows 설치는 옮긴 설치기가 S4U 서버까지 한다. 목표 버전을 넘긴다."""
         calls = []

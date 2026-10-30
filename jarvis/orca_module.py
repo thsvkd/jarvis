@@ -108,6 +108,7 @@ def plan():
     if check.get("error"):
         raise RuntimeError(check["error"])
     steps, blocked = [], []
+    unmanaged = windows and not orca_update._s4u_server()  # K4: S4U 서버가 없는 Windows 는 스킬도 맞추지 않는다
     if not check["current"]:
         deb, s4u = p["kind"] == "linux-deb", orca_update._s4u_server()
         note = (" (크기·SHA-512 를 검증한 deb 를 설치)" if deb else
@@ -119,7 +120,7 @@ def plan():
         if not check["supported"]:
             blocked.append({"step": "package", "reason": check["reason"]})
     # 앱을 올릴 때, 또는 번들 스킬을 마지막으로 맞춘 판이 지금 설치본과 다를 때만 스킬을 계획한다(같은 판이면 끝난 것이다)
-    if steps or orca_install.skills_version() != version:
+    if not unmanaged and (steps or orca_install.skills_version() != version):
         steps.append({"id": "skills", "summary": "Orca 번들 스킬을 모두 이 판의 사본으로 갱신(사용자가 고친 스킬도 덮어씀)",
                       "risk": "update", "argv": [p["cli"], "skills", "update", "--all"]})
     server_steps, server_blocked = ([], []) if windows else _server_steps(p["cli"])

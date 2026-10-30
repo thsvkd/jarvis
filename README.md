@@ -248,7 +248,7 @@ Orca 업데이트는 core 홈의 기기 목록에서 **Orca 업데이트 확인 
 | Debian/Ubuntu | 공식 `orca-ide` deb, `/opt/Orca`, `orca-serve` 사용자 유닛 | Jarvis: GitHub 매니페스트 크기·SHA-512 검증 → sudo apt → 서비스·실행 버전 확인 |
 | sudo 없는 기존 Linux | 같은 공식 deb, `~/.local/opt/orca/opt/Orca` | Jarvis: 검증한 deb 를 별도 폴더에 풀고 경로 교체 → 서비스·실행 버전 확인. 시스템 deb 로 통일하려면 관리자 설치가 필요 |
 | macOS | `/Applications/Orca.app`, 그 앱의 CLI 를 쓰는 LaunchAgent | Orca 공식 supervised 업데이터의 check/download/install RPC → 새 버전 재연결 확인 |
-| Windows | `%LOCALAPPDATA%\Programs\orca` 사용자 설치본 | Orca 공식 업데이터의 check/download/install RPC → 새 버전 재연결 확인 |
+| Windows(S4U 서버 없음) | `%LOCALAPPDATA%\Programs\orca` 사용자 설치본(데스크톱 앱이 서버를 겸함) | 갱신하지 않는다(K4). 계획은 package 단계를 blocked 로 보고하고 스킬도 맞추지 않는다 |
 | Windows(S4U 서버) | 같은 설치본, Orca 모듈이 구성한 S4U 서버(설치 폴더 밖 복사본) | Jarvis: 크기·SHA-512 를 검증한 설치기를 `/S --updated` 로 실행 → 러너가 터미널이 없을 때 새 복사본으로 옮겨 간다(데스크톱 앱이 열려 있으면 보류) |
 
 앱 갱신 후 설치본의 CLI 로 전역 Orca 스킬을 갱신한다. 앱과 스킬의 결과는 따로 표시한다.
@@ -256,7 +256,7 @@ Orca 업데이트는 core 홈의 기기 목록에서 **Orca 업데이트 확인 
 데몬 밖에서 실행되는 터미널, 실행 중인 네이티브 채팅, 조사 누락은 보류한다. Linux 는 데몬과 그 작업이 서비스 종료 cgroup 밖에 있는지도 확인한다.
 새 패키지의 호환성 계약에 모든 기존 데몬 프로토콜이 포함되어야 하며, 새 버전 재연결 후 같은 데몬 PID·시작 시각과 PTY 실행 식별자가 유지되어야 성공한다.
 지원되는 런타임에서는 최종 조사 때 새 터미널 생성을 잠시 막고 끝나면 해제한다. 구형 1.4.224/232 는 이 fence 를 지원하지 않으므로 관찰한 기존 PTY 의 연속성만 검증하며, 최종 조사 이후 시작한 새 작업 전체를 원자적으로 보호한다고 보장하지 않는다.
-Mac 은 공식 업데이터가 받은 ZIP 의 해시·버전·아키텍처와 계약을 확인한다. Windows 의 열린 세션과 함께 갱신할 때는 설치 EXE 안의 계약을 읽는 7-Zip 이 필요하다. 도구나 계약이 없으면 보류한다.
+Mac 은 공식 업데이터가 받은 ZIP 의 해시·버전·아키텍처와 계약을 확인한다. 계약이 없으면 보류한다.
 macOS 1.4.224 서버 모드는 Squirrel 설치 준비와 Orca 준비 확인이 서로 기다리는 문제가 있어 자동 갱신을 보류한다.
 이 버전은 공식 ZIP 의 SHA-512·코드 서명·공증·데몬 호환성을 확인한 뒤 백업을 남겨 한 번 이전해야 한다. 1.4.237 은 서버 모드의 설치 준비 순서를 수정했다.
 구형 런타임에서 `checking` 이 멈춘 경우 열린 창의 상태도 확인한다. 세션 조사 없이 데몬을 종료하거나 재시작하지 않는다.
