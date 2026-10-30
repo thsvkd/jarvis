@@ -245,7 +245,7 @@ class Apply(Fixture):
     CURRENT = {"supported": True, "latest": "1.4.240", "current": True, "reason": None, "error": None}
 
     def test_each_approved_step_has_exactly_one_result(self):
-        """covers: ORCA-13 — 갱신이 함께 한 skills 를 뒤 단계(server)가 다시 보고하지 않는다(실기기 apply 에서 중복·모순이 났다)."""
+        """TEST_SPEC 케이스 밖(apply 결과 형식은 사용자 확인 항목) — 갱신이 함께 한 skills 를 뒤 단계(server)가 다시 보고하지 않는다(실기기 apply 에서 중복·모순이 났다)."""
         receipt = self.home / ".claude/.claude-code-setup.json"
         body = json.loads(receipt.read_text())
         del body["tool_installs"]["orca_server"]
