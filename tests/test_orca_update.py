@@ -174,6 +174,7 @@ class ExecuteTest(unittest.TestCase):
 class CheckTest(unittest.TestCase):
     def test_mac_224_supervised_updater_requires_initial_migration(self):
         with patch.object(orca_update.orca_install, "profile", return_value={"kind": "mac-app", "cli": "/orca"}), \
+                patch.object(orca_update.sys, "platform", "darwin"), \
                 patch.object(orca_update.os.path, "isfile", return_value=True), \
                 patch.object(orca_update.orca_rpc, "call", return_value={"appVersion": "1.4.224", "support": {
                     "automatic": True, "installMode": "supervised-headless-serve"}}):
@@ -183,6 +184,7 @@ class CheckTest(unittest.TestCase):
 
     def test_fixed_mac_updater_remains_supported(self):
         with patch.object(orca_update.orca_install, "profile", return_value={"kind": "mac-app", "cli": "/orca"}), \
+                patch.object(orca_update.sys, "platform", "darwin"), \
                 patch.object(orca_update.os.path, "isfile", return_value=True), \
                 patch.object(orca_update.orca_rpc, "call", return_value={"appVersion": "1.4.237", "support": {
                     "automatic": True, "installMode": "supervised-headless-serve"}}):
@@ -202,7 +204,8 @@ class CheckTest(unittest.TestCase):
             self.assertEqual(self.old[0](), (True, None))
             with patch.object(orca_update, "RECEIPT", self.s4u_receipt(d, state="configuring")):
                 self.assertIsNone(orca_update._s4u_server())  # 구성이 끝나지 않은 서버는 그 경로로 보내지 않는다
-        with tempfile.TemporaryDirectory() as d, patch.object(orca_update, "RECEIPT", self.s4u_receipt(d)):
+        with tempfile.TemporaryDirectory() as d, patch.object(orca_update, "RECEIPT", self.s4u_receipt(d)), \
+                patch.object(orca_update.sys, "platform", "linux"):
             self.assertIsNone(orca_update._s4u_server())  # Windows 가 아니면 S4U 기록을 보지 않는다
 
     def run_s4u(self, installer="ok", desktop=False, skills=None, versions=("1.4.240", "1.4.244"), switch=None):
@@ -433,8 +436,10 @@ class StartGuardTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             lock = os.path.join(d, "orca-update.lock")
             holder = subprocess.Popen([_sys.executable, "-c",
-                                       "import fcntl, os, sys, time; fd = os.open(sys.argv[1], os.O_CREAT | os.O_RDWR);"
-                                       " fcntl.flock(fd, fcntl.LOCK_EX); print('locked', flush=True); time.sleep(30)", lock],
+                                       "import os, sys, time\nfd = os.open(sys.argv[1], os.O_CREAT | os.O_RDWR)\n"
+                                       "if sys.platform == 'win32':\n import msvcrt; msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)\n"
+                                       "else:\n import fcntl; fcntl.flock(fd, fcntl.LOCK_EX)\n"
+                                       "print('locked', flush=True); time.sleep(30)", lock],
                                       stdout=subprocess.PIPE, text=True)
             try:
                 self.assertEqual(holder.stdout.readline().strip(), "locked")
@@ -456,6 +461,7 @@ class StartGuardTest(unittest.TestCase):
             finally:
                 holder.kill()
                 holder.wait()
+                holder.stdout.close()
 
     def test_recovery_leaves_a_mark_alone_while_another_process_updates(self):
         """N3 — 모듈 apply 가 설치하는 중에 gateway 가 다시 떠도, 그 MARK 를 끊긴 갱신으로 보고 orca-serve 를 띄우지 않는다."""

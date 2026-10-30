@@ -232,7 +232,7 @@ class Apply(Fixture):
         record = {"state": "configured", "service_path": str(unit), "service_digest": "0" * 64}
         receipt = self.home / ".claude/.claude-code-setup.json"
         receipt.write_text(json.dumps({"tool_installs": {"orca_server": record}}))
-        with mock.patch.dict(os.environ, {"HOME": str(self.home)}):
+        with mock.patch.dict(os.environ, {"HOME": str(self.home), "USERPROFILE": str(self.home)}):
             out = orca_module.uninstall(plan_id=orca_module.uninstall(dry_run=True)["plan_id"])
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
@@ -344,7 +344,7 @@ class Apply(Fixture):
         """X1 — Windows 에는 pwd·os.getuid 가 없다. 그래도 모듈을 import 할 수 있다."""
         import subprocess
         import sys as _sys
-        script = ("import os, sys; sys.modules['pwd'] = None; del os.getuid\n"
+        script = ("import os, sys; sys.modules['pwd'] = None\nif hasattr(os, 'getuid'): del os.getuid\n"
                   "from jarvis import module\n"
                   "import jarvis.orca_module\n")
         p = subprocess.run([_sys.executable, "-c", script], capture_output=True, text=True, timeout=60,

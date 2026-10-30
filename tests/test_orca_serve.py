@@ -2,6 +2,7 @@
 import os
 import plistlib
 import shutil
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -9,6 +10,11 @@ from unittest import mock
 from jarvis import orca_serve
 
 
+# orca_serve 는 Linux·macOS 전용이다(systemd·launchd·pwd·심링크). Windows 서버는 modules/orca 의 S4U 경로가 맡는다.
+POSIX_ONLY = unittest.skipIf(sys.platform == "win32", "Linux·macOS 전용 서비스")
+
+
+@POSIX_ONLY
 class Base(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="jarvis-orca-serve-")
@@ -20,7 +26,7 @@ class Base(unittest.TestCase):
         os.makedirs(os.path.dirname(self.link))
         os.symlink(self.cli, self.link)
         self.calls = []
-        home = mock.patch.dict(os.environ, {"HOME": self.root})
+        home = mock.patch.dict(os.environ, {"HOME": self.root, "USERPROFILE": self.root})  # Windows 의 expanduser 는 USERPROFILE
         run = mock.patch.object(orca_serve, "run", lambda argv, timeout=6, sudo=False: (self.calls.append(argv), (0, "", ""))[1])
         for p in (home, run):
             p.start()
@@ -160,6 +166,7 @@ class Remove(Base):
         self.assertEqual(self.calls, [["systemctl", "--user", "disable", "--now", "orca-serve"], ["systemctl", "--user", "daemon-reload"]])
 
 
+@POSIX_ONLY
 class LoginEnv(unittest.TestCase):
     def test_reads_path_after_the_marker_and_ignores_shell_noise(self):
         out = "welcome banner\n\n__jarvis_path__/a/bin:/usr/bin\n"
