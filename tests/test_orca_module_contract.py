@@ -206,7 +206,8 @@ class Apply(Fixture):
         servers = []  # self.fail 은 apply 의 except Exception 에 삼켜지므로 호출을 기록해 단언한다
         with patches[0], patches[1], mock.patch.object(orca_module, "_server", lambda cli: servers.append(cli) or ("ok", "")):
             out = orca_module.apply(orca_module.plan()["plan_id"])
-        self.assertEqual((out["status"], [s["id"] for s in out["steps"]], servers), ("failed", ["package"], []))
+        self.assertEqual((out["status"], [(s["id"], s["result"]) for s in out["steps"]], servers),
+                         ("failed", [("package", "failed"), ("skills", "failed")], []))
 
     def test_uninstall_keeps_an_adopted_unit_and_drops_only_its_record(self):
         """covers: ORCA-11"""
@@ -259,8 +260,10 @@ class Apply(Fixture):
         started, patches = self.updater({"state": "done"})
         with patches[0], patches[1]:
             pl = orca_module.plan()
-            orca_module.apply(pl["plan_id"])
+            out = orca_module.apply(pl["plan_id"])
         self.assertEqual((pl["steps"][0]["target"], started), ("1.4.242", ["1.4.242"]))
+        # 갱신 작업이 함께 한 skills 도 승인한 단계라 결과가 있다(pi5-s3 실측에서 빠져 있었다)
+        self.assertEqual([(s["id"], s["result"]) for s in out["steps"]], [("package", "ok"), ("skills", "ok")])
 
     def test_a_device_whose_skills_match_its_version_reaches_current(self):
         """covers: ORCA-8 (X5) — 같은 판에서 이미 맞춘 스킬은 다시 계획하지 않는다(맞춘 판은 Fixture 가 1.4.240 으로 둔다)."""

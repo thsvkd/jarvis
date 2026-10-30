@@ -248,6 +248,9 @@ def apply(plan_id):
         except Exception as e:
             result, message = "failed", f"{type(e).__name__}: {e}"
         results.append(_step(step, result, message))
+        # 앞 단계가 함께 처리한 단계(갱신·설치 뒤의 skills)도 결과에 남긴다: 승인한 단계마다 결과가 하나씩 있다
+        results += [_step(s, result, f"{step['id']} 단계에서 함께 처리") for s in current["steps"]
+                    if s["id"] in done and s["id"] != step["id"]]
         if result == "failed":
             break  # 앞 단계가 실패하면 뒤 단계(서버 등)는 실행하지 않는다
     outcome = [r["result"] for r in results]
