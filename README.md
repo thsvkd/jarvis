@@ -242,6 +242,8 @@ Get-Content -Encoding UTF8 $env:LOCALAPPDATA\jarvis\jarvis.log -Tail 20
 Orca 업데이트는 core 홈의 기기 목록에서 **Orca 업데이트 확인 → Orca 업데이트** 순서로 실행한다.
 확인은 설치된 버전과 공식 stable 매니페스트를 비교하며 설치 권한·런타임 지원 여부와 독립적이다.
 최신 기기의 업데이트 버튼은 비활성화된다. 진행 상태는 기기 타일에 표시하며 페어링 QR 은 페어링 버튼으로 연다.
+기기에서 직접 할 때는 `python -m jarvis module orca plan --json` 으로 계획을 보고, 그 `plan_id` 로 `apply --json --plan-id <id>` 를 실행한다.
+python 은 게이트웨이 서비스가 쓰는 것을 쓴다(Mac 의 PATH 첫 `python3` 는 psutil 이 없는 시스템 3.9 일 수 있다: LaunchAgent 의 `/opt/homebrew/bin/python3` 나 venv).
 
 | OS | 설치본 하나 | 업데이트 주체 |
 | --- | --- | --- |

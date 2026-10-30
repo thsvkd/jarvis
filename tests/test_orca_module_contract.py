@@ -244,6 +244,22 @@ class Apply(Fixture):
 
     CURRENT = {"supported": True, "latest": "1.4.240", "current": True, "reason": None, "error": None}
 
+    def test_each_approved_step_has_exactly_one_result(self):
+        """covers: ORCA-13 — 갱신이 함께 한 skills 를 뒤 단계(server)가 다시 보고하지 않는다(실기기 apply 에서 중복·모순이 났다)."""
+        receipt = self.home / ".claude/.claude-code-setup.json"
+        body = json.loads(receipt.read_text())
+        del body["tool_installs"]["orca_server"]
+        receipt.write_text(json.dumps(body))
+        for job, package in (({"state": "done"}, "ok"), ({"state": "failed", "deferred": True, "error": "세션 조사 불완전"}, "deferred")):
+            started, patches = self.updater(job)
+            with patches[0], patches[1]:
+                pl = orca_module.plan()
+                self.assertEqual([s["id"] for s in pl["steps"]], ["package", "skills", "server"])
+                out = orca_module.apply(pl["plan_id"])
+            self.assertEqual([(s["id"], s["result"]) for s in out["steps"]], [("package", package), ("skills", package), ("server", "ok")])
+            body["tool_installs"].pop("orca_server", None)  # server 단계가 받아들여 기록한 것을 다음 경우를 위해 되돌린다
+            receipt.write_text(json.dumps(body))
+
     def test_a_skills_only_plan_never_runs_the_package_update(self):
         """covers: ORCA-13 (X4) — 매니페스트가 바뀌어도 skills 만 승인한 계획은 패키지를 받거나 설치하지 않는다."""
         (self.home / "state/orca-skills-version").write_text("1.4.239")  # 번들 스킬을 마지막으로 맞춘 판이 설치본과 다르다
