@@ -41,7 +41,7 @@ ai-setup(`thsvkd/ai-setup`)과 jarvis(`thsvkd/jarvis`)가 같은 Orca를 서로 
 | D12 | 순서: Orca(시범) → doctor → 훅 → 하네스 설치·갱신 → 스킬·플러그인·MCP → 나머지(output-style, mods, 줄바꿈 키, 프로젝트 지침). Orca 시범을 마친 뒤 순서를 한 번 다시 확인한다. |
 | D13 | ai-setup의 SSoT·TDD 체계(AGENTS.md, `docs/PRD.md`·`docs/SPEC.md`·`docs/TEST_SPEC.md`, 적대적 리뷰, 세 OS 검증)를 jarvis에 들여온다. 첫 단계에서는 문서 골격과 Orca 케이스만 만들고, 나머지는 모듈을 옮길 때마다 채운다. |
 | D14 | 작업은 두 세션이 나눠 한다. ai-setup-49는 설계 문서, 옮길 코드의 안내, 이식한 코드의 리뷰, ai-setup 쪽 삭제, 배포를 맡는다. jarvis-a3는 jarvis의 SSoT 골격, 모듈 이식·구현, jarvis 테스트를 맡는다. 커밋은 사용자 확인을 받은 뒤에 한다. |
-| D15 | 관리 기기 전부(thsvkd-win 포함)에 jarvis 게이트웨이를 설치하고 Orca 상태를 같게 맞춘다. grok-bot은 접속이 되면 같은 방식으로 맞춘다. |
+| D15 | 관리 기기 전부(thsvkd-win 포함)에 jarvis 게이트웨이를 설치하고 Orca 상태를 같게 맞춘다. grok-bot 은 관리 기기에서 뺀다(2026-10-30 사용자 결정). |
 | D16 | update-ai는 하네스 바이너리를 갱신하는 도구다. Orca는 update-ai에서 뺀다. |
 
 ## 3. 기각한 대안
@@ -78,7 +78,7 @@ ai-setup(`thsvkd/ai-setup`)과 jarvis(`thsvkd/jarvis`)가 같은 Orca를 서로 
 
 - Linux: `~/.config/systemd/user/orca-serve.service` 다. `ExecStart=/opt/Orca/resources/bin/orca-ide serve --supervise --port 6768 --pairing-address <주소>`, `Environment=ORCA_USER_DATA_PATH=<서버 프로필>`, `KillMode=process`, `Restart=on-failure` 로 둔다. Python 러너는 없다. 같은 형태의 유닛이 이미 있으면(jarvis가 만든 것 포함) 실패로 처리하지 않고 영수증에 기록해 받아들인다. 형태가 다른 유닛은 바꾸지 않고 보고한다. 같은 형태인지는 실행 파일을 realpath 로 비교해 판정한다(`validate_runtime` 과 같은 규칙). 예를 들어 pi5-server2 의 jarvis 유닛은 `/home/pi/.local/bin/orca-ide` 를 실행하는데, 이 경로는 `/opt/Orca/resources/bin/orca-ide` 를 가리키는 심링크다. 페어링 플래그(`--no-pairing`, `--mobile-pairing` 등)는 O7 이 정해질 때까지 판정에서 뺀다.
 - macOS: ProgramArguments가 `<앱 CLI> serve --supervise ...` 인 LaunchAgent로 둔다. Python 러너는 없다.
-- ai-setup 이 예전 형태(`ai-setup-orca.service`, `com.ai-setup.orca-server`)로 만든 Linux·macOS 서버: 2026-10-29 에 확인한 결과, 이런 서버가 있는 기기는 없다(POSIX 관리 기기 7대의 영수증에 `tool_installs.orca_server` 가 없다. grok-bot 은 접속이 되지 않아 확인하지 못했다). 그래서 자동 전환 코드는 만들지 않는다. 배포 단계에서 grok-bot 을 확인하고, 그런 서버가 있으면 jarvis 설치 전에 ai-setup 의 uninstall 로 지운 뒤 새 형태로 구성한다(5.5).
+- ai-setup 이 예전 형태(`ai-setup-orca.service`, `com.ai-setup.orca-server`)로 만든 Linux·macOS 서버: 2026-10-29 에 확인한 결과, 이런 서버가 있는 기기는 없다(POSIX 관리 기기 7대의 영수증에 `tool_installs.orca_server` 가 없다. grok-bot 은 관리 기기에서 뺐다). 그래서 자동 전환 코드는 만들지 않는다.
 - Windows: ai-setup의 S4U 예약 작업과 러너를 그대로 쓴다. Orca가 Windows에서 `--supervise` 를 지원하면 Linux·macOS와 같은 형태로 옮긴다.
 
 ### 5.3 갱신
@@ -118,7 +118,7 @@ jarvis `docs/TEST_SPEC.md` 에 옮길 후보다. 출처의 AI-n은 ai-setup TEST
 3. jarvis-a3가 Orca 모듈을 이식·구현한다. ai-setup-49는 옮길 코드와 테스트를 안내하고, 이식한 코드를 적대적으로 리뷰한다.
 4. 단위 테스트를 통과하면 pi5-s3에서 실측한다(Linux, jarvis가 만든 기존 `orca-serve` 를 받아들이는지). 이어서 kgolf에서 Windows를 실측한다.
 5. jarvis 모듈이 Windows S4U 서버의 소유 기록을 넘겨받으면, jarvis-a3 가 `orca_update._ai_setup_managed`(0dcf2de)의 보류를 지운다. 이어서 ai-setup-49 가 ai-setup 의 Orca 코드·테스트·SSoT 행을 지운다.
-6. 모든 관리 기기에 jarvis 게이트웨이를 설치하고 Orca 상태를 맞춘다(thsvkd-win 포함). grok-bot 은 접속되면 예전 형태 서버가 있는지 먼저 확인한다(5.2).
+6. 모든 관리 기기에 jarvis 게이트웨이를 설치하고 Orca 상태를 맞춘다(thsvkd-win 포함). grok-bot 은 관리 기기에서 뺐다.
 
 ## 6. 열린 문제
 
@@ -133,7 +133,7 @@ jarvis `docs/TEST_SPEC.md` 에 옮길 후보다. 출처의 AI-n은 ai-setup TEST
 | O7 | 페어링을 하나로 정해야 한다. (1) Windows S4U 를 발급 경로에 넣는다. `orca_issue.manager()` 는 Windows 에서 데스크톱 앱만 알기 때문에, S4U 서버가 있는 기기에서 쓰면 엉뚱한 프로세스를 내린다. kgolf 는 모바일 페어링을 GUI 에서 발급한다는 기존 결정과도 맞춘다. (2) `--supervise` 와의 상호작용을 확인한다. `orca_issue` 는 유닛을 멈춘 뒤 같은 argv 로 임시 serve 를 띄우고 `_kill_tree` 로 자식까지 끝내는데, 데몬(orcad)이 임시 serve 의 자식이면 데몬과 PTY 가 함께 끊긴다. 갱신 경로는 데몬 연속성을 지키므로 두 경로의 기준을 하나로 맞춘다. (3) `orca-serve` 의 ExecStart 플래그를 맞춘다. pi5-s3 의 jarvis 유닛은 `--no-pairing` 을 쓰는데, `orca_issue.py` 는 이 플래그가 있으면 페어링 버튼을 내지 않는다. ai-setup 은 서버를 시작할 때 페어링 범위(runtime·mobile)를 정하고 `--json` 으로 ready 이벤트를 읽는다. 페어링 코드는 출력·로그에 남기지 않고, 테스트에서 실제 페어링을 하지 않으며, tailnet 허용 목록만 쓰고 루프백은 허용하지 않는다는 jarvis 의 제약 안에서 하나로 정한다. |
 | O8 | jarvis 는 지금 앱이 최신이어도 `orca skills update --all` 을 실행한다. 그러면 사용자가 고친 소유 스킬과 소유하지 않은 Orca 스킬까지 바뀐다. ORCA-8 은 기록한 뒤 바뀌지 않은 소유 스킬만 바꾸게 한다. 추천은 ORCA-8 이었다. **닫힘(K2)**: 사용자가 "Orca 를 갱신할 때 관련 스킬·CLI 를 모두 갱신한다"로 정해 `--all` 을 유지한다. |
 | O9 | ai-setup 테스트는 pytest(monkeypatch, tmp_path)를 쓰고, jarvis 테스트는 표준 라이브러리 unittest 만 쓴다(`JARVIS_CONFIG=/dev/null python3 -m unittest discover -s tests`). 옮기는 테스트는 unittest 로 바꾸고, 단언은 약하게 만들지 않는다. Windows 전용 테스트는 kgolf 에서 돌린다. |
-| O10 | 마무리 배포는 jarvis 의 릴리스 경로를 쓴다. `tools/release.py` 가 GitHub 릴리스를 만들고, core 의 갱신 버튼이 `versions/` 로 전환한다(롤백 포함). 아직 게이트웨이가 없는 기기(thsvkd-win, grok-bot)는 처음 설치하는 경로가 따로 필요하다. |
+| O10 | 마무리 배포는 jarvis 의 릴리스 경로를 쓴다. `tools/release.py` 가 GitHub 릴리스를 만들고, core 의 갱신 버튼이 `versions/` 로 전환한다(롤백 포함). 아직 게이트웨이가 없는 기기(thsvkd-win)는 처음 설치하는 경로가 따로 필요하다. |
 | O11 | 닫힘(K4): Windows 는 S4U 하나로 통일하고 jarvis 의 windows-user 갱신 코드를 지웠다. |
 | O8b | 지금 jarvis 기기에는 스킬 소유 기록이 없다. ORCA-8 을 그대로 적용하면, 갱신해도 번들 스킬이 옛 판에 머문다(예전의 `--all` 보다 퇴행). 받아들일 때 지금 판의 사본과 내용이 같은지로 소유를 판정하는 방법은 쓸 수 없다. pi5-server2 의 orca-cli·orchestration 이 `orca skills get` 출력과 달랐다. (A) 엄격한 ORCA-8: 갱신하지 않고 status 에 알린다. (B) 받아들일 때 번들 목록에 이름이 있는 스킬을 `skills_adopted` 로 기록하고, 예전처럼 갱신하되 uninstall 은 지우지 않는다. 추천은 B 였다. **닫힘(K2)**: `--all` 로 정해져 소유 기록이 없어도 갱신하므로 이 문제가 없어졌다. |
 | O12 | 영수증 동시 쓰기(jarvis 갱신과 다른 셋업이 동시에 도는 경우)에는 잠금이 없다. |
@@ -201,3 +201,4 @@ jarvis `docs/TEST_SPEC.md` 에 옮길 후보다. 출처의 AI-n은 ai-setup TEST
 - 2026-10-30 jarvis-a3: v1.3.0 을 릴리스해 8대에 배포했다(thsvkd-win 은 시간 초과). ai-setup-49 가 사용자 허가로 Orca 1.4.245 apply 를 돌려 찾은 결함을 고쳤다: apply 결과에서 앞 단계가 함께 처리한 단계(package·skills)가 뒤 단계(server)에서 다시 "함께 처리"로 붙어, thsvkd-mac 에서는 package 가 deferred 와 ok 로 두 번 나왔다. 이제 그 단계가 새로 함께 처리한 것만 붙인다(테스트 1건, 변이 FAIL). thsvkd-mac 의 보류 원인: Orca 에 원격 호스트(runtime 6, ssh 2)가 붙어 있어 `worktree.ps`·`terminal.list` 의 `hostScope.omittedHostIds` 가 비어 있지 않고, `orca_sessions.complete` 는 이를 조사 불완전으로 보고 보류한다. 원격 호스트의 세션을 갱신의 보존 대상으로 볼지는 사용자 결정이다. README 에 모듈 CLI 와 Mac 의 python 안내를 넣었다.
 - 2026-10-30 jarvis-a3: 사용자 결정(원격 호스트 세션은 갱신이 끊지 않으니 진행)을 Orca 1.4.244 main 번들로 확인한 뒤 반영했다. runtime 세션은 다른 기기의 Orca 서버에 있고, ssh 세션은 원격 relay 가 `relayGracePeriodSeconds`(기본 10800초) 동안 붙들었다가 다시 붙는다. `orca_sessions.complete` 는 이제 `omittedHostIds` 가 `runtime:`·`ssh:` 호스트뿐이면 통과하고, 그 밖의 호스트(local 포함)가 빠지면 지금처럼 보류한다. 테스트 1건 추가, 기존 막힘 케이스에 local·None 추가, 변이 2종 FAIL. thsvkd-mac 에서 읽기 전용 capture 가 통과했다(터미널 3, 데몬 1). 전체 375건 OK(skip 8).
 - 2026-10-30 jarvis-a3: v1.3.1(42cc8b2)을 릴리스해 8대에서 확정했다(thsvkd-win 은 시간 초과). 사용자 확인(ai-setup-49 경유): K4 해석(S4U 기록이 없는 Windows 는 앱도 스킬도 건드리지 않고 막힘으로만 보고)과 SPEC 37행·ORCA-6 문구를 그대로 승인했고, 데스크톱 전용 Windows 를 S4U 로 바꾸는 plan 단계는 만들지 않는다. thsvkd-mac 의 Orca 를 plan → apply 로 1.4.244 → 1.4.245 갱신했다(done, 세션 preserved: 터미널 3·데몬 1, admission fenced). 갱신 뒤 status health=ok, plan 은 단계 없음.
+- 2026-10-30 jarvis-a3: 사용자 결정으로 grok-bot 을 관리 기기에서 뺐다(D15·5.2·6절·O10). 사용자 지시("kgolf 는 직접 진행")로 kgolf 의 Orca 를 갱신했다. 데스크톱 앱(로컬 터미널 없음: 앱의 데몬에 자식 프로세스 없음)을 닫은 뒤 plan(e0264eff…, 앞서 보류된 계획과 같음) → apply: 설치기 `/S --updated` 로 1.4.243 → 1.4.245, S4U 서버 전환, done·종료 코드 0, 다시 plan 하면 단계 없음. 실측에서 알게 된 것: S4U 서버는 `Roaming\orca` 프로필을 쓰고 데스크톱 앱은 ai-setup 이 만든 바로가기(`--user-data-dir=Roaming\orca-desktop`)로만 뜬다. `Orca.exe` 를 인자 없이 띄우면 서버와 같은 프로필의 단일 인스턴스 잠금에 걸려 종료 코드 3 으로 바로 끝난다(Orca main 번들 `requestSingleInstanceLock` 실패 경로). 앱은 시작 메뉴 바로가기로 다시 띄웠다(1.4.245). 설치기의 "열려 있던 데스크톱 앱 다시 열기"는 갱신할 때 앱이 닫혀 있어 쓰이지 않았다.
