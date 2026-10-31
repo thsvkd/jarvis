@@ -1,0 +1,555 @@
+[
+  {
+    "id": "claude",
+    "kind": "harness",
+    "detect": {
+      "bin": "claude",
+      "version_args": [
+        "--version"
+      ],
+      "sessions": {
+        "ignore": [
+          "AnthropicClaude"
+        ]
+      }
+    },
+    "install": {
+      "linux": [
+        {
+          "method": "native",
+          "cmd": "curl -fsSL https://claude.ai/install.sh | bash"
+        }
+      ],
+      "macos": [
+        {
+          "method": "native",
+          "cmd": "curl -fsSL https://claude.ai/install.sh | bash"
+        }
+      ],
+      "windows": [
+        {
+          "method": "native",
+          "cmd": "irm https://claude.ai/install.ps1 | iex"
+        }
+      ]
+    },
+    "packages": {
+      "npm": "@anthropic-ai/claude-code",
+      "winget": "Anthropic.ClaudeCode",
+      "brew_cask": "claude-code"
+    },
+    "update": [
+      "claude",
+      "update"
+    ],
+    "plugin_update": [
+      [
+        "claude",
+        "plugin",
+        "marketplace",
+        "update"
+      ]
+    ],
+    "uninstall": {
+      "linux": [
+        {
+          "method": "native",
+          "cmd": "rm -f \"$HOME/.local/bin/claude\" && rm -rf \"$HOME/.local/share/claude\""
+        }
+      ],
+      "macos": [
+        {
+          "method": "native",
+          "cmd": "rm -f \"$HOME/.local/bin/claude\" && rm -rf \"$HOME/.local/share/claude\""
+        }
+      ],
+      "windows": [
+        {
+          "method": "native",
+          "cmd": "foreach ($p in (Join-Path $env:USERPROFILE '.local\\bin\\claude.exe'), (Join-Path $env:USERPROFILE '.local\\share\\claude')) { if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force } }"
+        }
+      ]
+    }
+  },
+  {
+    "id": "codex",
+    "kind": "harness",
+    "detect": {
+      "bin": "codex",
+      "version_args": [
+        "--version"
+      ],
+      "sessions": {
+        "ignore": [
+          " app-server --listen",
+          "/app-server-daemon/",
+          "\\app-server-daemon\\",
+          "WindowsApps"
+        ]
+      }
+    },
+    "install": {
+      "linux": [
+        {
+          "method": "native",
+          "cmd": "curl -fsSL https://chatgpt.com/codex/install.sh | sh"
+        }
+      ],
+      "macos": [
+        {
+          "method": "native",
+          "cmd": "curl -fsSL https://chatgpt.com/codex/install.sh | sh"
+        }
+      ],
+      "windows": [
+        {
+          "method": "native",
+          "cmd": "irm https://chatgpt.com/codex/install.ps1 | iex"
+        }
+      ]
+    },
+    "packages": {
+      "npm": "@openai/codex",
+      "brew_cask": "codex"
+    },
+    "update": [
+      "codex",
+      "update"
+    ],
+    "plugin_update": [
+      [
+        "codex",
+        "plugin",
+        "marketplace",
+        "upgrade"
+      ]
+    ],
+    "uninstall": {
+      "linux": [
+        {
+          "method": "native",
+          "cmd": "rm -f \"${CODEX_INSTALL_DIR:-$HOME/.local/bin}/codex\" \"${CODEX_INSTALL_DIR:-$HOME/.local/bin}/codex-code-mode-host\" && rm -rf \"${CODEX_HOME:-$HOME/.codex}/packages/standalone\""
+        }
+      ],
+      "macos": [
+        {
+          "method": "native",
+          "cmd": "rm -f \"${CODEX_INSTALL_DIR:-$HOME/.local/bin}/codex\" \"${CODEX_INSTALL_DIR:-$HOME/.local/bin}/codex-code-mode-host\" && rm -rf \"${CODEX_HOME:-$HOME/.codex}/packages/standalone\""
+        }
+      ],
+      "windows": [
+        {
+          "method": "native",
+          "cmd": "$b = if ($env:CODEX_INSTALL_DIR) { $env:CODEX_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\\OpenAI\\Codex\\bin' }; $h = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }; if (Test-Path -LiteralPath $b) { cmd /c rmdir \"$b\" }; $s = Join-Path $h 'packages\\standalone'; if (Test-Path -LiteralPath $s) { Remove-Item -LiteralPath $s -Recurse -Force }"
+        }
+      ]
+    }
+  },
+  {
+    "id": "grok",
+    "kind": "harness",
+    "detect": {
+      "bin": "grok",
+      "version_args": [
+        "--version"
+      ],
+      "sessions": {
+        "match": [
+          ".grok/downloads/grok-",
+          ".grok\\downloads\\grok-"
+        ]
+      }
+    },
+    "install": {
+      "linux": [
+        {
+          "method": "native",
+          "cmd": "curl -fsSL https://x.ai/cli/install.sh | bash"
+        }
+      ],
+      "macos": [
+        {
+          "method": "native",
+          "cmd": "curl -fsSL https://x.ai/cli/install.sh | bash"
+        }
+      ],
+      "windows": [
+        {
+          "method": "native",
+          "cmd": "irm https://x.ai/cli/install.ps1 | iex"
+        }
+      ]
+    },
+    "packages": {},
+    "update": [
+      "grok",
+      "update"
+    ],
+    "plugin_update": [
+      [
+        "grok",
+        "plugin",
+        "update"
+      ]
+    ],
+    "uninstall": {
+      "linux": [
+        {
+          "method": "native",
+          "cmd": "b=\"${GROK_BIN_DIR:-$HOME/.grok/bin}\"; for n in grok agent; do case \"$(readlink \"$b/$n\" 2>/dev/null)\" in ../downloads/grok-*|\"$HOME/.grok/downloads/grok-\"*) for l in \"$HOME/.local/bin/$n\" \"/usr/local/bin/$n\"; do if [ \"$(readlink \"$l\" 2>/dev/null)\" = \"$b/$n\" ]; then rm -f \"$l\"; fi; done; rm -f \"$b/$n\";; esac; done; rm -rf \"$HOME/.grok/downloads\""
+        }
+      ],
+      "macos": [
+        {
+          "method": "native",
+          "cmd": "b=\"${GROK_BIN_DIR:-$HOME/.grok/bin}\"; for n in grok agent; do case \"$(readlink \"$b/$n\" 2>/dev/null)\" in ../downloads/grok-*|\"$HOME/.grok/downloads/grok-\"*) for l in \"$HOME/.local/bin/$n\" \"/usr/local/bin/$n\"; do if [ \"$(readlink \"$l\" 2>/dev/null)\" = \"$b/$n\" ]; then rm -f \"$l\"; fi; done; rm -f \"$b/$n\";; esac; done; rm -rf \"$HOME/.grok/downloads\""
+        }
+      ],
+      "windows": [
+        {
+          "method": "native",
+          "cmd": "$h = Join-Path $env:USERPROFILE '.grok'; $b = if ($env:GROK_BIN_DIR) { $env:GROK_BIN_DIR } else { Join-Path $h 'bin' }; $names = if ($env:GROK_BIN_DIR) { @('grok') } else { @('grok', 'agent', 'grove', 'grove-fsmonitor', 'grove-credential') }; foreach ($n in $names) { foreach ($f in (Join-Path $b \"$n.exe\"), (Join-Path $b \"$n.exe.old\")) { if (Test-Path -LiteralPath $f) { Remove-Item -LiteralPath $f -Force } } }; foreach ($d in (Join-Path $h 'downloads'), (Join-Path $env:LOCALAPPDATA 'grok\\git')) { if (Test-Path -LiteralPath $d) { Remove-Item -LiteralPath $d -Recurse -Force } }"
+        }
+      ]
+    }
+  },
+  {
+    "id": "opencode",
+    "kind": "harness",
+    "detect": {
+      "bin": "opencode",
+      "version_args": [
+        "--version"
+      ]
+    },
+    "install": {
+      "linux": [
+        {
+          "method": "native",
+          "cmd": "curl -fsSL https://opencode.ai/v2/install | bash"
+        }
+      ],
+      "macos": [
+        {
+          "method": "native",
+          "cmd": "curl -fsSL https://opencode.ai/v2/install | bash"
+        }
+      ],
+      "windows": [
+        {
+          "method": "npm-release",
+          "cmd": "python res/tools/npm_release.py install opencode"
+        }
+      ]
+    },
+    "packages": {
+      "npm": "@opencode/cli",
+      "winget": "SST.opencode",
+      "brew": "anomalyco/tap/opencode-v2"
+    },
+    "update": [
+      "opencode",
+      "upgrade"
+    ],
+    "uninstall": {
+      "linux": [
+        {
+          "method": "native",
+          "cmd": "rm -f \"$HOME/.opencode/bin/opencode\" \"$HOME/.opencode/bin/opencode2\""
+        }
+      ],
+      "macos": [
+        {
+          "method": "native",
+          "cmd": "rm -f \"$HOME/.opencode/bin/opencode\" \"$HOME/.opencode/bin/opencode2\""
+        }
+      ],
+      "windows": [
+        {
+          "method": "npm-release",
+          "cmd": "python res/tools/npm_release.py uninstall opencode"
+        }
+      ]
+    }
+  },
+  {
+    "id": "gemini",
+    "kind": "harness",
+    "detect": {
+      "bin": "gemini",
+      "version_args": [
+        "--version"
+      ]
+    },
+    "requires": "node>=20",
+    "install": {
+      "linux": [
+        {
+          "method": "npm-release",
+          "cmd": "python3 res/tools/npm_release.py install gemini"
+        }
+      ],
+      "macos": [
+        {
+          "method": "npm-release",
+          "cmd": "python3 res/tools/npm_release.py install gemini"
+        }
+      ],
+      "windows": [
+        {
+          "method": "npm-release",
+          "cmd": "python res/tools/npm_release.py install gemini"
+        }
+      ]
+    },
+    "packages": {
+      "npm": "@google/gemini-cli",
+      "brew": "gemini-cli"
+    },
+    "update": null,
+    "plugin_update": [
+      [
+        "gemini",
+        "extensions",
+        "update",
+        "--all"
+      ]
+    ],
+    "uninstall": {
+      "linux": [
+        {
+          "method": "npm-release",
+          "cmd": "python3 res/tools/npm_release.py uninstall gemini"
+        }
+      ],
+      "macos": [
+        {
+          "method": "npm-release",
+          "cmd": "python3 res/tools/npm_release.py uninstall gemini"
+        }
+      ],
+      "windows": [
+        {
+          "method": "npm-release",
+          "cmd": "python res/tools/npm_release.py uninstall gemini"
+        }
+      ]
+    }
+  },
+  {
+    "id": "agy",
+    "kind": "harness",
+    "detect": {
+      "bin": "agy",
+      "version_args": [
+        "--version"
+      ]
+    },
+    "install": {
+      "linux": [
+        {
+          "method": "native",
+          "cmd": "curl -fsSL https://antigravity.google/cli/install.sh | bash"
+        }
+      ],
+      "macos": [
+        {
+          "method": "native",
+          "cmd": "curl -fsSL https://antigravity.google/cli/install.sh | bash"
+        }
+      ],
+      "windows": [
+        {
+          "method": "native",
+          "cmd": "irm https://antigravity.google/cli/install.ps1 | iex"
+        }
+      ]
+    },
+    "packages": {},
+    "update": [
+      "agy",
+      "update"
+    ],
+    "uninstall": {
+      "linux": [
+        {
+          "method": "native",
+          "cmd": "rm -f \"$HOME/.local/bin/agy\" && rm -rf \"$HOME/.cache/antigravity/staging\""
+        }
+      ],
+      "macos": [
+        {
+          "method": "native",
+          "cmd": "rm -f \"$HOME/.local/bin/agy\" && rm -rf \"$HOME/.cache/antigravity/staging\""
+        }
+      ],
+      "windows": [
+        {
+          "method": "native",
+          "cmd": "foreach ($p in (Join-Path $env:LOCALAPPDATA 'agy\\bin\\agy.exe'), (Join-Path $env:LOCALAPPDATA 'antigravity\\staging')) { if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force } }"
+        }
+      ]
+    }
+  },
+  {
+    "id": "copilot",
+    "kind": "harness",
+    "detect": {
+      "bin": "copilot",
+      "version_args": [
+        "--version"
+      ]
+    },
+    "requires": "node>=22",
+    "install": {
+      "linux": [
+        {
+          "method": "native",
+          "cmd": "curl -fsSL https://gh.io/copilot-install | bash"
+        }
+      ],
+      "macos": [
+        {
+          "method": "native",
+          "cmd": "curl -fsSL https://gh.io/copilot-install | bash"
+        }
+      ],
+      "windows": [
+        {
+          "method": "npm-release",
+          "cmd": "python res/tools/npm_release.py install copilot"
+        }
+      ]
+    },
+    "packages": {
+      "npm": "@github/copilot",
+      "winget": "GitHub.Copilot",
+      "brew_cask": "copilot-cli"
+    },
+    "update": [
+      "copilot",
+      "update"
+    ],
+    "uninstall": {
+      "linux": [
+        {
+          "method": "native",
+          "cmd": "python3 res/tools/npm_release.py uninstall copilot && rm -f \"$HOME/.local/bin/copilot\""
+        }
+      ],
+      "macos": [
+        {
+          "method": "native",
+          "cmd": "python3 res/tools/npm_release.py uninstall copilot && rm -f \"$HOME/.local/bin/copilot\""
+        }
+      ],
+      "windows": [
+        {
+          "method": "npm-release",
+          "cmd": "python res/tools/npm_release.py uninstall copilot"
+        }
+      ]
+    }
+  },
+  {
+    "id": "herdr",
+    "kind": "tool",
+    "detect": {
+      "bin": "herdr",
+      "version_args": [
+        "--version"
+      ],
+      "sessions": {
+        "ignore": [
+          "herdr server"
+        ]
+      }
+    },
+    "install": {
+      "linux": [
+        {
+          "method": "native",
+          "cmd": "curl -fsSL https://herdr.dev/install.sh | sh"
+        }
+      ],
+      "macos": [
+        {
+          "method": "native",
+          "cmd": "curl -fsSL https://herdr.dev/install.sh | sh"
+        }
+      ],
+      "windows": [
+        {
+          "method": "native",
+          "cmd": "irm https://herdr.dev/install.ps1 | iex"
+        }
+      ]
+    },
+    "packages": {
+      "brew": "herdr"
+    },
+    "update": [
+      "herdr",
+      "update"
+    ]
+  },
+  {
+    "id": "codegraph",
+    "kind": "tool",
+    "detect": {
+      "bin": "codegraph",
+      "version_args": [
+        "--version"
+      ],
+      "sessions": {
+        "ignore": [
+          "serve --mcp"
+        ]
+      }
+    },
+    "requires": "node>=20",
+    "install": {
+      "linux": [
+        {
+          "method": "npm-release",
+          "cmd": "python3 res/tools/npm_release.py install codegraph"
+        }
+      ],
+      "macos": [
+        {
+          "method": "npm-release",
+          "cmd": "python3 res/tools/npm_release.py install codegraph"
+        }
+      ],
+      "windows": [
+        {
+          "method": "npm-release",
+          "cmd": "python res/tools/npm_release.py install codegraph"
+        }
+      ]
+    },
+    "packages": {
+      "npm": "@colbymchenry/codegraph"
+    },
+    "uninstall": {
+      "linux": [
+        {
+          "method": "npm-release",
+          "cmd": "python3 res/tools/npm_release.py uninstall codegraph"
+        }
+      ],
+      "macos": [
+        {
+          "method": "npm-release",
+          "cmd": "python3 res/tools/npm_release.py uninstall codegraph"
+        }
+      ],
+      "windows": [
+        {
+          "method": "npm-release",
+          "cmd": "python res/tools/npm_release.py uninstall codegraph"
+        }
+      ]
+    }
+  }
+]

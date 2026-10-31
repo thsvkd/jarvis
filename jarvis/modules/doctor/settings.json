@@ -1,0 +1,64 @@
+{
+  "_comment": "실제 Claude Code settings.json 조각(SSoT). 여기 보이는 구조가 그대로 병합·설치된다. 설치 시 {{PY}}는 감지된 python 실행 명령(python / py -3 등)으로, {{HOOKS_DIR}}는 유저 훅 디렉터리(예: ~/.claude/hooks)로 치환된다. merge_and_diff.py가 permissions/hooks를 외과적으로 병합하고, model/effortLevel/language(스칼라)와 env 하위의 우리 관리 키(CLAUDE_CODE_SCROLL_SPEED, Windows 설치에서만 GRAFT_TEST_SYNC_RUN)는 '없을 때만' 추가하고, 예전 설치가 넣은 autoMode.allow 항목은 설치 영수증을 근거로 걷어낸다(기존 값이 있으면 사용자 선택을 그대로 보존 — allow/deny 와 동일한 union 철학). env 객체 자체와 사용자의 기존 env 키/값, 그 외 최상위 키(statusLine 등)는 100% 보존한다. PowerShell 규칙/matcher는 Windows용이며 POSIX에선 무해(inert)하다. 이 _comment 키는 병합 시 무시되어 대상 settings.json에는 들어가지 않는다.",
+  "model": "opus",
+  "effortLevel": "xhigh",
+  "language": "korean",
+  "env": {
+    "CLAUDE_CODE_SCROLL_SPEED": "3",
+    "GRAFT_TEST_SYNC_RUN": "{{HOOKS_DIR}}/graft_sync_hidden.cjs"
+  },
+  "permissions": {
+    "defaultMode": "auto",
+    "allow": [
+      "Bash",
+      "PowerShell",
+      "Glob(*)",
+      "Grep(*)",
+      "Read(*)",
+      "Edit(*)",
+      "MultiEdit(*)",
+      "Write(*)",
+      "Agent(*)",
+      "WebFetch(*)",
+      "WebSearch",
+      "Monitor",
+      "Workflow",
+      "Artifact",
+      "mcp__plugin_oh-my-claudecode_t__*",
+      "mcp__plugin_context7_context7__*",
+      "mcp__claude_ai_Context7__*",
+      "Skill"
+    ],
+    "ask": [
+      "Skill(oh-my-claudecode:release)",
+      "Skill(oh-my-claudecode:release *)",
+      "Skill(to-issues)",
+      "Skill(to-issues *)",
+      "Skill(to-prd)",
+      "Skill(to-prd *)",
+      "Skill(triage)",
+      "Skill(triage *)",
+      "Skill(schedule)",
+      "Skill(schedule *)",
+      "Skill(loop)",
+      "Skill(loop *)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "{{PY}} -X utf8 \"{{HOOKS_DIR}}/danger_guard.py\"" }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          { "type": "command", "command": "{{PY}} -X utf8 \"{{HOOKS_DIR}}/danger_guard.py\"" }
+        ]
+      }
+    ]
+  }
+}
