@@ -335,6 +335,8 @@
   const TABS = NAV.filter((n) => n.sec);
   const TABBED = PAGE === "home" && !window.JarvisLab; // 랩 시안은 자기 배치를 쓴다
   let tab = null;
+  const scrolls = Object.create(null); // 탭별 마지막 스크롤 위치: 뒤로·앞으로 가기로 돌아오면 그 자리로
+  let jump = false; // 링크를 눌러 옮기는 중(기록 이동이 아님)
   const tabOf = (t) => { const s = t && t.closest(".sec"); return (s && TABS.find((n) => n.sec === s.id)) || null; };
   function markNav(id) {
     navLinks.forEach((a) => { if (a.getAttribute("data-sh-nav") === id) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
@@ -342,8 +344,9 @@
     const a = navLinks.find((x) => x.getAttribute("data-sh-nav") === id);
     if (a && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = a.offsetLeft - (nav.clientWidth - a.offsetWidth) / 2;
   }
-  function selectTab(n) {
+  function selectTab(n, save = true) {
     if (n === tab) return false;
+    if (save && tab) scrolls[tab.sec] = window.scrollY;
     tab = n;
     TABS.forEach((x) => { const s = doc.getElementById(x.sec); if (s) s.toggleAttribute("data-tab-on", x === n); });
     markNav(n.id);
@@ -355,8 +358,13 @@
     try { t = h ? doc.getElementById(decodeURIComponent(h)) : null; } catch (e) { /* 깨진 해시 */ }
     const n = h ? tabOf(t) : TABS[0];
     if (!n) { if (!tab) selectTab(TABS[0]); return; }
-    // 탭을 옮겼으면 새 탭의 맨 위(해시가 섹션 안 요소면 그 요소)에서 시작한다
-    if (selectTab(n) && moved) { if (t && t.id !== n.sec) t.scrollIntoView(); else window.scrollTo(0, 0); }
+    // 링크로 탭을 옮겼으면 새 탭의 맨 위(해시가 섹션 안 요소면 그 요소)에서, 뒤로·앞으로 가기면 그 탭의 마지막 위치에서 시작한다
+    const link = jump; jump = false;
+    if (selectTab(n, !link) && moved) { // 링크면 위치는 클릭 순간에 이미 저장했다(브라우저가 조각 위치로 먼저 스크롤한다)
+      // 탭 전환의 스크롤은 즉시 한다(html 의 smooth 스크롤이면 중간 값을 지나고, 빠르게 오가면 앞 애니메이션과 겹친다)
+      if (!link && scrolls[n.sec] != null) window.scrollTo({ top: scrolls[n.sec], behavior: "instant" });
+      else if (t && t.id !== n.sec) t.scrollIntoView(); else window.scrollTo({ top: 0, behavior: "instant" });
+    }
   }
   /** 다른 탭 안의 요소로 갈 때(개요의 경보 · 타일 → 그 섹션): 그 탭으로 바꾸고 기록에 남긴다(뒤로 가기로 돌아온다) */
   function reveal(target) {
@@ -367,6 +375,14 @@
   }
   if (TABBED) {
     window.addEventListener("hashchange", () => route(true));
+    // 링크 클릭은 hashchange 보다 먼저 온다. 그 밖의 hashchange(뒤로·앞으로 가기)는 기록 이동으로 본다
+    doc.addEventListener("click", (e) => {
+      if (!e.target.closest || !e.target.closest('a[href*="#"]')) return;
+      jump = true;
+      if (tab) scrolls[tab.sec] = window.scrollY;
+    }, true);
+    // 기록 이동 때 브라우저가 먼저 스크롤하면 떠나는 탭의 위치를 잃는다: 탭별 위치는 여기서 직접 되돌린다(새로 고침도 맨 위에서 시작)
+    try { history.scrollRestoration = "manual"; } catch (e) { /* 미지원 */ }
     if (doc.readyState === "loading") doc.addEventListener("DOMContentLoaded", () => route(false)); else route(false);
   } else markNav(PAGE);
 

@@ -428,7 +428,8 @@
     if (next) box.scrollTo({ top: box.scrollTop + next.getBoundingClientRect().top - box.getBoundingClientRect().top - 4, behavior: calm() ? "auto" : "smooth" });
   });
   $("#alertList").addEventListener("scroll", () => { requestAnimationFrame(updateAlertMore); }, { passive: true });
-  window.addEventListener("resize", () => requestAnimationFrame(updateAlertMore), { passive: true });
+  // 크기가 바뀔 때(창 크기, 숨은 개요 탭이 다시 보일 때) 다시 센다. 숨은 동안에는 모든 높이가 0 이라 0건으로 셌다
+  new ResizeObserver(() => requestAnimationFrame(updateAlertMore)).observe($("#alertList"));
 
   // ------------------------------------------------------------------ 하드웨어 한눈에(지도 도크와 같은 부품)
   function renderHw(s) {

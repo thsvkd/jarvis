@@ -114,7 +114,7 @@ assert.equal(h`<style>a::after{content:"'"}</style>${"<"}`, `<style>a::after{con
     const c = { document, location, URLSearchParams, console, Intl, Date, setTimeout, clearTimeout, setInterval, matchMedia: () => ({ matches: false }),
       addEventListener: (t, fn) => { (on[t] = on[t] || []).push(fn); },
       history: { pushState: (s, t, url) => { location.hash = url.slice(url.indexOf("#")); } },
-      scrollTo: () => scrolled.push("top"),
+      scrollY: 0, scrollTo: (x, y) => { const top = typeof x === "object" ? x.top : y; scrolled.push(top ? "y" + top : "top"); },
       localStorage: { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = v; } } };
     c.window = c;
     vm.createContext(c);
@@ -123,7 +123,7 @@ assert.equal(h`<style>a::after{content:"'"}</style>${"<"}`, `<style>a::after{con
     const shown = () => Object.values(els).filter((e) => e.hasAttribute("data-tab-on")).map((e) => e.id);
     const current = () => links.filter((a) => a.getAttribute("aria-current") === "page").map((a) => a.getAttribute("data-sh-nav"));
     const tab = (id) => links.find((a) => a.getAttribute("data-sh-nav") === id);
-    return { go, shown, current, tab, links, els, location, shell: c.JarvisShell };
+    return { go, shown, current, tab, links, els, location, win: c, shell: c.JarvisShell };
   };
   const SECS = { overview: ["alerts"], devices: [], usage: [], services: ["svcGroups"], hardware: ["hw-cpu"], network: [], runtime: [] };
 
@@ -153,6 +153,13 @@ assert.equal(h`<style>a::after{content:"'"}</style>${"<"}`, `<style>a::after{con
   home.shell.reveal(home.els.svcGroups);
   assert.deepEqual(home.shown(), ["services"]);
   assert.equal(home.location.hash, "#services");
+  // 뒤로·앞으로 가기(클릭 없는 hashchange)로 돌아온 탭은 떠날 때의 스크롤 위치로 돌아간다
+  home.win.scrollY = 640;
+  home.go("#hw-cpu");
+  home.win.scrollY = 0;
+  scrolled.length = 0;
+  home.go("#services");
+  assert.deepEqual(scrolled, ["y640"]);
 
   // core 가 아니면(아무도 data-core 를 붙이지 않음) 기기 · AI 사용량 탭은 CSS 로 숨는다
   assert.equal(home.tab("devices").hasAttribute("data-core"), false);
