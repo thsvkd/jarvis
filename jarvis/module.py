@@ -13,7 +13,7 @@ import json
 import os
 import sys
 
-MODULES = {"orca": "jarvis.orca_module"}
+MODULES = {"orca": "jarvis.orca_module", "doctor": "jarvis.doctor_module"}
 EXIT = {"done": 0, "current": 0, "failed": 1, "deferred": 2, "stale": 3}
 
 

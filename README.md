@@ -254,6 +254,7 @@ Orca 업데이트는 core 홈의 기기 목록에서 **Orca 업데이트 확인 
 최신 기기의 업데이트 버튼은 비활성화된다. 진행 상태는 기기 타일에 표시하며 페어링 QR 은 페어링 버튼으로 연다.
 기기에서 직접 할 때는 `python -m jarvis module orca plan --json` 으로 계획을 보고, 그 `plan_id` 로 `apply --json --plan-id <id>` 를 실행한다.
 python 은 게이트웨이 서비스가 쓰는 것을 쓴다(Mac 의 PATH 첫 `python3` 는 psutil 이 없는 시스템 3.9 일 수 있다: LaunchAgent 의 `/opt/homebrew/bin/python3` 나 venv).
+하네스·도구 점검은 `python -m jarvis module doctor status --json` 이다. 읽기 전용이며 설치 위치·버전, 중복 설치, 은퇴한 훅, 평문 시크릿의 위치와 키 이름(값은 내지 않는다), lock 밖 스킬을 보고한다.
 
 | OS | 설치본 하나 | 업데이트 주체 |
 | --- | --- | --- |

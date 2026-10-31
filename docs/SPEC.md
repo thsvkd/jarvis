@@ -53,3 +53,12 @@ jarvis 본체는 모듈을 라이브러리로 부른다. 부트스트랩과 시�
 - 새로 쓰는 유닛·LaunchAgent 에는 사용자의 로그인 셸에서 얻은 `PATH`·`SHELL` 을 넣는다(Orca 터미널이 하네스를 찾도록). 쓴 뒤 `daemon-reload` 와 `enable --now` 를 한다. 실행 중인 adopted 유닛에는 아무것도 하지 않는다.
 - systemd 사용자 매니저의 linger 가 꺼져 있으면 plan 에 `config` 단계로 보이고 승인 뒤에만 켠다.
 
+
+## doctor 모듈
+
+코드는 `jarvis/modules/doctor/` 다. `doctor.py` 는 ai-setup `res/doctor/doctor.py` 를 옮긴 것으로 단독 실행(사람용 보고, 종료 코드 0·1·2)도 그대로 된다. 하네스·도구 목록(`catalog.json`)과 현재 훅 조각(`settings.json`)은 ai-setup `res/` 의 사본이다. 하네스 모듈과 훅 모듈을 옮길 때 원본도 jarvis 로 넘어오며, 그때까지는 ai-setup 의 것과 내용을 같게 유지한다.
+
+- 읽기 전용이다. 홈 아래 어떤 파일도 만들거나 바꾸지 않는다. 버전 확인은 홈·설정·캐시 위치를 임시 폴더로 돌린 환경에서 한다.
+- `status.details` 는 `{tools: [{id, kind: harness/tool, found: [PATH 순서의 실행 파일], version, hint}], findings: [{kind, message}]}` 다. `found` 의 홈 아래 경로는 `~/` 로 줄인다. `hint` 는 없는 항목의 그 플랫폼 설치 명령이다.
+- `findings.kind` 는 `duplicate`(PATH 의 중복 설치, 첫 번째가 우선), `hook_drift`(은퇴한 훅이 하네스 설정에 남음), `secret`(평문 값이 있는 파일 위치와 키 이름. 값은 내보내지 않는다), `skill`(`~/.agents/skills` 의 lock 밖 스킬. 지우지 않는다)이다. 발견 항목이 있으면 `health` 는 `degraded`, 없으면 `ok` 다.
+- 바꾸는 것이 없으므로 `plan` 은 언제나 단계가 없고, `apply` 는 그 plan_id 면 `current`, 아니면 `stale` 이다. `uninstall` 은 지울 것이 없다.

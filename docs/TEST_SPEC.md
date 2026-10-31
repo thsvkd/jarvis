@@ -27,3 +27,17 @@
 | ID | 케이스 | 테스트 | 상태 |
 | --- | --- | --- | --- |
 | BOOT-1 | WHEN macOS 에서 `install.sh --core <tailnet IP>` 를 실행하면 THE SYSTEM SHALL sha256 을 통과한 최신 릴리스를 풀고, 설정·LaunchAgent 를 없을 때만 만들어 띄우며, 모듈을 plan 의 plan_id 로 apply 한다. 다시 실행해도 기존 설정을 덮어쓰지 않는다. | `tests/test_install_sh.py` | 단위 GREEN (Mac 도구 부분은 thsvkd-kgolf-macmini 임시 폴더에서 확인: uv venv, 릴리스 sha256·압축 해제, plist lint. 새 Mac 전체 실행 미검증) |
+
+## doctor
+
+ai-setup 의 AI-1~AI-6 을 옮긴 것이다. 테스트 본문은 원본과 같고(`tests/test_doctor.py`, pytest 형식을 `pytest_compat` 로 돌린다), 대상만 `jarvis/modules/doctor/doctor.py` 로 바꿨다.
+
+| ID | 케이스 | 테스트 | 상태 |
+| --- | --- | --- | --- |
+| DOCTOR-1 | WHEN doctor 를 실행하면 THE SYSTEM SHALL 홈 아래 어떤 파일도 만들거나 바꾸지 않는다 | `test_doctor_writes_nothing_under_home`, `tests/test_doctor_module.py::test_status_writes_nothing_under_home` | GREEN (단위) |
+| DOCTOR-2 | WHEN 카탈로그의 하네스가 PATH 에 있으면 THE SYSTEM SHALL 그 이름과 버전을 보고하고, 없으면 그 플랫폼의 설치 명령을 안내한다 | `test_reports_installed_harness_version_and_install_hint_for_missing` | GREEN (단위) |
+| DOCTOR-3 | WHEN 같은 하네스 실행 파일이 PATH 에 두 개 이상 있으면 THE SYSTEM SHALL 중복 설치로 보고하고 어느 쪽이 우선인지 표시한다 | `test_duplicate_harness_on_path_is_reported_with_the_winner`, `test_same_directory_twice_on_path_is_not_a_duplicate` | GREEN (단위) |
+| DOCTOR-4 | WHEN 영수증이 은퇴로 표시한 훅이 어느 하네스 설정에 아직 연결되어 있으면 THE SYSTEM SHALL 드리프트로 보고한다 | `test_retired_hook_still_wired_in_another_harness_is_drift`, `test_current_hook_is_not_drift`, `test_hook_the_receipt_lists_as_retired_is_drift` | GREEN (단위) |
+| DOCTOR-5 | WHEN 하네스 설정 파일에 토큰·키처럼 보이는 평문 값이 있으면 THE SYSTEM SHALL 파일 위치와 키 이름만 보고하고 값은 출력하지 않는다 | `test_plaintext_secret_reports_location_and_key_but_never_the_value` 외 4건 | GREEN (단위) |
+| DOCTOR-6 | WHEN `~/.agents/skills` 에 lock 파일에 없는 스킬 디렉터리가 있으면 THE SYSTEM SHALL 그 이름을 보고하고 지우지 않는다 | `test_skill_outside_lock_is_reported_and_kept`, `test_a_skill_link_that_cannot_be_followed_is_reported_without_stopping` | GREEN (단위) |
+| DOCTOR-7 | WHEN `python -m jarvis module doctor status --json` 을 실행하면 THE SYSTEM SHALL 도구별 설치 위치·버전·설치 안내와 종류별 발견 항목을 모듈 계약의 JSON 으로 내고, 홈 경로는 `~/` 로 줄이며, plan 은 단계가 없고 apply 는 current(다른 plan_id 면 stale)다 | `tests/test_doctor_module.py` | GREEN (단위. s2 에서 읽기 전용 실행: 9초, 중복 2·시크릿 위치 1·lock 밖 스킬 15) |

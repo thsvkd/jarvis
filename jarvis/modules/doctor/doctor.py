@@ -181,21 +181,32 @@ def tilde(path, home):
         return str(path)
 
 
-def check_installs(catalog, warn, env, scratch):
+def inventory(catalog, env, scratch):
+    """카탈로그 항목마다 {id, kind, found: PATH 순서의 실행 파일들, version, hint: 없을 때의 설치 명령}."""
     plat = platform_key()
+    rows = []
+    for entry in (e for e in catalog if e.get("kind") in ("harness", "tool")):
+        found = locations(entry["detect"]["bin"])
+        hints = entry.get("install", {}).get(plat) or []
+        rows.append({"id": entry["id"], "kind": entry["kind"], "found": found,
+                     "version": version_of(found[0], entry["detect"].get("version_args", []), env, scratch) if found else None,
+                     "hint": None if found else (hints[0]["cmd"] if hints else "no install method for this platform")})
+    return rows
+
+
+def check_installs(catalog, warn, env, scratch):
+    rows = inventory(catalog, env, scratch)
     for kind, title in (("harness", "Harnesses"), ("tool", "Tools")):
         print("── " + title + " ──")
-        for entry in (e for e in catalog if e.get("kind") == kind):
-            found = locations(entry["detect"]["bin"])
+        for row in (r for r in rows if r["kind"] == kind):
+            found = row["found"]
             if not found:
-                hints = entry.get("install", {}).get(plat) or []
-                hint = hints[0]["cmd"] if hints else "no install method for this platform"
-                print("ℹ️  {}: not installed; install with: {}".format(entry["id"], hint))
+                print("ℹ️  {}: not installed; install with: {}".format(row["id"], row["hint"]))
                 continue
-            print("✅ {} {} ({})".format(entry["id"], version_of(found[0], entry["detect"].get("version_args", []), env, scratch), found[0]))
+            print("✅ {} {} ({})".format(row["id"], row["version"], found[0]))
             if len(found) > 1:
                 warn("{}: duplicate installs on PATH; first wins: {}; also: {}".format(
-                    entry["id"], found[0], ", ".join(found[1:])))
+                    row["id"], found[0], ", ".join(found[1:])))
 
 
 def check_hook_drift(home, warn):
