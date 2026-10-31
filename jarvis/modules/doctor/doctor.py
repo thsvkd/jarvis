@@ -19,7 +19,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 CATALOG = HERE / "catalog.json"
-FRAGMENT = HERE / "settings.json"
+FRAGMENT = HERE.parent / "hooks" / "settings.json"
 RECEIPT = Path(".claude") / ".claude-code-setup.json"
 
 # 하네스가 사용자 설정을 두는 파일. 인증 전용 파일(auth.json, .credentials.json)은 원래 자격 증명을

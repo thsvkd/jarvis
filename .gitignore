@@ -11,3 +11,8 @@ fixtures/
 # 공개 저장소에 올리지 않는 운영 기록·실제 기기 설정
 private/
 .kickoff-prompt.txt
+
+# 훅 테스트가 만드는 판정 기록과 임시 폴더(jarvis/modules/hooks/danger_guard.py 는 자기 폴더에 guard.log 를 쓴다)
+jarvis/modules/hooks/guard.log
+.tmp-rmshim/
+.tmp-rmshim-ps/

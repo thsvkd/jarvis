@@ -1,0 +1,301 @@
+#!/bin/sh
+# rm 셰임 — 삭제를 휴지통 이동으로 바꾼다.
+#
+# 훅이 명령 문자열을 재작성하는 대신 PATH 앞에 이 디렉터리를 끼워 넣는다. 셸이 변수·글로브·
+# 따옴표 확장을 모두 끝낸 뒤의 argv 를 그대로 받으므로, 원본 rm 과 해석이 어긋날 수 없다.
+# find -exec / xargs / 스크립트 내부 호출도 PATH 로 해석되므로 같은 경로를 탄다.
+#
+# 원본 rm 에게 그대로 넘기는 경우 — 셰임이 흉내 내면 의미가 달라지는 것들:
+#   · -i/-I : 치환하면 프롬프트가 사라진다
+#   · `.`/`..` 로 끝나는 대상 : rm 이 거부하는 형태다. 치환이 원본보다 더 지우면 안 된다
+#   · 대상이 전부 /tmp 등 tmpfs 아래 : 휴지통 자리도 같은 램이라 옮겨봐야 회수되지 않는다
+#   · 휴지통 도구 부재 : rm 자체를 못 쓰게 만드는 쪽이 더 해롭다 (경고 후 실제 삭제)
+set -u
+
+REAL_RM=/bin/rm
+[ -x "$REAL_RM" ] || REAL_RM=/usr/bin/rm
+
+# 탈출구: 이 변수가 있으면 원본 rm 으로 바로 넘긴다.
+[ -z "${CLAUDE_NO_TRASH:-}" ] || exec "$REAL_RM" "$@"
+
+# 휴지통 도구를 찾는다. Windows 의 Git Bash 에는 trash-cli 가 없고 대신 훅 디렉터리의
+# send_to_trash.py(send2trash) 가 있다.
+SHIM_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SEND_TO_TRASH="$SHIM_DIR/../send_to_trash.py"
+TRASH=$(command -v trash-put 2>/dev/null) || TRASH=""
+# macOS 14.4+ 는 /usr/bin/trash 를 기본 제공한다. 설치기(setup_hooks.sh)의
+# resolve_trash_command 와 같은 우선순위여야 한다 — 어긋나면 설치기는 '휴지통 있음'으로
+# 보고하는데 셰임은 실제로 삭제한다.
+OS=$(uname -s 2>/dev/null) || OS=""
+MAC_TRASH=0
+if [ -z "$TRASH" ] && [ "$OS" = Darwin ] && TRASH=$(command -v trash 2>/dev/null); then
+    MAC_TRASH=1
+fi
+TRASH_PY=""
+if [ -z "$TRASH" ] && [ -f "$SEND_TO_TRASH" ]; then
+    for _py in python3 python py; do
+        if command -v "$_py" >/dev/null 2>&1; then TRASH_PY=$_py; break; fi
+    done
+fi
+
+# 보호할 홈은 둘이다. 사용자 DB 의 홈(`~이름` 은 getpwnam 조회)과 $HOME. 다만 $HOME 이 tmp 아래면
+# 테스트·스크립트가 HOME 을 임시 디렉터리로 바꿔 둔 것이므로 보호하지 않는다 — bats 의 샌드박스
+# teardown(`rm -rf "$HOME"`)이 실제로 막혔다. 컨테이너(-e HOME=…)나 `sudo -E` 처럼 $HOME 이
+# 진짜 홈인 경우는 tmp 아래가 아니므로 그대로 보호된다.
+PW_HOME=""
+_user=$(id -un 2>/dev/null) || _user=""
+case "$_user" in
+    ''|*[!A-Za-z0-9._-]*) ;;               # eval 에 셸 문법이 섞이지 않게 안전한 이름만
+    *) PW_HOME=$(eval "printf %s ~$_user" 2>/dev/null) || PW_HOME="" ;;
+esac
+case "$PW_HOME" in /*) ;; *) PW_HOME="" ;; esac
+ENV_HOME=${HOME:-}
+case "$ENV_HOME/" in
+    /tmp/*|/private/tmp/*|/var/folders/*|/private/var/folders/*|/dev/shm/*|/run/user/*) ENV_HOME="" ;;
+esac
+
+# 절대경로($1, 끝 슬래시 없음)의 물리 경로. 텍스트로만 비교하면 `/tmp/../home/me` 나 `/tmp/h/`
+# (h -> ~) 가 홈 검사를 빠져나가고 /tmp 대상으로 분류돼 원본 rm 으로 간다. 실제 디렉터리는 끝까지
+# 푼다. 링크인 마지막 요소는 rm 처럼 따라가지 않되(링크만 지운다), $2=1(끝 슬래시)이면 rm 도 링크
+# 너머를 지우므로 따라간다. realpath -m 은 BSD 에 없어서 cd -P 로 푼다. 상위 디렉터리를 못 풀면
+# 실패 — 그 경로는 rm 도 닿지 못한다.
+physical() {
+    if [ -d "$1" ] && { [ "$2" -eq 1 ] || [ ! -L "$1" ]; }; then
+        (CDPATH= cd -P -- "$1" 2>/dev/null && pwd -P) && return 0
+    fi
+    _d=${1%/*}
+    _r=$(CDPATH= cd -P -- "${_d:-/}" 2>/dev/null && pwd -P) || return 1
+    printf '%s/%s' "${_r%/}" "${1##*/}"
+}
+# 홈 자체가 링크 아래 있을 수 있으므로 텍스트와 물리 경로 둘 다 보호한다.
+PW_HOME_P=""
+[ -z "$PW_HOME" ] || PW_HOME_P=$(physical "${PW_HOME%/}" 1) || PW_HOME_P=""
+ENV_HOME_P=""
+[ -z "$ENV_HOME" ] || ENV_HOME_P=$(physical "${ENV_HOME%/}" 1) || ENV_HOME_P=""
+
+# macOS(APFS)·Windows(NTFS) 는 대소문자를 구분하지 않는다. `/Users/ME` 도 홈이므로 소문자로 맞춰
+# 비교한다. 대소문자를 구분하는 macOS 볼륨에서는 과잉 거부가 되지만 안전한 쪽이다.
+FOLD=0
+WIN=0
+case "$OS" in
+    Darwin) FOLD=1 ;;
+    MINGW*|MSYS*|CYGWIN*) FOLD=1; WIN=1 ;;
+esac
+fold() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+PW_HOME=${PW_HOME%/}
+ENV_HOME=${ENV_HOME%/}
+if [ "$FOLD" -eq 1 ]; then
+    PW_HOME=$(fold "$PW_HOME"); PW_HOME_P=$(fold "$PW_HOME_P")
+    ENV_HOME=$(fold "$ENV_HOME"); ENV_HOME_P=$(fold "$ENV_HOME_P")
+fi
+
+# --- 1차 통과: "$@" 를 보존한 채 훑는다. 원본 rm 에게 넘길 판정을 여기서 모두 끝낸다.
+# 넘길지는 기록만 하고 실제로 넘기는 것은 루프 뒤다. 도중에 넘기면 뒤쪽 대상의 루트/홈
+# 검사를 건너뛴다 (실측: `rm -rf x/. ~` 에서 rm 이 x/. 만 거부하고 홈을 지웠다).
+# 묻기 모드(ask)는 rm 처럼 -i/-I/-f/--interactive 중 마지막 것이 이긴다: i=늘 묻는다, I=대상이 셋 넘거나
+# 재귀일 때만 한 번 묻는다, 빈 값=묻지 않는다. 묻지 않는 호출을 원본 rm 에 넘기면 휴지통 없이
+# 영구 삭제된다(실측: `rm -I f`, `rm -if f`, `rm --interactive=never f`). -i/-I 는 -f 의 '없는 파일
+# 무시'도 끈다(GNU rm.c). 긴 옵션은 getopt 처럼 줄임을 받는다(`--inter=ne`).
+force=0
+ask=""
+recursive=0
+dirs=0
+passthrough=0
+targets=0
+tmp_targets=0
+# BSD/macOS rm 과 POSIXLY_CORRECT 의 GNU rm 은 첫 대상에서 옵션 읽기를 멈춘다. 그때 `rm x -i` 의 -i 는
+# 파일 이름이라 묻지 않으므로, 여기서도 옵션으로 읽어 원본 rm 에 넘기면 휴지통 없이 지워진다.
+stop_at_operand=0
+case "$OS" in Darwin|*BSD|DragonFly) stop_at_operand=1 ;; esac
+# 셸 변수가 아니라 내보낸 값을 본다. sh 로 불린 bash 는 POSIXLY_CORRECT 를 내보내지 않고 정의만 해서,
+# 그 값을 믿으면 GNU rm 이 받아 주는 `rm x -f` 를 거꾸로 해석한다.
+# printenv 가 없으면(busybox 일부) 셸 변수로 판단한다 — 틀려도 휴지통 쪽으로 틀린다.
+if command -v printenv >/dev/null 2>&1; then
+    printenv POSIXLY_CORRECT >/dev/null 2>&1 && stop_at_operand=1
+else
+    [ -n "${POSIXLY_CORRECT+x}" ] && stop_at_operand=1
+fi
+end_opts=0
+for a in "$@"; do
+    if [ "$end_opts" -eq 0 ]; then
+        case "$a" in
+            --) end_opts=1; continue ;;
+            --?*)
+                _o=${a#--}
+                _w=""
+                case "$_o" in *=*) _w=${_o#*=}; _o=${_o%%=*} ;; esac
+                case force in "$_o"*) ask=""; force=1 ;; esac
+                case recursive in "$_o"*) recursive=1 ;; esac
+                case dir in "$_o"*) dirs=1 ;; esac
+                case interactive in
+                    "$_o"*)
+                        case "$a" in
+                            *=*) case "$_w" in
+                                     n|ne|nev|neve|never|no|non|none) ask="" ;;
+                                     o|on|onc|once) ask=I; force=0 ;;
+                                     # always/yes, 그리고 rm 이 거부할 값 — 넘기면 rm 이 묻거나 오류를 낸다
+                                     *) ask=i; force=0 ;;
+                                 esac ;;
+                            *) ask=i; force=0 ;;
+                        esac ;;
+                esac
+                continue ;;
+            -?*)
+                _s=${a#-}
+                while [ -n "$_s" ]; do
+                    _c=${_s%"${_s#?}"}
+                    _s=${_s#?}
+                    case "$_c" in
+                        f) ask=""; force=1 ;;
+                        i|I) ask=$_c; force=0 ;;
+                        r|R) recursive=1 ;;
+                        d) dirs=1 ;;
+                    esac
+                done
+                continue ;;
+        esac
+    fi
+    [ "$stop_at_operand" -eq 1 ] && end_opts=1
+    targets=$((targets + 1))
+
+    # Git Bash 에서 C:\… / C:/… 는 절대경로다. 상대경로로 보면 "$USERPROFILE" 이 홈 검사를
+    # 빠져나가 프로필이 통째로 휴지통에 간다. cygpath 가 없으면(POSIX) 그대로 둔다.
+    p=$a
+    case "$a" in
+        [A-Za-z]:|[A-Za-z]:/*|[A-Za-z]:\\*) p=$(cygpath -u "$a" 2>/dev/null) || p=$a ;;
+    esac
+    case "$p" in
+        /*) abs=$p ;;
+        *)  abs=$PWD/$p ;;
+    esac
+    trail=0
+    case "$abs" in */) trail=1 ;; esac
+    # 뒤에 붙은 슬래시를 '전부' 벗긴다. 하나만 벗기면 `rm -rf .//` 이 `$PWD/./` 로 남아
+    # 아래 점 검사를 빠져나간다.
+    while [ "${abs%/}" != "$abs" ]; do
+        abs=${abs%/}
+    done
+    [ -n "$abs" ] || abs=/
+
+    # `.`/`..` 로 끝나는 대상은 rm 이 거부한다. 치환이 원본보다 더 지우면 안 되므로
+    # 거부 판정을 rm 에게 그대로 넘긴다. 원시 인자가 아니라 정규화한 절대경로로 봐야
+    # `./`, `../`, `.//`, `sub/./` 같은 변형이 새지 않는다 (실측: 원본 rm 은 거부하는데
+    # 셰임이 통과시켜 상위 디렉터리를 통째로 휴지통에 넣었다).
+    case "$abs" in
+        */.|*/..) passthrough=1 ;;
+    esac
+
+    # 루트/홈 전체 삭제는 어느 경로로 와도 거부한다. 텍스트와 물리 경로를 모두 대조한다.
+    # Git Bash 의 /c(Cygwin 은 /cygdrive/c)는 드라이브 전체다. Linux·macOS 의 /c 는 그냥 디렉터리다.
+    res=$(physical "$abs" "$trail") || res=""
+    for _p in "$abs" "$res"; do
+        [ -n "$_p" ] || continue
+        [ "$FOLD" -eq 0 ] || _p=$(fold "$_p")
+        _hit=0
+        if [ "$WIN" -eq 1 ]; then
+            case "$_p" in /[a-z]|/cygdrive/[a-z]) _hit=1 ;; esac
+        fi
+        for _h in / "$PW_HOME" "$PW_HOME_P" "$ENV_HOME" "$ENV_HOME_P"; do
+            [ "$_p" != "$_h" ] || _hit=1
+        done
+        if [ "$_hit" -eq 1 ]; then
+            echo "rm(shim): refusing to delete the entire root/home directory ($a)." >&2
+            exit 1
+        fi
+    done
+
+    # /tmp 분류는 물리 경로로만 한다. 풀지 못한 경로는 /tmp 로 치지 않는다(휴지통 쪽이 안전하다).
+    case "$res/" in
+        /tmp/*|/private/tmp/*|/dev/shm/*|/run/user/*) tmp_targets=$((tmp_targets + 1)) ;;
+    esac
+done
+
+case "$ask" in
+    i) passthrough=1 ;;
+    I) [ "$recursive" -eq 0 ] && [ "$targets" -le 3 ] || passthrough=1 ;;
+esac
+[ "$passthrough" -eq 0 ] || exec "$REAL_RM" "$@"
+# 대상이 없다 → rm 이 내는 usage/오류를 그대로 보여준다.
+[ "$targets" -gt 0 ] || exec "$REAL_RM" "$@"
+# 대상이 '전부' tmpfs 아래일 때만 실제 삭제로 넘긴다. 하나라도 아니면 휴지통으로 간다 —
+# 섞였다고 실삭제로 넘기면 되돌릴 수 없는 파일까지 함께 사라진다.
+[ "$tmp_targets" -ne "$targets" ] || exec "$REAL_RM" "$@"
+if [ -z "$TRASH" ] && [ -z "$TRASH_PY" ]; then
+    echo "rm(shim): no trash tool found; deleting for real without the trash. (pip install trash-cli)" >&2
+    exec "$REAL_RM" "$@"
+fi
+
+# --- 2차 통과: 옵션을 버리고 대상만 남긴다. 앞에서 꺼내 뒤에 붙이므로
+# 정확히 원본 개수만큼 꺼내면 남는 것은 대상뿐이다.
+n=$#
+i=0
+end_opts=0
+while [ "$i" -lt "$n" ]; do
+    a=$1; shift; i=$((i + 1))
+    if [ "$end_opts" -eq 0 ]; then
+        case "$a" in
+            --)  end_opts=1; continue ;;
+            -?*) continue ;;
+        esac
+    fi
+    [ "$stop_at_operand" -eq 1 ] && end_opts=1
+    set -- "$@" "$a"
+done
+
+# --- 3차 통과: 존재 확인. `rm -f 없는파일` 은 조용히 성공해야 하는데 휴지통 도구는
+# 없는 파일에 오류를 낸다. -f 가 없으면 rm 처럼 오류를 내되 멈추지는 않는다.
+missing=0
+n=$#
+i=0
+while [ "$i" -lt "$n" ]; do
+    t=$1; shift; i=$((i + 1))
+    if [ ! -e "$t" ] && [ ! -L "$t" ]; then
+        [ "$force" -eq 1 ] || {
+            echo "rm: cannot remove '$t': No such file or directory" >&2
+            missing=1
+        }
+        continue
+    fi
+    # rm 은 -r 없이 디렉터리를 지우지 않는다(-d 는 빈 디렉터리만). 셰임이 rm 보다 더 지우면 안
+    # 된다. -f 로도 이 오류는 사라지지 않는다.
+    if [ "$recursive" -eq 0 ] && [ -d "$t" ] && [ ! -L "$t" ]; then
+        if [ "$dirs" -eq 0 ]; then
+            echo "rm: cannot remove '$t': Is a directory" >&2
+            missing=1
+            continue
+        elif [ -n "$(ls -A -- "$t" 2>/dev/null)" ]; then
+            echo "rm: cannot remove '$t': Directory not empty" >&2
+            missing=1
+            continue
+        fi
+    fi
+    set -- "$@" "$t"
+done
+
+[ $# -gt 0 ] || exit "$missing"            # 남은 대상 없음 → 없던 대상 유무로 판정
+
+if [ "$MAC_TRASH" -eq 1 ]; then
+    # macOS trash 는 `--` 를 받는지 문서화돼 있지 않다. 대신 대시로 시작하는 대상에 ./ 를
+    # 붙여 옵션으로 오인되지 않게 한다.
+    n=$#
+    i=0
+    while [ "$i" -lt "$n" ]; do
+        t=$1; shift; i=$((i + 1))
+        case "$t" in -*) t=./$t ;; esac
+        set -- "$@" "$t"
+    done
+    "$TRASH" "$@" || exit $?
+elif [ -n "$TRASH" ]; then
+    "$TRASH" -- "$@" || exit $?
+else
+    "$TRASH_PY" "$SEND_TO_TRASH" -- "$@"
+    rc=$?
+    if [ "$rc" -eq 127 ]; then
+        # send2trash 미설치 — 휴지통으로 옮길 수단이 없다. 알리고 실제 삭제한다.
+        echo "rm(shim): deleting for real without the trash. (pip install send2trash)" >&2
+        "$REAL_RM" -r -- "$@" || exit $?
+    elif [ "$rc" -ne 0 ]; then
+        exit "$rc"
+    fi
+fi
+exit "$missing"
