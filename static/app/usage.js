@@ -92,7 +92,9 @@
   if(isErr(a)){const k=kind(a);return html`<p class="ul-err">${k[2]}</p>${a.error?html`<details class="ul-raw"><summary>원문 보기</summary><pre>${a.error}</pre></details>`:""}`;}
   const note=a.note?html`<p class="${a.attention?"ul-err":"ul-note"}">${a.note}</p>`:""; // 마지막으로 읽은 값에 붙는 이유
   if(!a.windows.length&&!a.buckets.length)return note||html`<p class="ul-muted">${a.status==="fetching"?"사용량을 읽는 중입니다.":"아직 사용량을 읽지 않았습니다."}</p>`;
-  return html`${note}<div class="ul-wins">${a.windows.map(win)}</div>${a.buckets.length?html`<p class="ul-extra">세부 한도 · ${a.buckets.map((b,i)=>html`${i?" · ":""}${b.name} <b>${pct(b.used)}</b>`)}</p>`:""}${extra(a.extra)}${a.credits?html`<p class="ul-extra">한도 리셋 크레딧 ${a.credits}개</p>`:""}`;
+  // Claude(cswap) 는 2026-10-30 요금제 개편 뒤 계정에 따라 5시간 창이 없다(인증된 Ultra). 읽지 못한 것과 구분해 적는다
+  const no5h=/^cswap/.test(a.source||"")&&a.windows.some(w=>w.key==="weekly")&&!a.windows.some(w=>w.key==="session");
+  return html`${note}<div class="ul-wins">${a.windows.map(win)}</div>${no5h?html`<p class="ul-extra">5시간 한도 없음 · 주간 한도만 적용</p>`:""}${a.buckets.length?html`<p class="ul-extra">세부 한도 · ${a.buckets.map((b,i)=>html`${i?" · ":""}${b.name} <b>${pct(b.used)}</b>`)}</p>`:""}${extra(a.extra)}${a.credits?html`<p class="ul-extra">한도 리셋 크레딧 ${a.credits}개</p>`:""}`;
  }
  const head=a=>html`<div class="ul-ah"><b class="ul-email">${a.label}</b>${a.plan?html`<span class="ul-plan">${a.plan}</span>`:""}${a.org?html`<span class="ul-plan">${a.org}</span>`:""}${a.active?html`<span class="badge" data-tone="info">사용 중</span>`:""}${isErr(a)||a.attention?html`<span class="badge" data-tone="crit">${isErr(a)?kind(a)[1]:"조치 필요"}</span>`:""}</div>`;
  const relog=(d,id,again=true)=>html`<button type="button" class="seg-action" data-login="${d.id}" data-lp="${id}">${LOGIN[id]} ${again?"다시 로그인":"로그인"}</button>`;

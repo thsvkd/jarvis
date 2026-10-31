@@ -17,7 +17,7 @@ const account = (label, used, updated, extra = {}) => ({ label, org: null, statu
 const provider = (id, name, accounts) => ({ id, name, accounts });
 const device = (id, providers) => ({ id, host: id, status: 200, mode: "independent", unavailable: [], providers });
 const devices = [
-  device("first", [provider("claude", "Claude", [account("a@example.com", 95, 100), account("org@example.com", 10, 10, { org: "Org A" }), account("기본 계정", 20, 10), account("기본 계정", 25, 10)])]),
+  device("first", [provider("claude", "Claude", [account("a@example.com", 95, 100), account("u5@example.com", 5, 10, { source: "cswap-cache", windows: [{ key: "weekly", used: 5, resets_at: null }] }), account("org@example.com", 10, 10, { org: "Org A" }), account("기본 계정", 20, 10), account("기본 계정", 25, 10)])]),
   device("second", [provider("claude", "Claude", [account("a@example.com", 80, 20), account("org@example.com", 12, 10, { org: "Org A" }), account("org@example.com", 5, 10, { org: "Org B" }), account("기본 계정", 30, 10)]),
     provider("codex", "Codex", [account("b@example.com", null, 10, { status: "error", error: "network" })])]),
   device("empty", []),
@@ -43,6 +43,8 @@ assert.equal((initial.match(/a@example\.com/g) || []).length, 1);
 assert.equal((initial.match(/org@example\.com/g) || []).length, 2);
 assert.equal((initial.match(/Org A/g) || []).length, 1);
 assert.match(initial, /80%/);
+// 5시간 창이 없는 Claude(cswap) 계정은 읽지 못한 것과 구분해 적는다(5시간 창이 있는 계정에는 적지 않는다)
+assert.equal((initial.match(/5시간 한도 없음/g) || []).length, 1);
 assert.doesNotMatch(initial, /95%/);
 assert.match(initial, /42%/);
 assert.equal((initial.match(/기본 계정/g) || []).length, 3);
