@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f2f2f5">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#09090b">
+<meta name="description" content="Jarvis AI 셋업 — 기기마다 jarvis 모듈(Orca·doctor)의 상태를 보고, 계획을 미리 본 뒤 실행하는 화면">
+<title>AI 셋업 · Jarvis</title>
+<link rel="icon" href="/shared/favicon.svg">
+<script src="/app/theme-init.js"></script>
+<link rel="stylesheet" href="/app/tokens.css">
+<link rel="stylesheet" href="/app/shell.css">
+<link rel="stylesheet" href="/app/bento.css">
+<link rel="stylesheet" href="/setup/setup.css">
+<script src="/setup/setup.js" defer></script>
+</head>
+<body>
+<a class="sh-skip" href="#main">본문으로 건너뛰기</a>
+<header id="jarvis-shell" data-page="setup"></header>
+<script src="/shared/jarvis.js"></script>
+<script src="/app/shell.js"></script>
+
+<main class="wrap" id="main" tabindex="-1">
+  <section class="sec" aria-labelledby="suTitle">
+    <div class="sec-head su-head">
+      <h1 id="suTitle">AI 셋업</h1>
+      <p class="sec-sub">기기마다 jarvis 모듈의 상태를 보고, 계획을 미리 본 뒤 실행합니다.</p>
+      <div class="su-tools"><span class="su-hint" id="suAge" role="status"></span><button type="button" class="su-btn" id="suRefresh">다시 점검</button></div>
+    </div>
+    <div id="suBody" aria-live="polite"><p class="su-muted">기기 목록을 읽는 중…</p></div>
+  </section>
+</main>
+
+<dialog class="sheet" id="suSheet" aria-labelledby="suSheetTitle">
+  <div class="sheet-panel">
+    <div class="sheet-grab" aria-hidden="true"></div>
+    <header class="sheet-head">
+      <div class="sheet-head-main" id="suSheetHead"></div>
+      <button type="button" class="icon-btn sheet-close" data-close aria-label="닫기" autofocus><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </header>
+    <div class="sheet-body" id="suSheetBody"></div>
+  </div>
+</dialog>
+</body>
+</html>

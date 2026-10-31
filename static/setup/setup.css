@@ -1,0 +1,179 @@
+/* Jarvis — AI 셋업(/setup/). 디자인 랩 05 의 C 안. 토큰(tokens.css)·셸(shell.css)·카드·서랍(bento.css)을 그대로 쓰고
+ * 이 화면의 조각만 더한다(접두어 su-). 색·글자 크기·모서리는 토큰만 쓴다. */
+#suBody .tile{animation:none} /* 몇 초마다 다시 그리므로 등장 애니메이션을 끈다 */
+#main{outline:0}
+code,.mono{font-family:var(--mono)}
+.su-head h1{font-size:var(--fs-2xl);line-height:1.15;font-weight:var(--fw-bold);letter-spacing:var(--ls-heading)}
+.su-tools{margin-left:auto;display:flex;align-items:center;gap:10px}
+
+/* ---------------------------------------------------------------- 공용 조각 */
+.su-k{color:var(--text-3);font-size:var(--fs-xs);font-weight:var(--fw-semibold)}
+.su-muted{color:var(--text-3);font-size:var(--fs-sm)}
+.su-none{color:var(--text-3);font-weight:var(--fw-semibold)}
+.su-os{display:block;color:var(--text-3);font-size:var(--fs-xs)}
+.su-btn{font:inherit;font-size:var(--fs-sm);font-weight:var(--fw-semibold);min-height:34px;padding:6px 13px;border-radius:var(--r-sm);border:1px solid var(--line-2);background:var(--tile);color:var(--text);cursor:pointer;white-space:nowrap;transition:background-color var(--dur) var(--ease),border-color var(--dur) var(--ease),transform var(--dur-fast) var(--ease)}
+.su-btn:hover{border-color:var(--accent)}
+.su-btn:active{transform:scale(.97)}
+.su-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.su-btn.primary{background:var(--accent);border-color:transparent;color:var(--on-accent)}
+.su-btn.primary:hover{background:var(--accent-hover)}
+/* 다크의 강조색(밝은 파랑) 위 흰 글자는 대비가 2.6:1 이라 바탕색 글자로 바꾼다 */
+:root[data-theme=dark] .su-btn.primary{color:var(--bg)}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]) .su-btn.primary{color:var(--bg)}}
+@media(pointer:coarse){.su-btn{min-height:40px}}
+.su-acts{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px}
+.su-hint{color:var(--text-3);font-size:var(--fs-xs)}
+.su-run{color:var(--info-ink);font-weight:var(--fw-semibold)}
+.su-warn{font-size:var(--fs-sm);color:var(--crit-ink);background:var(--crit-soft);padding:8px 10px;border-radius:var(--r-xs);overflow-wrap:anywhere}
+
+/* 진행 단계 — 상태 → 계획 → 승인 → 실행 → 결과 */
+.su-flow{display:flex;gap:4px;list-style:none;padding:0;margin:0}
+.su-flow li{flex:1;min-width:0;position:relative;padding-top:8px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.su-flow li::before{content:"";position:absolute;left:0;right:0;top:0;height:4px;border-radius:var(--r-2xs);background:var(--tile-3)}
+.su-flow li[data-s=past]{color:var(--text-2)}
+.su-flow li[data-s=past]::before{background:var(--accent);opacity:.45}
+.su-flow li[data-s=now]{color:var(--accent)}
+.su-flow li[data-s=now]::before{background:var(--accent)}
+
+/* 상태 */
+.su-orca{display:grid;gap:14px;outline:0}
+.su-status{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px}
+.su-ver{display:inline-flex;align-items:baseline;gap:6px;font-variant-numeric:tabular-nums}
+.su-ver b{font-size:var(--fs-lg)}
+.su-to{color:var(--info-ink);font-family:var(--mono);font-size:var(--fs-sm);font-weight:var(--fw-semibold)}
+.su-facts{flex-basis:100%;display:flex;flex-wrap:wrap;gap:4px 16px;color:var(--text-3);font-size:var(--fs-sm)}
+.su-facts b{color:var(--text-2);font-weight:var(--fw-semibold)}
+.su-note{flex-basis:100%;font-size:var(--fs-sm);color:var(--tone-ink);background:var(--tone-soft);padding:7px 10px;border-radius:var(--r-xs);overflow-wrap:anywhere}
+
+/* 계획 */
+.su-plan{display:grid;gap:12px;padding:14px;border-radius:var(--r-md);background:var(--tile-2);box-shadow:0 0 0 1px var(--line)}
+.su-ph{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:6px 12px}
+.su-pt{display:grid;gap:1px;min-width:0}
+.su-pt b{font-size:var(--fs-lg);letter-spacing:var(--ls-tight)}
+.su-pid{font-size:var(--fs-xs);padding:3px 8px;border-radius:var(--r-xs);background:var(--tile-3);color:var(--text-2);white-space:nowrap}
+.su-steps{list-style:none;padding:0;margin:0;display:grid;gap:6px}
+.su-step{display:grid;grid-template-columns:26px minmax(0,1fr) auto;gap:4px 12px;align-items:start;padding:10px 12px;border-radius:var(--r-sm);background:var(--tile)}
+.su-step[data-blocked=true]{box-shadow:inset 3px 0 0 var(--crit)}
+.su-step[data-r=failed]{background:var(--crit-soft)}
+.su-step[data-r=deferred]{background:var(--warn-soft)}
+.su-i{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--tile-3);color:var(--text-2);font-size:var(--fs-xs);font-weight:var(--fw-bold);font-variant-numeric:tabular-nums}
+.su-i[data-tone]{background:var(--tone);color:var(--on-accent)}
+.su-i[data-tone=muted]{background:var(--tile-3);color:var(--text-2)}
+.su-i[data-tone=warn]{color:var(--on-warn)}
+.su-sm{min-width:0;display:grid;gap:3px}
+.su-sm>b{font-size:var(--fs-md);font-weight:var(--fw-semibold)}
+.su-sm code{font-size:var(--fs-xs);color:var(--text-3);overflow-wrap:anywhere}
+.su-block{font-size:var(--fs-sm);color:var(--crit-ink);background:var(--crit-soft);padding:6px 9px;border-radius:var(--r-xs);margin-top:3px;overflow-wrap:anywhere}
+.su-block b{margin-right:4px}
+.su-rmsg{font-size:var(--fs-sm);color:var(--tone-ink);font-weight:var(--fw-medium);overflow-wrap:anywhere}
+.su-rk{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.su-need,.su-auto{font-size:var(--fs-2xs);font-weight:var(--fw-bold);letter-spacing:var(--ls-wide);white-space:nowrap}
+.su-need{color:var(--warn-ink)}
+.su-need::before{content:"● ";font-size:.8em}
+.su-auto{color:var(--text-3)}
+.su-psum{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:var(--fs-sm);color:var(--text-2)}
+.su-psum [data-tone]{color:var(--tone-ink)}
+.su-result{display:grid;grid-template-columns:14px minmax(0,1fr);gap:10px;align-items:start;padding:12px 14px;border-radius:var(--r-sm);background:var(--tone-soft);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--tone) 30%,transparent)}
+.su-result>.shape{margin-top:6px;width:11px;height:11px}
+.su-result b{font-size:var(--fs-lg);color:var(--tone-ink)}
+.su-result p{font-size:var(--fs-sm);color:var(--text-2);margin-top:2px;overflow-wrap:anywhere}
+.su-code{font-family:var(--mono);font-size:var(--fs-xs);color:var(--text-3);margin-left:4px}
+/* 실행 중: 끝을 모르므로 흐르는 막대(움직임 줄이기면 멈춘 막대) */
+.su-prog{height:6px;border-radius:var(--r-2xs);background:var(--tile-3);overflow:hidden}
+.su-prog-run i{display:block;height:100%;width:35%;border-radius:var(--r-2xs);background:var(--info);animation:su-flow 1.4s var(--ease) infinite}
+@keyframes su-flow{from{transform:translateX(-100%)}to{transform:translateX(290%)}}
+@media(prefers-reduced-motion:reduce){.su-prog-run i{animation:none;width:100%;opacity:.5}}
+
+/* doctor */
+.su-doc{display:grid;gap:12px}
+.su-meta{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;color:var(--text-3);font-size:var(--fs-sm)}
+.su-kg{display:grid;gap:6px}
+.su-kh{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 8px;font-size:var(--fs-md)}
+.su-kh>.shape{position:relative;top:1px}
+.su-kh b{color:var(--tone-ink)}
+.su-kh span{color:var(--text-3);font-size:var(--fs-xs)}
+.su-finds{list-style:none;padding:0;margin:0;display:grid;gap:4px}
+.su-find{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;align-items:start;padding:8px 12px;border-radius:var(--r-sm);background:var(--tile-2)}
+.su-find:has(>.shape){grid-template-columns:12px minmax(0,1fr)}
+.su-find>.shape{margin-top:6px}
+.su-find p{font-size:var(--fs-sm);color:var(--text-2);overflow-wrap:anywhere}
+.su-find b{font-size:var(--fs-md)}
+.su-find code,.su-tw code{font-size:var(--fs-xs);color:var(--text);background:var(--tile-3);padding:1px 5px;border-radius:var(--r-2xs)}
+.su-hide{font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--crit-ink)}
+.su-clean{display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);color:var(--ok-ink);font-weight:var(--fw-semibold)}
+.su-tools-d summary{cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--text-2);min-height:32px;display:flex;align-items:center}
+.su-tl{list-style:none;padding:0;margin:6px 0 0;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px}
+.su-tl li{display:grid;gap:1px;padding:8px 10px;border-radius:var(--r-sm);background:var(--tile-2);font-size:var(--fs-sm);min-width:0}
+.su-tl span{color:var(--text-3);font-size:var(--fs-xs)}
+.su-tl code{font-size:var(--fs-2xs);color:var(--text-3);overflow-wrap:anywhere}
+.su-tl li[data-off=true]{background:var(--info-soft)}
+.su-tl li[data-off=true] span{color:var(--info-ink);font-weight:var(--fw-semibold)}
+
+/* 승인 대기 */
+.su-appr{box-shadow:var(--shadow),inset 0 3px 0 var(--warn)}
+.su-appr ul{list-style:none;padding:0;margin:0;display:grid;gap:8px}
+.su-ar{display:grid;gap:8px;padding:12px 14px;border-radius:var(--r-md);background:var(--tile-2)}
+.su-ar-t{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px}
+.su-ar-t>span{color:var(--text-2);font-size:var(--fs-sm)}
+.su-ar-t .su-pid{margin-left:auto}
+.su-ar-n{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:var(--fs-sm)}
+.su-ar-s{display:inline-flex;align-items:center;gap:6px}
+
+/* 본문 */
+.su-kpis{margin-bottom:var(--gap)}
+.su-kpi{gap:2px}
+.su-kpi b{font-size:var(--fs-figure-sm);line-height:1.1;font-weight:var(--fw-bold);letter-spacing:var(--ls-heading);color:var(--tone-ink);font-variant-numeric:tabular-nums}
+.su-cgrid{align-items:start}
+.su-col{display:grid;gap:var(--gap);min-width:0}
+.su-lj{display:grid;gap:10px}
+.su-lj+.su-lj{margin-top:6px;padding-top:14px;border-top:1px solid var(--line)}
+.su-x-h{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.su-x-h h3{font-size:var(--fs-lg);letter-spacing:var(--ls-tight);min-width:0}
+.su-x-h .su-btn{min-height:28px;padding:3px 10px;font-size:var(--fs-xs)}
+.su-todo ul,.su-hist ol{list-style:none;padding:0;margin:0;display:grid}
+.su-todo li{display:grid;grid-template-columns:12px minmax(0,1fr) auto;gap:6px 12px;align-items:center;padding:11px 0;border-top:1px solid var(--line)}
+.su-todo li:first-child{border-top:0}
+.su-tw{min-width:0}
+.su-th{display:block;font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-3)}
+.su-tw p{font-size:var(--fs-sm);color:var(--text-2);overflow-wrap:anywhere}
+.su-tw p b{color:var(--tone-ink)}
+.su-todo>.su-muted{margin-top:4px}
+.su-hist li{display:grid;grid-template-columns:12px minmax(0,1fr);gap:10px;padding:9px 0;border-top:1px solid var(--line);font-size:var(--fs-sm)}
+.su-hist li:first-child{border-top:0}
+.su-hist li>.shape{margin-top:6px}
+.su-hist li span{display:block;color:var(--tone-ink);font-size:var(--fs-xs);font-weight:var(--fw-semibold)}
+.su-hist>.su-muted{margin-top:8px;font-size:var(--fs-xs)}
+.su-sh{margin-top:var(--sp-8)}
+.su-sh h2{font-size:var(--fs-xl);letter-spacing:var(--ls-heading)}
+.su-devs{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:var(--gap)}
+.su-dev{font:inherit;color:inherit;width:100%;height:100%;border:0;text-align:left;cursor:pointer;gap:8px;padding:16px 18px;transition:box-shadow var(--dur) var(--ease)}
+.su-dev:hover{box-shadow:var(--shadow-hover)}
+.su-dev[data-off=true]{background:color-mix(in srgb,var(--tile) 60%,var(--bg))}
+.su-dh{display:flex;align-items:baseline;justify-content:space-between;gap:8px;min-width:0}
+.su-dh b{font-size:var(--fs-lg);overflow-wrap:anywhere}
+.su-dh .su-os{flex:none}
+.su-dl{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;font-size:var(--fs-sm)}
+.su-dl .su-k{width:46px}
+.su-dl .su-ver b{font-size:var(--fs-md)}
+.su-dl>.mono{font-size:var(--fs-md)}
+.su-dn{display:inline-flex;align-items:center;gap:6px;color:var(--tone-ink);font-weight:var(--fw-semibold)}
+.su-legacy{margin:var(--sp-6) 0 var(--sp-8)}
+.su-limited{margin-bottom:var(--gap)}
+.su-grp{padding:14px 16px}
+
+/* ---------------------------------------------------------------- 좁은 화면 */
+@media(max-width:760px){
+ .su-tools{margin-left:0;flex-basis:100%}
+ .su-flow li{font-size:var(--fs-2xs)}
+ .su-step{grid-template-columns:24px minmax(0,1fr)}
+ .su-rk{grid-column:2;flex-direction:row;align-items:center;justify-content:flex-start}
+ .su-ar-t .su-pid{margin-left:0}
+ .su-appr .tile-aside{flex-basis:100%;margin-left:0;text-align:left}
+ .su-acts .su-hint{flex-basis:100%}
+ .su-todo li{grid-template-columns:12px minmax(0,1fr)}
+ .su-todo li>.su-btn{grid-column:2;justify-self:start}
+ .bento.su-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .su-kpis>.su-kpi{grid-column:auto;padding:14px}
+ .su-kpi b{font-size:var(--fs-heading-sm)}
+ .su-kpi .su-muted{font-size:var(--fs-xs)}
+}

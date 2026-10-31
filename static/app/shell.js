@@ -11,7 +11,7 @@
  *   </head>
  *   <body>
  *     <a class="sh-skip" href="#main">본문으로 건너뛰기</a>
- *     <header id="jarvis-shell" data-page="home|map" [data-layout="full"] [data-sections="id:라벨,id:라벨"]></header>
+ *     <header id="jarvis-shell" data-page="home|map|setup" [data-layout="full"] [data-sections="id:라벨,id:라벨"]></header>
  *     <script src="/shared/jarvis.js"></script>
  *     <script src="/app/shell.js"></script>              jarvis.js 바로 뒤, 페이지 스크립트보다 먼저(동기)
  *     … 본문 … <script src="/app/<page>.js"></script>   (또는 <head> 의 defer)
@@ -96,6 +96,7 @@
   const NAV = [
     { id: "home", href: "/", label: "개요", icon: "home" },
     { id: "map", href: "/map/", label: "네트워크 맵", short: "맵", icon: "map" },
+    { id: "setup", href: "/setup/", label: "AI 셋업", short: "셋업", icon: "cpu" },
   ];
   const THEMES = [
     { v: "system", label: "시스템", aria: "시스템 설정 따르기", icon: "system" },

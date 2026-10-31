@@ -372,7 +372,7 @@ body {
 @media (max-width: 699px) { .sh-act { height: 40px; } }
 
 /* ------------------------------------------------------------------ 반응형 */
-@media (max-width: 1319px) {
+@media (max-width: 1519px) {
   .sh-sections { display: none; }
 }
 @media (min-width: 1320px) {
@@ -413,7 +413,7 @@ body {
   .sh-copy { width: 40px; height: 40px; }
   .sh-pop-link { min-height: 44px; }
 }
-@media (max-width: 379px) {
+@media (max-width: 699px) {
   .sh-tab-l.has-short { display: none; }
   .sh-tab-s { display: inline; }
 }
