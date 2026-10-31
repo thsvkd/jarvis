@@ -69,7 +69,7 @@ class InstallTest(unittest.TestCase):
         with open(os.path.join(self.home, *parts)) as f:
             return f.read()
 
-    def test_fresh_mac_gets_gateway_agent_and_orca(self):
+    def test_fresh_mac_gets_gateway_agent_orca_and_hooks(self):
         """covers: BOOT-1"""
         r = self.run_install("--core", "100.115.245.91")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -83,7 +83,8 @@ class InstallTest(unittest.TestCase):
             log = f.read().splitlines()
         self.assertIn("launchctl bootstrap gui/%d %s/Library/LaunchAgents/dev.jarvis.plist" % (os.getuid(), self.home), log)
         self.assertEqual([line for line in log if line.startswith("jarvis ")],
-                         ["jarvis module orca plan --json", "jarvis module orca apply --json --plan-id abc123"])
+                         ["jarvis module orca plan --json", "jarvis module orca apply --json --plan-id abc123",
+                          "jarvis module hooks plan --json", "jarvis module hooks apply --json --plan-id abc123"])
         self.assertIn("install Orca", r.stderr)
 
     def test_rerun_keeps_existing_config_and_does_not_download_again(self):

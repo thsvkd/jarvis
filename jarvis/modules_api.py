@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from . import config, module
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TTL = {"orca": 60, "doctor": 600}  # status 캐시(초). doctor 는 하네스마다 --version 을 불러 수 초 걸린다
+TTL = {"orca": 60, "doctor": 600, "hooks": 300}  # status 캐시(초). doctor 는 하네스마다 --version 을 불러 수 초 걸린다
 STATUS_TIMEOUT_S = 120
 PLAN_TIMEOUT_S = 120
 APPLY_TIMEOUT_S = 3600

@@ -56,7 +56,7 @@ jarvis 본체는 모듈을 라이브러리로 부른다. 부트스트랩과 시�
 
 ## doctor 모듈
 
-코드는 `jarvis/modules/doctor/` 다. `doctor.py` 는 ai-setup `res/doctor/doctor.py` 를 옮긴 것으로 단독 실행(사람용 보고, 종료 코드 0·1·2)도 그대로 된다. 하네스·도구 목록(`catalog.json`)과 현재 훅 조각(`settings.json`)은 ai-setup `res/` 의 사본이다. 하네스 모듈과 훅 모듈을 옮길 때 원본도 jarvis 로 넘어오며, 그때까지는 ai-setup 의 것과 내용을 같게 유지한다.
+코드는 `jarvis/modules/doctor/` 다. `doctor.py` 는 ai-setup `res/doctor/doctor.py` 를 옮긴 것으로 단독 실행(사람용 보고, 종료 코드 0·1·2)도 그대로 된다. 하네스·도구 목록(`catalog.json`)은 ai-setup `res/catalog.json` 의 사본이다. 하네스 모듈을 옮길 때 원본도 jarvis 로 넘어오며, 그때까지는 ai-setup 의 것과 내용을 같게 유지한다. 현재 훅 조각은 훅 모듈의 `jarvis/modules/hooks/settings.json` 을 읽는다.
 
 - 읽기 전용이다. 홈 아래 어떤 파일도 만들거나 바꾸지 않는다. 버전 확인은 홈·설정·캐시 위치를 임시 폴더로 돌린 환경에서 한다.
 - `status.details` 는 `{tools: [{id, kind: harness/tool, found: [PATH 순서의 실행 파일], version, hint}], findings: [{kind, message}]}` 다. `found` 의 홈 아래 경로는 `~/` 로 줄인다. `hint` 는 없는 항목의 그 플랫폼 설치 명령이다.
@@ -80,3 +80,13 @@ core 홈의 AI 셋업 화면(디자인 랩 05 의 C 안)은 기기마다 모듈 
 - HEAD 요청은 점검·계획을 돌리지 않는다. 적용 요청(core: viewer IP·기기·모듈·plan_id 앞 12자, 게이트웨이: 시작·끝)은 로그에 한 줄씩 남긴다. 결과 본문과 페어링 값은 남기지 않는다.
 - 모듈 apply 의 단계 오류 문구는 페어링 링크를 가리고(`redact_reason`), 시간 초과는 명령 이름과 시간만 적는다(argv 에 페어링 링크가 들어갈 수 있다).
 - 승인 대기 목록과 휴대폰 알림(D7, O2)은 아직 없다. 지금은 viewer 가 화면에서 계획을 보고 실행을 누르는 것이 승인이다.
+
+## 훅 모듈
+
+코드는 `jarvis/modules/hooks/` 다. `danger_guard.py`(PreToolUse 판정), `merge_and_diff.py`(settings.json 병합), `send_to_trash.py`, `graft_sync_hidden.cjs`, `shims/rm`·`shims/RmShim.psm1`(rm 대체 래퍼)과 조각 `settings.json` 은 ai-setup `res/hooks`·`res/settings.json` 을 옮긴 것이다. 설치 흐름(ai-setup 의 `setup_hooks.sh`·`setup_hooks.ps1`)은 계약 층 `jarvis/hooks_module.py` 가 대신한다.
+
+- 설치하는 파일: POSIX 는 `danger_guard.py`·`shims/rm`, Windows 는 여기에 `send_to_trash.py`·`shims/RmShim.psm1`·`graft_sync_hidden.cjs` 를 더한다. 위치는 `~/.claude/hooks/`.
+- 단계: `trash`(install, 휴지통 도구가 없을 때. POSIX 는 `pip --user trash-cli`, 거절되면 `sudo -n apt-get install trash-cli`. Windows 는 `pip send2trash`) → `files`(config, 배포본과 다이제스트가 다른 파일만. 영수증 `hook_files` 에 없는 같은 이름 파일은 덮어쓰지 않고 blocked) → `settings`(config, `merge_and_diff` 로 권한·훅만 병합, 나머지 최상위 키 보존, 바뀌면 백업, 영수증 기록) → `selftest`(read, 세션이 훅을 부르는 python 으로 정해진 입력의 판정을 확인. 실패하면 apply 는 failed).
+- 훅을 실행할 명령(조각의 `{{PY}}`)은 ai-setup 과 같은 순서로 찾는다(POSIX: `python3` → `python`, Windows: `python` → `python3` → `py -3` → `py`). 권한 모드(`permissions.defaultMode`)는 사용자가 지금 쓰는 값을 유지하고, 없으면 조각의 값(auto)이다.
+- status·plan 은 아무것도 쓰지 않는다. 병합은 메모리에서 미리 돌려 보고, 셀프테스트(guard.log 를 쓴다)는 apply 에서만 돈다.
+- ai-setup 이 설치한 기기는 영수증의 같은 키(`hook_files`, 권한 기록)를 읽어 이어서 관리한다. uninstall 은 영수증에 기록한 파일과 설치가 넣은 settings 항목만 걷어내고, 영수증의 다른 단계 기록은 남긴다.

@@ -56,3 +56,14 @@ ai-setup 의 AI-1~AI-6 을 옮긴 것이다. 테스트 본문은 원본과 같�
 | --- | --- | --- | --- |
 | SETUP-1 | WHEN core 의 AI 셋업 화면이 모듈 상태를 물으면 THE SYSTEM SHALL 기기마다 게이트웨이의 모듈 status 를 모으고(모듈별 캐시, 맞춤 헤더가 있을 때만 강제 새로고침), 닿지 않는 기기는 오류로 표시하며, viewers 가 아닌 기기에는 doctor 세부·작업 결과 문구를 빼고 주고, 모듈 출력이 JSON 이 아니면 종료 코드만 오류로 낸다 | `tests/test_modules_api.py` | GREEN (단위) |
 | SETUP-2 | WHEN 화면에서 계획을 보거나 적용하면 THE SYSTEM SHALL viewers 만 계획을 받고, viewers 와 정확한 `X-Jarvis-Action: module-apply` 가 있을 때만 그 plan_id 를 그 기기의 게이트웨이에 전달하며, 게이트웨이는 설정 core 의 요청만 받아 한 번에 하나의 apply 를 뒤에서 돌린다(다른 적용·갱신·발급과 서로 배제, 재시작으로 끊긴 적용은 interrupted, 오류 문구에 페어링 링크를 남기지 않음) | `tests/test_modules_api.py` | GREEN (단위) |
+
+## 훅
+
+옮긴 훅 자체의 테스트(`tests/test_danger_guard.py`·`test_merge_and_diff.py`·`test_rm_shim.py`·`test_hook_compat.py`·`test_git_snapshot.py`, Pester `tests/RmShim.Tests.ps1`)는 ai-setup 원본 그대로이며 케이스 ID 없이 함께 돈다.
+
+| ID | 케이스 | 테스트 | 상태 |
+| --- | --- | --- | --- |
+| HOOKS-1 | WHEN 훅 모듈의 status·plan 을 실행하면 THE SYSTEM SHALL 홈 아래 아무것도 쓰지 않고, 필요한 단계(trash·files·settings·selftest)를 계획한다 | `tests/test_hooks_module.py` | GREEN (단위. s2 실측: ai-setup 이 설치한 훅을 받아들여 health=ok·단계 없음, settings·영수증 해시 그대로) |
+| HOOKS-2 | WHEN 훅 계획을 apply 하면 THE SYSTEM SHALL 배포본과 다른 훅 파일만 쓰고 settings.json 은 권한·훅만 병합(다른 키·사용자의 권한 모드 보존)하며, 셀프테스트가 실패하면 failed, 계획이 바뀌었으면 stale 이다. 다시 plan 하면 단계가 없다 | `tests/test_hooks_module.py` | GREEN (단위) |
+| HOOKS-3 | WHEN `~/.claude/hooks` 에 설치 기록에 없는 같은 이름 파일이 있으면 THE SYSTEM SHALL 그 파일을 덮어쓰지 않고 막힘으로 보고한다 | `tests/test_hooks_module.py` | GREEN (단위) |
+| HOOKS-4 | WHEN 훅을 uninstall 하면 THE SYSTEM SHALL dry-run 의 plan_id 가 맞을 때만 기록한 파일과 설치가 넣은 settings 항목만 지우고 영수증의 다른 단계 기록은 남긴다 | `tests/test_hooks_module.py` | GREEN (단위) |

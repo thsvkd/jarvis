@@ -1,5 +1,5 @@
 #!/bin/sh
-# jarvis 설치기(macOS): 게이트웨이를 설치해 띄우고 모듈(지금은 Orca)을 적용한다. 다시 실행해도 된다.
+# jarvis 설치기(macOS): 게이트웨이를 설치해 띄우고 모듈(Orca·훅)을 적용한다. 다시 실행해도 된다.
 #
 #   curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh -s -- --core <core 의 tailnet IP>
 #
@@ -81,8 +81,7 @@ launchctl print "gui/$(id -u)/dev.jarvis" >/dev/null 2>&1 || launchctl bootstrap
 
 # 5. 모듈: 계획을 보이고 그 plan_id 로 적용한다
 cd "$REPO"
-# shellcheck disable=SC2043  # ai-setup 에서 옮긴 모듈을 여기에 더한다
-for m in orca; do
+for m in orca hooks; do
   plan=$("$PY" -m jarvis module "$m" plan --json) || { echo "$m: 계획을 세우지 못했습니다" >&2; continue; }
   id=$(printf '%s' "$plan" | "$PY" -c '
 import json, sys

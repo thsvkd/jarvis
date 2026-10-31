@@ -216,7 +216,7 @@ curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh 
 ```
 
 `install.sh` 는 uv 로 Python venv(`~/.local/share/jarvis/venv`)를 만들고, 최신 릴리스 묶음을 sha256 으로 확인해 `~/Workspace/jarvis` 에 푼다.
-그다음 설정 파일과 LaunchAgent(`dev.jarvis`)를 만들고, 모듈(지금은 Orca)을 plan 으로 보인 뒤 그 plan_id 로 apply 한다.
+그다음 설정 파일과 LaunchAgent(`dev.jarvis`)를 만들고, 모듈(Orca·훅)을 plan 으로 보인 뒤 그 plan_id 로 apply 한다.
 이미 있는 설정·LaunchAgent·저장소는 덮어쓰지 않으므로 다시 실행해도 된다. Tailscale·Orca·하네스 로그인과 core 의 `devices` 등록은 직접 한다.
 
 수동 설치:
