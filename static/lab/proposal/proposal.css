@@ -1,3 +1,11 @@
+/* 섹션 막대(.lnav): 운영 홈은 헤더 탭으로 바뀌어 bento.css 에서 빠졌다. 랩 시안만 이 막대를 쓰므로 기본 모양을 여기 둔다 */
+.lnav{position:sticky;top:calc(var(--sh-h) + var(--sh-tabs-h));z-index:30;background:var(--topbar);-webkit-backdrop-filter:saturate(180%) blur(18px);backdrop-filter:saturate(180%) blur(18px);border-bottom:1px solid var(--line)}
+.lnav-in.wrap{display:flex;align-items:center;gap:2px;height:46px;overflow-x:auto;scrollbar-width:none;padding-left:calc(var(--gutter) - 10px);padding-right:calc(var(--gutter) - 10px)}
+.lnav-in::-webkit-scrollbar{display:none}
+.lnav a{flex:none;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 var(--sp-3);border-radius:var(--r-pill);font-size:var(--fs-md);font-weight:var(--fw-medium);color:var(--text-2);white-space:nowrap;text-decoration:none;transition:background-color var(--dur) var(--ease),color var(--dur) var(--ease)}
+.lnav a:hover{color:var(--text);background:var(--muted-soft);text-decoration:none}
+.lnav a[aria-current="true"]{color:var(--text);background:var(--muted-soft);font-weight:var(--fw-semibold)}
+.lnav-n{font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-3);font-variant-numeric:tabular-nums}
 /* 원본 shell.css + bento.css 토큰·카드·타입·차트 유지. 새 스타일은 공개 방식에만 사용. */
 .lab-note{display:flex;align-items:baseline;gap:8px 18px;flex-wrap:wrap;padding:14px 0 0;color:var(--text-2);font-size:var(--fs-sm)}
 .lab-note strong{font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--text)}
