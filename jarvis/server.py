@@ -20,7 +20,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from . import __version__, cli_login, config, cswap_usage, orca, orca_issue, orca_update, orca_usage, self_update
+from . import __version__, cli_login, config, cswap_usage, independent_usage, orca, orca_issue, orca_update, orca_usage, self_update
 from .core import why
 from .util import client_kind
 
@@ -186,7 +186,7 @@ def make_handler(collector, core=None):
                     force = self._usage_force(u)
                     if force is None:
                         return self._json({"error": "X-Jarvis-Action 헤더가 필요합니다"}, head, 403)
-                    code, body = core.usage(dev, force)
+                    code, body = core.usage(dev, force, independent=parse_qs(u.query).get("independent") == ["1"])
                     return self._json(body, head, code)
                 if what == "history":
                     rng = (parse_qs(u.query).get("range") or ["1h"])[0]
@@ -347,6 +347,11 @@ def make_handler(collector, core=None):
                         return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
                     code, body = orca_usage.read(force=parse_qs(u.query).get("refresh") == ["1"])
                     return self._json(body, head, code)
+                if path == "/api/usage/independent":
+                    if not self._trusted(config.CORE):
+                        return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
+                    body = independent_usage.read(force=parse_qs(u.query).get("refresh") == ["1"])
+                    return self._json(body, head)
                 if path == "/api/orca":
                     if not self._trusted(config.CORE):
                         return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
@@ -367,7 +372,7 @@ def make_handler(collector, core=None):
                     force = self._usage_force(u)
                     if force is None:
                         return self._json({"error": "X-Jarvis-Action 헤더가 필요합니다"}, head, 403)
-                    return self._json(core.usage_all(force), head)
+                    return self._json(core.usage_all(force, independent=parse_qs(u.query).get("independent") == ["1"]), head)
                 if core and path.startswith("/api/devices/"):
                     return self._device(path, u, head)
                 if path == "/api/health":

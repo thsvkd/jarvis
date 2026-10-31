@@ -11,6 +11,7 @@ RPC 는 한 번에 하나만 부른다: Windows 명명 파이프는 다른 연�
 공식 계약: src/main/runtime/rpc/methods/accounts.ts, src/shared/rate-limit-types.ts (stablyai/orca)
 """
 import math
+import re
 import threading
 import time
 
@@ -105,6 +106,21 @@ def _set_up(lim):
         and (lim["status"] in ("ok", "error") or bool(lim["windows"]))
 
 
+def _grok_email(rate_limit):
+    """Orca 가 성공한 Grok 조회의 authProvenance 에 넣은 이메일만 쓴다. 계정 ID 는 내보내지 않는다.
+
+    https://github.com/stablyai/orca/blob/v1.4.245/src/main/rate-limits/grok-fetcher.ts
+    """
+    rate_limit = _dict(rate_limit)
+    metadata = _dict(rate_limit.get("usageMetadata"))
+    value = metadata.get("authProvenance")
+    if rate_limit.get("status") != "ok" or metadata.get("source") != "oauth" or not isinstance(value, str) or len(value) > 300:
+        return None
+    match = re.fullmatch(r"([A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)(?: \([^()\r\n]*\))?", value)
+    email = match.group(1) if match else None
+    return email if email and len(email) <= 200 else None
+
+
 def _managed(snap, pid, rl):
     """claude·codex: 사용 중 계정(관리 계정 또는 시스템 기본) + 다른 관리 계정(inactive*Accounts)."""
     st = _dict(snap.get(pid))
@@ -149,7 +165,8 @@ def normalize(snap):
             accounts = _managed(snap, key, rl)
         else:
             lim = limits(rl.get(key))
-            accounts = [{"label": "기본 계정", "org": None, "active": True, **lim}] if _set_up(lim) else []
+            label = _grok_email(rl.get(key)) if key == "grok" else None
+            accounts = [{"label": label or "기본 계정", "org": None, "active": True, **lim}] if _set_up(lim) else []
         if accounts:
             providers.append({"id": key, "name": name, "accounts": accounts})
     return providers

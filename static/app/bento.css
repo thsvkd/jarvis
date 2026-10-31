@@ -1170,6 +1170,12 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
 .ul-kpi { gap: 4px; }
 .ul-kpi b { font-size: var(--fs-2xl); font-weight: var(--fw-bold); color: var(--tone-ink, var(--text)); letter-spacing: var(--ls-heading); }
 .ul-kpi .ul-kpi-s { font-size: var(--fs-xl); }
+.ul-summary { margin-top: var(--gap); }
+.ul-summary > .ul-muted { margin-top: 4px; }
+.ul-group { margin-top: 10px; }
+.ul-group h4 { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.ul-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 10px; }
+.ul-summary-account { min-width: 0; padding: 12px; border-radius: var(--r-sm); background: var(--tile-2); }
 .ul-soon, .ul-mx { margin-top: var(--gap); }
 .ul-soon ol { list-style: none; display: grid; gap: 8px; }
 .ul-soon li { display: grid; grid-template-columns: 110px 10px minmax(0, 240px) minmax(0, 150px) minmax(80px, 1fr) 42px; align-items: center; gap: 10px; font-size: var(--fs-sm); }

@@ -22,6 +22,14 @@
 | ORCA-12 | WHEN Orca 모듈이 jarvis 에 들어가면 THE SYSTEM SHALL ai-setup 의 `--tools orca` 와 `update-ai orca` 가 Orca 를 바꾸지 않고 jarvis 를 안내한다 | ai-setup `tests/test_stages.py::test_orca_desktop_points_to_jarvis_and_changes_nothing`, `tests/test_update_ai.py`(orca 대상 안내·exit 1), bats·Pester(`--tools`/`-Tools` 거부·영수증 보존) | GREEN (ai-setup 단위: a5a3353·2a9d5cc·b2bf4de, `scripts/test.sh` 종료 코드 0. kgolf 사본에서 안내 문구 실측) |
 | ORCA-13 | WHEN `apply` 가 받은 `--plan-id` 가 실행 직전에 다시 세운 계획과 다르면 THE SYSTEM SHALL 아무것도 실행하지 않고 `stale` 과 종료 코드 3 을 돌려준다 | `test_plan_id_is_bound_to_the_device`, `Apply::test_a_plan_id_that_no_longer_matches_runs_nothing_and_is_stale` | GREEN (단위; pi5-s3 실측에서 승인한 plan_id 로 실행) |
 
+## AI 구독 사용량
+
+| ID | 케이스 | 테스트 | 상태 |
+| --- | --- | --- | --- |
+| USAGE-1 | WHEN core 홈에서 AI 구독 사용량을 보면 THE SYSTEM SHALL 기기별 표 위에 프로바이더별 계정과 각 한도 창·오류·값의 기기와 확인 시각을 표시하고 기존 필터를 적용한다. 같은 프로바이더의 이메일·조직이 같은 계정은 사용량이 있는 값 중 최근 값을 한 번 표시하며, 이메일이 없으면 기기별로 구분한다. 서로 다른 한도 창은 합산하지 않는다. | `tests/test_usage_summary.mjs` | 단위 검증 |
+| USAGE-2 | WHEN Grok·Antigravity 사용량에 연결된 계정 이메일을 안전하게 확인할 수 있으면 THE SYSTEM SHALL 이메일을 표시하고, 확인할 수 없으면 기본 계정으로 표시하며 자격 증명·계정 ID 는 내보내지 않는다. | `tests/test_provider_usage.py`, `tests/test_antigravity_usage.py`, `tests/test_orca_usage.py::NormalizeTest` | 부분 (Antigravity 활성 계정 s2 실측; 다른 기기와 Grok 실계정 미검증) |
+| USAGE-3 | WHEN core 홈에서 AI 구독 사용량을 조회하면 THE SYSTEM SHALL Orca 의 실행·계정 설정·응답과 독립적으로 각 프로바이더와 계정의 사용량을 표시하고, 계정·한도를 확인할 수 없는 경우 그 상태를 명시하며, 자격 증명과 계정 ID 를 내보내거나 로그인을 변경하지 않는다. | `tests/test_provider_usage.py`, `tests/test_codex_native_usage.py`, `tests/test_cswap_cached_usage.py`, `tests/test_opencode_usage.py`, `tests/test_antigravity_usage.py`, `tests/test_gemini_usage.py`, `tests/test_kimi_usage.py`, `tests/test_minimax_usage.py`, `tests/test_zcode_usage.py`, `tests/test_independent_usage.py`, `tests/test_core.py`, `tests/test_usage_summary.mjs` | 부분 (독립 API 와 웹 연결; Gemini·Kimi·MiniMax·ZCode·OpenCode Go 및 기기별 실증 미완료) |
+
 ## 설치기
 
 | ID | 케이스 | 테스트 | 상태 |

@@ -8,6 +8,7 @@
 """
 import json
 import math
+import re
 import subprocess
 import threading
 import time
@@ -100,7 +101,8 @@ def account(row):
     usage, fetched = row.get("usage"), row.get("usageFetchedAt")
     if status != "ok" and isinstance(row.get("lastGoodUsage"), dict):
         usage, fetched = row["lastGoodUsage"], row.get("lastGoodFetchedAt")
-    reason = str(row.get("usageError") or "")[:60]
+    raw_reason = row.get("usageError")
+    reason = raw_reason if isinstance(raw_reason, str) and re.fullmatch(r"http-[1-5][0-9]{2}", raw_reason) else ""
     note, attention = STATUS.get(status, (None, False))
     if status == "api_key":
         note = "API 키 계정이라 구독 한도가 없습니다."

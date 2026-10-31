@@ -3,6 +3,7 @@ import gzip
 import json
 import threading
 import unittest
+from unittest import mock
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -112,6 +113,18 @@ class CoreTest(unittest.TestCase):
         code, body = self.core.usage("gw")
         self.assertEqual(code, 501)
         self.assertIn("갱신 필요", body["error"])
+
+    def test_independent_usage_uses_only_independent_gateway(self):
+        """covers: USAGE-3"""
+        Gateway.routes["/api/usage/independent"] = (200, b'{"mode":"independent","providers":[]}', False)
+        Gateway.routes["/api/usage/independent?refresh=1"] = (200, b'{"mode":"independent","providers":[],"refreshed":true}', False)
+        self.assertEqual(self.core.usage("gw", independent=True)[1]["mode"], "independent")
+        self.assertTrue(self.core.usage("gw", force=True, independent=True)[1]["refreshed"])
+        rows = {r["id"]: r for r in self.core.usage_all(independent=True)["devices"]}
+        self.assertEqual(rows["gw"]["mode"], "independent")
+        self.assertEqual(rows["down"]["status"], 502)
+        del Gateway.routes["/api/usage/independent"]
+        self.assertEqual(self.core.usage("gw", independent=True)[0], 501)
 
     def test_no_redirect(self):
         # 장악된 게이트웨이가 core 를 자기 자신(루프백)의 /api/orca 로 보내도 따라가지 않는다
@@ -233,6 +246,20 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(Gateway.posted, ("/api/orca/account?slot=2", "usage-account"))
         self.core.state["gw"].update(fails=1, error="timed out")  # 폴링 실패 중이면 묻지 않고 바로 502
         self.assertEqual(self.get("/api/devices/usage")[1]["devices"][0]["status"], 502)
+
+    def test_independent_usage_routes_are_core_only_and_never_fall_back(self):
+        """covers: USAGE-3"""
+        Gateway.routes["/api/usage/independent"] = (200, b'{"mode":"independent","providers":[]}', False)
+        Gateway.routes["/api/usage/independent?refresh=1"] = (200, b'{"mode":"independent","providers":[],"refreshed":true}', False)
+        self.assertEqual(self.get("/api/devices/gw/usage?independent=1")[1]["mode"], "independent")
+        self.assertEqual(self.get("/api/devices/usage?independent=1")[1]["devices"][0]["mode"], "independent")
+        self.assertEqual(self.get("/api/usage/independent")[0], 403)
+        self.assertEqual(self.get("/api/devices/usage?independent=1&refresh=1")[0], 403)
+        self.assertTrue(self.get("/api/devices/usage?independent=1&refresh=1", {"X-Jarvis-Action": "usage-refresh"})[1]["devices"][0]["refreshed"])
+        with mock.patch.object(server, "client_kind", return_value="tailnet"), \
+                mock.patch.object(config, "CORE", ["127.0.0.1"]), \
+                mock.patch.object(server.independent_usage, "read", return_value={"mode": "independent", "providers": []}):
+            self.assertEqual(self.get("/api/usage/independent")[1]["mode"], "independent")
 
     def test_viewers(self):
         cls = server.make_handler(FakeCollector(), self.core)

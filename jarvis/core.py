@@ -240,9 +240,10 @@ class Core:
             out = list(pool.map(one, others))
         return out + [one(i) for i in self.devices if i in mine]
 
-    def usage(self, i, force=False):
+    def usage(self, i, force=False, independent=False):
         """AI 구독 사용량: 그 게이트웨이 GET /api/orca/usage. 모아 두지 않는다(계정 이메일이 들어 있다)."""
-        req = urllib.request.Request(self.devices[i]["url"] + "/api/orca/usage" + ("?refresh=1" if force else ""))
+        path = "/api/usage/independent" if independent else "/api/orca/usage"
+        req = urllib.request.Request(self.devices[i]["url"] + path + ("?refresh=1" if force else ""))
         return self._ask(i, req, USAGE_TIMEOUT_S, "사용량 조회를")
 
     def usage_login(self, i, provider):
@@ -262,7 +263,7 @@ class Core:
                                      data=b"", method="POST", headers={"X-Jarvis-Action": "usage-account"})
         return self._ask(i, req, SWITCH_TIMEOUT_S, "계정 전환을")
 
-    def usage_all(self, force=False):
+    def usage_all(self, force=False, independent=False):
         """모든 기기의 사용량을 동시에 묻는다. 한 대가 느리거나 실패해도 나머지는 그대로 준다."""
         ids = list(self.devices)
 
@@ -271,7 +272,7 @@ class Core:
                 host = (self.state[i]["summary"] or {}).get("host")
                 err = self.state[i]["fails"] and self.state[i]["error"]
             # 폴링이 실패 중인 기기(꺼진 tailnet 피어)는 묻지 않는다. 물으면 70초를 기다려 섹션 전체가 늦게 뜬다
-            code, body = (502, {"error": f"{i} 에 닿지 못했습니다: {err}"}) if err else self.usage(i, force)
+            code, body = (502, {"error": f"{i} 에 닿지 못했습니다: {err}"}) if err else self.usage(i, force, independent)
             return {**(body if isinstance(body, dict) else {"error": str(body)}), "id": i, "host": host, "status": code}
 
         with ThreadPoolExecutor(max_workers=max(1, min(16, len(ids)))) as pool:

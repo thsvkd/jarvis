@@ -38,6 +38,33 @@ SNAP = {
 
 
 class NormalizeTest(unittest.TestCase):
+    def test_grok_email_from_usage_provenance_without_leaking_other_metadata(self):
+        """covers: USAGE-2"""
+        snap = {"rateLimits": {
+            "grok": {"status": "ok", "weekly": W(13), "usageMetadata": {
+                "source": "oauth", "authProvenance": "grok@example.com (SuperGrok)",
+                "credentialSource": "secret-token"}},
+            "antigravity": {"status": "ok", "weekly": W(22), "usageMetadata": {"source": "cli"}},
+        }}
+        result = {p["id"]: p["accounts"][0] for p in orca_usage.normalize(snap)}
+        self.assertEqual(result["grok"]["label"], "grok@example.com")
+        self.assertEqual(result["antigravity"]["label"], "기본 계정")
+        self.assertNotIn("secret-token", json.dumps(result))
+        self.assertNotIn("SuperGrok", json.dumps(result))
+
+    def test_grok_does_not_treat_account_ids_or_other_sources_as_email(self):
+        """covers: USAGE-2"""
+        for source, provenance in (("oauth", "account-id (Pro)"), ("oauth", "secret@token example"),
+                                   ("oauth", "x" * 200 + "@example.com"),
+                                   ("cli", "wrong@example.com (Pro)"), ("oauth", None)):
+            with self.subTest(source=source, provenance=provenance):
+                snap = {"rateLimits": {"grok": {"status": "ok", "weekly": W(1),
+                        "usageMetadata": {"source": source, "authProvenance": provenance}}}}
+                self.assertEqual(orca_usage.normalize(snap)[0]["accounts"][0]["label"], "기본 계정")
+        snap = {"rateLimits": {"grok": {"status": "error", "usageMetadata": {
+            "source": "oauth", "authProvenance": "old@example.com"}}}}
+        self.assertEqual(orca_usage.normalize(snap)[0]["accounts"][0]["label"], "기본 계정")
+
     def test_providers_and_accounts(self):
         p = {x["id"]: x for x in orca_usage.normalize(SNAP)}
         self.assertEqual(list(p), ["claude", "codex", "grok", "antigravity"])  # 미설정·모르는 프로바이더는 뺀다
