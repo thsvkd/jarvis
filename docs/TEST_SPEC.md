@@ -30,6 +30,14 @@
 | USAGE-2 | WHEN Grok·Antigravity 사용량에 연결된 계정 이메일을 안전하게 확인할 수 있으면 THE SYSTEM SHALL 이메일을 표시하고, 확인할 수 없으면 기본 계정으로 표시하며 자격 증명·계정 ID 는 내보내지 않는다. | `tests/test_provider_usage.py`, `tests/test_antigravity_usage.py`, `tests/test_orca_usage.py::NormalizeTest` | 부분 (Antigravity 활성 계정 s2 실측; 다른 기기와 Grok 실계정 미검증) |
 | USAGE-3 | WHEN core 홈에서 AI 구독 사용량을 조회하면 THE SYSTEM SHALL Orca 의 실행·계정 설정·응답과 독립적으로 각 프로바이더와 계정의 사용량을 표시하고, 계정·한도를 확인할 수 없는 경우 그 상태를 명시하며, 자격 증명과 계정 ID 를 내보내거나 로그인을 변경하지 않는다. | `tests/test_provider_usage.py`, `tests/test_codex_native_usage.py`, `tests/test_cswap_cached_usage.py`, `tests/test_opencode_usage.py`, `tests/test_antigravity_usage.py`, `tests/test_gemini_usage.py`, `tests/test_kimi_usage.py`, `tests/test_minimax_usage.py`, `tests/test_zcode_usage.py`, `tests/test_independent_usage.py`, `tests/test_core.py`, `tests/test_usage_summary.mjs` | 부분 (독립 API 와 웹 연결; Gemini·Kimi·MiniMax·ZCode·OpenCode Go 및 기기별 실증 미완료) |
 
+## 화면
+
+| ID | 케이스 | 테스트 | 상태 |
+| --- | --- | --- | --- |
+| UI-1 | WHEN 헤더의 탭을 고르거나 `/#<섹션>` 주소로 홈을 열면 THE SYSTEM SHALL 다시 불러오지 않고 그 섹션 하나만 표시하고(해시가 없거나 그 기기에 없는 섹션이면 개요), 섹션 밖 해시(`#svc=…`, `#main`)는 지금 탭을 유지하며, 기기·AI 사용량 탭은 core 에서만 표시한다. | `tests/test_jarvis_js.mjs`(탭 바 블록) | GREEN (단위; s2 실데이터 브라우저 확인, 360px 가로 스크롤 없음) |
+| UI-2 | WHEN 다른 화면(개요·지도·셋업)으로 옮겨 헤더를 다시 그리면 THE SYSTEM SHALL 그 기기에서 마지막으로 받은 호스트 표시를 첫 응답 전에 먼저 보여 주고, 저장된 값이 없을 때만 확인 중 문구를 보인다. | `tests/test_jarvis_js.mjs`(호스트 블록) | GREEN (단위; s2 브라우저에서 지도·셋업 첫 페인트 확인) |
+| UI-3 | WHEN 수치가 갱신되면 THE SYSTEM SHALL 숫자 텍스트를 중간 값 없이 바로 최종 값으로 바꾼다. | `tests/test_number_update.mjs` | GREEN (단위) |
+
 ## 설치기
 
 | ID | 케이스 | 테스트 | 상태 |

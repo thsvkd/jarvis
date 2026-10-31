@@ -1,4 +1,4 @@
-// bento.js 의 num(): 숫자 텍스트는 보간 없이 바로 최종 값이 된다. 실행: node tests/test_number_update.mjs
+// covers: UI-3. bento.js 의 num(): 숫자 텍스트는 보간 없이 바로 최종 값이 된다. 실행: node tests/test_number_update.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";

@@ -43,7 +43,7 @@ assert.equal(h`<!-- it's --><script>var a=${"1"}</script>`, "<!-- it's --><scrip
 assert.equal(h`<script>var s="it's"; if (a<b) {}</script><a class=${"x"}>`, `<script>var s="it's"; if (a<b) {}</script><a class=>`);
 assert.equal(h`<style>a::after{content:"'"}</style>${"<"}`, `<style>a::after{content:"'"}</style>&lt;`);
 
-// 탭 전환 회귀: 헤더(shell.js)는 페이지마다 새로 그려진다. 지난 화면에서 받은 호스트가 저장돼 있으면 "호스트 확인 중…" 으로 되돌리지 않는다
+// covers: UI-2. 탭 전환 회귀: 헤더(shell.js)는 페이지마다 새로 그려진다. 지난 화면에서 받은 호스트가 저장돼 있으면 "호스트 확인 중…" 으로 되돌리지 않는다
 {
   // 어떤 속성이든 받는 가짜 DOM 노드. 헤더 템플릿의 data-sh 노드만 쓰는 값(innerHTML)을 가진다.
   const node = (own = {}) => new Proxy(function () {}, {
@@ -67,7 +67,7 @@ assert.equal(h`<style>a::after{content:"'"}</style>${"<"}`, `<style>a::after{con
   assert.equal(mountShell({}).innerHTML, "호스트 확인 중…"); // 처음 불러올 때만 자리표시 문구
 }
 
-// 탭 바 하나: 개요 화면은 주소 해시로 섹션 하나만 보인다(shell.js 가 data-tab-on, bento.css 가 나머지를 숨긴다).
+// covers: UI-1. 탭 바 하나: 개요 화면은 주소 해시로 섹션 하나만 보인다(shell.js 가 data-tab-on, bento.css 가 나머지를 숨긴다).
 // 기기·AI 사용량 탭은 core 에서만(shell.css 가 data-core 없는 탭을 숨긴다. 지도·셋업은 개요에서 기억한 값).
 {
   const node = (own = {}) => new Proxy(function () {}, {
