@@ -109,6 +109,22 @@ code,.mono{font-family:var(--mono)}
 .su-tl li[data-off=true]{background:var(--info-soft)}
 .su-tl li[data-off=true] span{color:var(--info-ink);font-weight:var(--fw-semibold)}
 
+/* 훅: 파일 상태·settings 변경 */
+.su-files{flex-basis:100%;list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px}
+.su-files li{display:grid;grid-template-columns:10px minmax(0,1fr);gap:2px 8px;align-items:center;padding:7px 10px;border-radius:var(--r-sm);background:var(--tile-2);font-size:var(--fs-sm);min-width:0}
+.su-files code{font-size:var(--fs-xs);color:var(--text);overflow-wrap:anywhere}
+.su-files span{grid-column:2;font-size:var(--fs-xs);color:var(--tone-ink);font-weight:var(--fw-semibold)}
+.su-chg{flex-basis:100%;display:grid;gap:4px}
+.su-chg ul{list-style:none;padding:0;margin:0;display:grid;gap:3px}
+.su-chg code{font-size:var(--fs-xs);color:var(--text-2);background:var(--tile-2);padding:3px 7px;border-radius:var(--r-xs);display:inline-block;overflow-wrap:anywhere}
+/* 서랍 묶음 라벨 · 모르는 모듈 · 이전 순서 */
+.su-grp-k{margin:6px 6px -8px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);letter-spacing:var(--ls-wide);color:var(--text-3)}
+.su-gen{list-style:none;padding:0;margin:0 0 8px;display:grid;gap:10px}
+.su-gen>li>b{display:block;margin-bottom:4px}
+.su-order{list-style:none;padding:0;margin:8px 0 0;display:flex;flex-wrap:wrap;gap:6px}
+.su-order li{padding:4px 10px;border-radius:var(--r-pill);font-size:var(--fs-xs);font-weight:var(--fw-semibold);background:var(--tile-3);color:var(--text-3)}
+.su-order li[data-s=past]{background:var(--ok-soft);color:var(--ok-ink)}
+
 /* 승인 대기 */
 .su-appr{box-shadow:var(--shadow),inset 0 3px 0 var(--warn)}
 .su-appr ul{list-style:none;padding:0;margin:0;display:grid;gap:8px}
