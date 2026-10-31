@@ -49,3 +49,10 @@ ai-setup 의 AI-1~AI-6 을 옮긴 것이다. 테스트 본문은 원본과 같�
 | DOCTOR-5 | WHEN 하네스 설정 파일에 토큰·키처럼 보이는 평문 값이 있으면 THE SYSTEM SHALL 파일 위치와 키 이름만 보고하고 값은 출력하지 않는다 | `test_plaintext_secret_reports_location_and_key_but_never_the_value` 외 4건 | GREEN (단위) |
 | DOCTOR-6 | WHEN `~/.agents/skills` 에 lock 파일에 없는 스킬 디렉터리가 있으면 THE SYSTEM SHALL 그 이름을 보고하고 지우지 않는다 | `test_skill_outside_lock_is_reported_and_kept`, `test_a_skill_link_that_cannot_be_followed_is_reported_without_stopping` | GREEN (단위) |
 | DOCTOR-7 | WHEN `python -m jarvis module doctor status --json` 을 실행하면 THE SYSTEM SHALL 도구별 설치 위치·버전·설치 안내와 종류별 발견 항목을 모듈 계약의 JSON 으로 내고, 홈 경로는 `~/` 로 줄이며, plan 은 단계가 없고 apply 는 current(다른 plan_id 면 stale)다 | `tests/test_doctor_module.py` | GREEN (단위. s2 에서 읽기 전용 실행: 9초, 중복 2·시크릿 위치 1·lock 밖 스킬 15) |
+
+## AI 셋업 화면
+
+| ID | 케이스 | 테스트 | 상태 |
+| --- | --- | --- | --- |
+| SETUP-1 | WHEN core 의 AI 셋업 화면이 모듈 상태를 물으면 THE SYSTEM SHALL 기기마다 게이트웨이의 모듈 status 를 모으고(모듈별 캐시, 맞춤 헤더가 있을 때만 강제 새로고침), 닿지 않는 기기는 오류로 표시하며, 모듈 출력이 JSON 이 아니면 표준 오류의 마지막 줄을 오류로 낸다 | `tests/test_modules_api.py` | GREEN (단위) |
+| SETUP-2 | WHEN 화면에서 계획을 적용하면 THE SYSTEM SHALL viewers 와 `X-Jarvis-Action: module-apply` 가 있을 때만 그 plan_id 를 그 기기의 게이트웨이에 전달하고, 게이트웨이는 설정 core 의 요청만 받아 한 번에 하나의 apply 를 뒤에서 돌린다 | `tests/test_modules_api.py` | GREEN (단위) |

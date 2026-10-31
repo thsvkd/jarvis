@@ -62,3 +62,19 @@ jarvis 본체는 모듈을 라이브러리로 부른다. 부트스트랩과 시�
 - `status.details` 는 `{tools: [{id, kind: harness/tool, found: [PATH 순서의 실행 파일], version, hint}], findings: [{kind, message}]}` 다. `found` 의 홈 아래 경로는 `~/` 로 줄인다. `hint` 는 없는 항목의 그 플랫폼 설치 명령이다.
 - `findings.kind` 는 `duplicate`(PATH 의 중복 설치, 첫 번째가 우선), `hook_drift`(은퇴한 훅이 하네스 설정에 남음), `secret`(평문 값이 있는 파일 위치와 키 이름. 값은 내보내지 않는다), `skill`(`~/.agents/skills` 의 lock 밖 스킬. 지우지 않는다)이다. 발견 항목이 있으면 `health` 는 `degraded`, 없으면 `ok` 다.
 - 바꾸는 것이 없으므로 `plan` 은 언제나 단계가 없고, `apply` 는 그 plan_id 면 `current`, 아니면 `stale` 이다. `uninstall` 은 지울 것이 없다.
+
+## AI 셋업 화면
+
+core 홈의 AI 셋업 화면(디자인 랩 05 의 C 안)은 기기마다 모듈 계약을 부른다. 코드는 `jarvis/modules_api.py` 다.
+
+| 경로 | 누가 | 동작 |
+| --- | --- | --- |
+| 게이트웨이 `GET /api/modules[?refresh=1]` | 설정 core 만 | 모듈마다 `status` 와 `checked_at`·`ok`, 마지막 apply 작업(`job`). status 는 모듈별로 캐시한다(orca 60초, doctor 600초). `refresh=1` 은 `X-Jarvis-Action: modules-refresh` 가 있어야 한다 |
+| 게이트웨이 `GET /api/modules/<이름>/plan` | 설정 core 만 | 그 모듈의 `plan` |
+| 게이트웨이 `POST /api/modules/<이름>/apply?plan_id=<sha256>` | 설정 core 만, `X-Jarvis-Action: module-apply` | 뒤에서 `apply --plan-id` 를 돌리고 바로 202 와 작업을 준다. 한 번에 하나만 돌리고, 진행 중이면 409 다. 끝나면 그 모듈의 status 캐시를 버린다 |
+| core `GET /api/devices/modules[?refresh=1]` | tailnet | 기기마다 위의 응답에 `id`·`host`·`status`(HTTP)를 붙여 모은다. 폴링이 실패 중인 기기는 묻지 않는다 |
+| core `GET /api/devices/<id>/modules/<이름>/plan` | tailnet | 그 기기의 plan 을 전달한다 |
+| core `POST /api/devices/<id>/modules/<이름>/apply?plan_id=…` | viewers 만, `X-Jarvis-Action: module-apply` | 그 기기에 전달한다. 화면에 보인 계획의 plan_id 만 보내므로, 그사이 계획이 바뀌었으면 apply 는 stale 이 된다 |
+
+- 게이트웨이는 모듈 명령을 하위 프로세스(`python -m jarvis module <이름> <동작> --json`)로 돌린다. 모듈 CLI 는 fd 1 을 바꾸므로 서버 스레드에서 부르지 않는다. 출력이 JSON 이 아니면 표준 오류의 마지막 줄을 `error` 로 낸다.
+- 승인 대기 목록과 휴대폰 알림(D7, O2)은 아직 없다. 지금은 viewer 가 화면에서 계획을 보고 실행을 누르는 것이 승인이다.

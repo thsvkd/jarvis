@@ -20,7 +20,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from . import __version__, cli_login, config, cswap_usage, independent_usage, orca, orca_issue, orca_update, orca_usage, self_update
+from . import __version__, cli_login, config, cswap_usage, independent_usage, modules_api, orca, orca_issue, orca_update, orca_usage, self_update
 from .core import why
 from .util import client_kind
 
@@ -69,6 +69,7 @@ def _host_only(h):
 
 def make_handler(collector, core=None):
     static_root = os.path.realpath(config.STATIC_DIR)
+    mods = modules_api.CoreModules(core) if core else None
 
     class Handler(BaseHTTPRequestHandler):
         server_version = f"jarvis/{__version__}"
@@ -159,6 +160,42 @@ def make_handler(collector, core=None):
                 return False
             return True if self.headers.get("X-Jarvis-Action") == "usage-refresh" else None
 
+        def _modules(self, path, u, head, post=False):
+            """AI 셋업 화면. 게이트웨이 /api/modules[/<이름>/(plan|apply)] 는 설정 core 만,
+            core /api/devices/modules·/api/devices/<id>/modules/<이름>/(plan|apply) 는 tailnet(apply 는 viewers 만)."""
+            parts = path.split("/")
+            force = parse_qs(u.query).get("refresh") == ["1"]
+            if force and not post and self.headers.get("X-Jarvis-Action") != "modules-refresh":
+                return self._json({"error": "X-Jarvis-Action 헤더가 필요합니다"}, head, 403)
+            if parts[2] == "modules":
+                if not self._trusted(config.CORE):
+                    return self._json({"error": "core 로 지정한 기기만 부를 수 있습니다"}, head, 403)
+                if len(parts) == 3 and not post:
+                    return self._json(modules_api.status(force), head)
+                if len(parts) == 5 and parts[4] == "plan" and not post:
+                    code, body = modules_api.plan(parts[3])
+                    return self._json(body, head, code)
+                if len(parts) == 5 and parts[4] == "apply" and post:
+                    code, body = modules_api.apply(parts[3], (parse_qs(u.query).get("plan_id") or [""])[0])
+                    return self._json(body, head, code)
+                return self._json({"error": "not found"}, head, 404)
+            if not core:
+                return self._json({"error": "not found"}, head, 404)
+            if path == "/api/devices/modules" and not post:
+                return self._json(mods.all(force), head)
+            if len(parts) != 7 or parts[4] != "modules" or not core.has(parts[3]) or parts[5] not in modules_api.module.MODULES:
+                return self._json({"error": "not found"}, head, 404)
+            dev, name, what = parts[3], parts[5], parts[6]
+            if what == "plan" and not post:
+                code, body = mods.plan(dev, name)
+                return self._json(body, head, code)
+            if what == "apply" and post:
+                if not self._trusted(config.VIEWERS, config.PROXIES):
+                    return self._json({"error": "적용은 허용된 기기(viewers)에서만 할 수 있습니다"}, head, 403)
+                code, body = mods.apply(dev, name, (parse_qs(u.query).get("plan_id") or [""])[0])
+                return self._json(body, head, code)
+            return self._json({"error": "not found"}, head, 404)
+
         def _device(self, path, u, head):
             """core: /api/devices/<id>/(snapshot|history|changes|orca|usage)."""
             parts = path.split("/")
@@ -231,7 +268,7 @@ def make_handler(collector, core=None):
             # 맞춤 헤더를 요구해 다른 사이트가 브라우저로 대신 보내지 못하게 한다(맞춤 헤더가 있으면 교차 출처 요청은
             # preflight 가 필요한데, 이 서버는 OPTIONS 에 답하지 않는다).
             if post and self.headers.get("X-Jarvis-Action") not in ("orca-issue", "orca-update", "jarvis-update", "usage-login",
-                                                                        "usage-account"):
+                                                                        "usage-account", "module-apply"):
                 return self._json({"error": "X-Jarvis-Action 헤더가 필요합니다"}, head, 403)
             u = urlsplit(self.path)
             path = unquote(u.path)
@@ -318,6 +355,8 @@ def make_handler(collector, core=None):
                             return self._json({"error": "업데이트는 허용된 기기(viewers)에서만 할 수 있습니다"}, head, 403)
                         code, body = core.orca_update(dev)
                         return self._json(body, head, code)
+                    if path.startswith("/api/modules/") or (core and path.startswith("/api/devices/") and "/modules/" in path):
+                        return self._modules(path, u, head, post=True)
                     return self._json({"error": "not found"}, head, 404)
                 if path == "/api/snapshot":
                     body, gz = collector.snapshot()
@@ -368,6 +407,9 @@ def make_handler(collector, core=None):
                     return self._json(body, head, code)
                 if core and path == "/api/devices":
                     return self._json(core.list(), head)
+                if path == "/api/modules" or path.startswith("/api/modules/") or path == "/api/devices/modules" \
+                        or (core and path.startswith("/api/devices/") and "/modules/" in path):
+                    return self._modules(path, u, head)
                 if core and path == "/api/devices/usage":
                     force = self._usage_force(u)
                     if force is None:
