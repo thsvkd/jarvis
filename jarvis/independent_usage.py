@@ -1,11 +1,11 @@
-"""Orca 상태와 별개로 사용할 수 있는 사용량 수집기를 묶는다."""
+"""Orca 상태와 별개로 사용할 수 있는 사용량 수집기를 묶는다. Orca 가 있으면 독립 수집기가 못 읽은 계정만 보충한다."""
 from concurrent.futures import ThreadPoolExecutor, wait
 import os
 import sys
 import threading
 import time
 
-from . import antigravity_usage, caam_usage, codex_native_usage, cswap_cached_usage, cswap_usage, gemini_usage, kimi_usage, minimax_usage, opencode_usage, provider_usage, zcode_usage
+from . import antigravity_usage, caam_usage, codex_native_usage, cswap_cached_usage, cswap_usage, gemini_usage, kimi_usage, minimax_usage, opencode_usage, orca_usage, provider_usage, zcode_usage
 from .util import which_local
 
 _pool = ThreadPoolExecutor(max_workers=5, thread_name_prefix="jarvis-usage")
@@ -47,6 +47,20 @@ def _claude(force):
     return cswap_cached_usage.read()
 
 
+def _orca(force):
+    """Orca 로컬 RPC 의 계정만 읽는다(cswap·caam 은 실행하지 않는다). Orca 가 없거나 실패하면 빈 목록."""
+    return orca_usage._orca(force).get("providers", [])
+
+
+def _merge(mine, orca):
+    """독립 수집 계정에 Orca 계정을 보충한다. 이메일 모르는 기본 계정만 있으면 Orca 의 이메일 계정이 같은 로그인이다."""
+    emails = {a["label"].lower() for a in mine if "@" in a["label"]}
+    extra = [o for o in orca if "@" in o["label"] and o["label"].lower() not in emails]
+    if not mine:
+        return list(orca)
+    return extra if extra and not emails else mine + extra
+
+
 def read(force=False):
     """독립 수집 결과만 반환한다. 실패 원문이나 자격 증명은 내보내지 않는다."""
     jobs = {"claude": lambda: _claude(force), "codex": _codex,
@@ -62,28 +76,35 @@ def read(force=False):
             if previous is None or (previous[1].done() and (force or now - previous[0] >= ttl)):
                 previous = _tasks[name] = (now, _pool.submit(job))
             selected[name] = previous[1]
-    wait(selected.values(), timeout=55)
+        previous = _tasks.get("orca")
+        if previous is None or (previous[1].done() and (force or now - previous[0] >= 30)):
+            previous = _tasks["orca"] = (now, _pool.submit(_orca, force))
+        orca = previous[1]
+    wait([*selected.values(), orca], timeout=55)
+    try:
+        extra = {p["id"]: p["accounts"] for p in orca.result(0)} if orca.done() else {}
+    except Exception:
+        extra = {}
     providers, unavailable = [], []
     for name, future in selected.items():
-        if not future.done():
-            unavailable.append(name)
-            continue
+        accounts, failed = [], True
         try:
-            value = future.result()
+            value = future.result(0) if future.done() else None
             if name == "claude":
                 accounts = value.get("accounts", []) if isinstance(value, dict) else []
-                if isinstance(value, dict) and value.get("error"):
-                    unavailable.append(name)
+                failed = not isinstance(value, dict) or bool(value.get("error"))
             elif name in ("opencodeGo", "antigravity", "kimi", "zcode", "gemini", "minimax"):
                 accounts = value.get("accounts", []) if isinstance(value, dict) else []
-                if not isinstance(value, dict) or value.get("status") != "ok":
-                    unavailable.append(name)
+                failed = not isinstance(value, dict) or value.get("status") != "ok"
             else:
                 accounts = value if isinstance(value, list) else []
-            if not accounts and name not in unavailable:
-                unavailable.append(name)
-            if accounts:
-                providers.append({"id": name, "name": _names[name], "accounts": accounts})
+                failed = not future.done()
         except Exception:
+            pass
+        if extra.get(name):
+            accounts = _merge(accounts, extra[name])
+        if failed and not extra.get(name) or not accounts:
             unavailable.append(name)
+        if accounts:
+            providers.append({"id": name, "name": _names[name], "accounts": accounts})
     return {"mode": "independent", "providers": providers, "unavailable": unavailable, "fetched_at": time.time()}

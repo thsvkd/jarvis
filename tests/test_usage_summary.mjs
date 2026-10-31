@@ -17,8 +17,8 @@ const account = (label, used, updated, extra = {}) => ({ label, org: null, statu
 const provider = (id, name, accounts) => ({ id, name, accounts });
 const device = (id, providers) => ({ id, host: id, status: 200, mode: "independent", unavailable: [], providers });
 const devices = [
-  device("first", [provider("claude", "Claude", [account("a@example.com", 95, 100), account("org@example.com", 10, 10, { dedupe: false }), account("기본 계정", 20, 10), account("기본 계정", 25, 10)])]),
-  device("second", [provider("claude", "Claude", [account("a@example.com", 80, 20), account("org@example.com", 12, 10, { dedupe: false }), account("기본 계정", 30, 10)]),
+  device("first", [provider("claude", "Claude", [account("a@example.com", 95, 100), account("org@example.com", 10, 10, { org: "Org A" }), account("기본 계정", 20, 10), account("기본 계정", 25, 10)])]),
+  device("second", [provider("claude", "Claude", [account("a@example.com", 80, 20), account("org@example.com", 12, 10, { org: "Org A" }), account("org@example.com", 5, 10, { org: "Org B" }), account("기본 계정", 30, 10)]),
     provider("codex", "Codex", [account("b@example.com", null, 10, { status: "error", error: "network" })])]),
   device("empty", []),
 ];
@@ -39,7 +39,9 @@ assert.match(initial, /프로바이더별 계정 사용량/);
 assert.match(initial, /Claude/);
 assert.match(initial, /Codex/);
 assert.equal((initial.match(/a@example\.com/g) || []).length, 1);
+// 같은 이메일·조직은 기기가 달라도 한 번, 조직이 다르면 따로 센다
 assert.equal((initial.match(/org@example\.com/g) || []).length, 2);
+assert.equal((initial.match(/Org A/g) || []).length, 1);
 assert.match(initial, /80%/);
 assert.doesNotMatch(initial, /95%/);
 assert.match(initial, /42%/);

@@ -7,7 +7,7 @@ import math
 import os
 import sys
 
-from . import cswap_usage, opencode_usage, provider_usage
+from . import cswap_usage, opencode_usage, orca_usage, provider_usage
 
 
 def _root():
@@ -66,11 +66,15 @@ def read():
                 fetched = None
             email = provider_usage._email(ident)
             has_usage = bool(windows or buckets)
-            result.append({"label": email, "org": None, "active": False, "status": "ok" if has_usage else "error",
-                           "error": None if has_usage else "저장된 사용량이 없습니다.",
-                           "note": "cswap 에 저장된 마지막 값입니다." if has_usage else None, "attention": False,
+            # 화면은 이메일+조직 이름으로 같은 계정을 묶는다. Orca 경로와 같은 규칙으로 개인 조직("<email>'s Organization")은 None.
+            # 조직 UUID 는 내보내지 않는다
+            org = ident.get("organizationName")
+            org = orca_usage.org(org[:80], email) if isinstance(org, str) and org else None
+            result.append({"label": email, "org": org, "active": False,
+                           "status": "ok" if has_usage else "error",
+                           "error": None if has_usage else "저장된 사용량이 없습니다.", "note": None, "attention": False,
                            "failure": None, "plan": None, "updated_at": fetched, "windows": windows, "buckets": buckets,
-                           "extra": None, "credits": None, "source": "cswap-cache", "dedupe": not bool(ident.get("organizationUuid"))})
+                           "extra": None, "credits": None, "source": "cswap-cache"})
         return {"accounts": result} if result else None
     except (OSError, ValueError, TypeError):
         return None

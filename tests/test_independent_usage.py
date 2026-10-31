@@ -8,8 +8,43 @@ from jarvis import independent_usage, orca_rpc
 
 
 class IndependentUsageTest(unittest.TestCase):
+    def setUp(self):
+        # 실제 기기의 Orca 를 읽지 않는다. Orca 보충을 보는 테스트만 따로 값을 준다
+        patcher = mock.patch.object(independent_usage, "_orca", return_value=[])
+        self.orca = patcher.start()
+        self.addCleanup(patcher.stop)
+
     def tearDown(self):
         independent_usage._tasks.clear()
+
+    def test_orca_fills_what_independent_readers_cannot_see(self):
+        """covers: USAGE-3"""
+        row = lambda label, used=10: {"label": label, "org": None, "active": True, "status": "ok", "windows": [{"key": "weekly", "used": used, "resets_at": None}], "buckets": []}
+        self.orca.return_value = [
+            {"id": "codex", "accounts": [row("codex@example.com")]},
+            {"id": "grok", "accounts": [row("기본 계정")]},
+            {"id": "antigravity", "accounts": [row("기본 계정")]},
+            {"id": "claude", "accounts": [row("c@example.com"), row("other@example.com")]},
+        ]
+        empty = {"status": "unavailable", "accounts": []}
+        with mock.patch.object(independent_usage, "_claude", return_value={"accounts": [row("c@example.com", 50)]}), \
+                mock.patch.object(independent_usage, "_codex", return_value=[row("기본 계정")]), \
+                mock.patch.object(independent_usage, "_caam", return_value=[]), \
+                mock.patch.object(independent_usage, "_opencode", return_value=empty), \
+                mock.patch.object(independent_usage.antigravity_usage, "read", return_value={"status": "ok", "accounts": [row("a@example.com")]}), \
+                mock.patch.object(independent_usage.gemini_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.kimi_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.minimax_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.zcode_usage, "read", return_value=empty):
+            data = independent_usage.read(force=True)
+        got = {p["id"]: [a["label"] for a in p["accounts"]] for p in data["providers"]}
+        self.assertEqual(got["codex"], ["codex@example.com"])  # 이메일 모르는 기본 계정은 Orca 의 같은 로그인으로 바꾼다
+        self.assertEqual(got["grok"], ["기본 계정"])  # 독립 수집이 못 읽은 프로바이더는 Orca 로 채운다
+        self.assertEqual(got["antigravity"], ["a@example.com"])  # 이메일을 아는 독립 값은 그대로 둔다
+        self.assertEqual(got["claude"], ["c@example.com", "other@example.com"])  # 같은 이메일은 독립 값, Orca 에만 있는 계정은 더한다
+        self.assertEqual(data["providers"][0]["accounts"][0]["windows"][0]["used"], 50)
+        self.assertNotIn("grok", data["unavailable"])
+        self.assertIn("cursor", data["unavailable"])
 
     def test_all_provider_results_are_returned_without_orca(self):
         """covers: USAGE-3"""
