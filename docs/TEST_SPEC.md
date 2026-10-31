@@ -64,6 +64,6 @@ ai-setup 의 AI-1~AI-6 을 옮긴 것이다. 테스트 본문은 원본과 같�
 | ID | 케이스 | 테스트 | 상태 |
 | --- | --- | --- | --- |
 | HOOKS-1 | WHEN 훅 모듈의 status·plan 을 실행하면 THE SYSTEM SHALL 홈 아래 아무것도 쓰지 않고, 필요한 단계(trash·trash_apt·files·settings·selftest)를 계획하며(휴지통 도구는 사용자 bin 에서도 찾고, sudo 는 별도 단계로 보임), 등록된 훅 명령이 동작하지 않으면 degraded·막힘으로 보고한다 | `tests/test_hooks_module.py` | GREEN (단위. s2 실측: 게이트웨이 PATH 로도 ai-setup 이 설치한 훅을 받아들여 health=ok·단계 없음, settings·영수증 해시 그대로) |
-| HOOKS-2 | WHEN 훅 계획을 apply 하면 THE SYSTEM SHALL 막힌 단계가 있으면 아무것도 하지 않고 failed, 아니면 배포본과 다른 훅 파일만 쓰고(계획 뒤·도중에 바뀐 파일은 덮어쓰지 않음) settings.json 은 권한·훅만 병합(다른 키·사용자의 권한 모드 보존)하며, 휴지통 도구 설치 실패는 건너뛰고, 셀프테스트가 실패하면 failed, 계획이 바뀌었으면 stale 이다. 다시 plan 하면 단계가 없다 | `tests/test_hooks_module.py` | GREEN (단위) |
+| HOOKS-2 | WHEN 훅 계획을 apply 하면 THE SYSTEM SHALL 막힌 단계가 있으면 아무것도 하지 않고 failed, 아니면 배포본과 다른 훅 파일만 쓰고(계획 뒤·도중에 바뀐 파일은 덮어쓰지 않음) settings.json 은 권한·훅만 병합(다른 키·사용자의 권한 모드 보존)하며, 휴지통 도구 설치 실패는 건너뛰고, 셀프테스트가 실패하면 failed, 계획이 바뀌었으면 stale 이다. 다시 plan 하면 단계가 없다 | `tests/test_hooks_module.py` | GREEN (단위. 1.4.2 실측: core AI 셋업 API 를 viewer(kgolf)에서 불러 thsvkd-ubuntu-1·thsvkd-kgolf-macmini·kgolf(Windows) 의 옛 판 훅을 갱신, 셋 다 done·셀프테스트 5건 통과, 다시 plan 하면 단계 없음) |
 | HOOKS-3 | WHEN `~/.claude/hooks` 에 설치 기록에 없는 같은 이름 파일이 있으면 THE SYSTEM SHALL 그 파일을 덮어쓰지도 영수증에 넣지도 않고 막힘으로 보고한다(다른 파일이 모두 최신이어도, 몇 번을 apply 해도) | `tests/test_hooks_module.py` | GREEN (단위) |
 | HOOKS-4 | WHEN 훅을 uninstall 하면 THE SYSTEM SHALL dry-run 의 plan_id 가 맞을 때만 기록한 파일과 설치가 넣은 settings 항목만 지우고 영수증의 다른 단계 기록은 남긴다 | `tests/test_hooks_module.py` | GREEN (단위) |
