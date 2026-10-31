@@ -113,6 +113,7 @@ node tools/check-home.mjs http://100.64.0.2:9300 /tmp/jarvis-home-check
 기존 Bento의 디자인과 렌더러를 재사용하며 콘텐츠 순서·탭·접기만 달리한다. 운영 홈은 기존 주소 `/`에 있다.
 같은 Jarvis 서버에서 제공하므로 LAN·Tailnet 접근 제한도 동일하다. [시안별 설계·검증 방법](static/lab/README.md).
 `/lab/usage/` 는 랩 04(AI 구독 사용량 배치 A·B·C, 샘플 데이터·시뮬레이션 새로고침)다. 운영 화면은 C 를 골라 자세히 모드를 더했다.
+`/lab/setup/` 은 랩 05(AI 셋업: 모듈 상태 → 계획 → 승인 → 실행 → 결과, 배치 A·B·C, 샘플 데이터·시뮬레이션 실행)다. 운영 화면은 C(할 일 먼저 + 기기 서랍)를 고른다.
 
 ```sh
 node tools/check-lab.mjs http://100.64.0.2:9300 /tmp/jarvis-lab-check

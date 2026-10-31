@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark"><title>Jarvis 디자인 랩 05 · AI 셋업</title>
+<script src="/app/theme-init.js"></script><script src="/lab/setup/theme.js"></script>
+<link rel="icon" href="/shared/favicon.svg"><link rel="stylesheet" href="/app/tokens.css"><link rel="stylesheet" href="/app/shell.css"><link rel="stylesheet" href="/app/bento.css"><link rel="stylesheet" href="/lab/gallery.css"><link rel="stylesheet" href="/lab/setup/setup.css">
+<script defer src="/shared/jarvis.js"></script><script defer src="/app/shell.js"></script><script defer src="/lab/setup/gallery.js"></script>
+</head>
+<body>
+<a class="skip" href="#designs">시안 목록으로 건너뛰기</a>
+<header id="jarvis-shell" data-page="home"></header>
+<nav class="lab-top wrap"><span>디자인 랩 05 · AI 셋업</span><a href="/" target="_blank" rel="noopener noreferrer">현재 운영 화면 열기 ↗</a></nav>
+<main class="wrap">
+<section class="intro">
+  <div><p class="eyebrow">JARVIS MODULES · AI SETUP</p><h1>기기마다, 모듈마다, 계획 하나씩.</h1><p class="lead"><strong>ai-setup 에서 옮겨 오는 모듈을 core 홈에서 보고 실행하는 세 가지 배치입니다.</strong><br>모두 같은 샘플 데이터(기기 9대 · Orca·doctor 와 아직 ai-setup 이 관리하는 모듈 5개)를 사용합니다.</p></div>
+  <aside class="brief"><span class="stamp">DESIGN LAB / 05</span><h2>이번 랩의 질문</h2><p>기기를 기준으로 볼까요, 모듈을 기준으로 볼까요,<br>아니면 할 일과 승인부터 볼까요?</p><ul><li>상태</li><li>계획(위험 등급·막힌 단계·plan_id)</li><li>승인 대기</li><li>결과 다섯 가지</li></ul><p class="su-muted su-src">계약: <code>docs/SPEC.md</code> 모듈 계약 · 승인: 흡수 문서 D4·D7</p></aside>
+</section>
+<section class="reading"><span>같은 조건으로 비교하기</span><p><b>상태 확인 → 계획 미리 보기 → 실행(또는 승인) → 결과</b>를 각 시안에서 해 보세요. 결과는 기기마다 정해 두었습니다: <b>s2</b> 이미 최신 · <b>pit5·pi5-s3·cm5-1</b> 완료(승인 필요) · <b>thsvkd-ubuntu-1</b> 보류(열린 터미널, 다시 시도하면 완료) · <b>kgolf</b> 계획 바뀜(다시 세우면 이미 최신) · <b>thsvkd-kgolf-macmini</b> 실패(막힌 단계). thsvkd-mac·thsvkd-win 은 연결되지 않습니다.</p><a href="#feedback">선택·의견 남기기 ↓</a></section>
+<section id="designs" aria-labelledby="designs-title"><div class="section-head"><div><p class="eyebrow">THREE LAYOUTS</p><h2 id="designs-title">같은 계약, 다른 출발점.</h2></div><p id="favorite" aria-live="polite">시안을 하나 골라 주세요.</p></div><div id="cards" class="cards su-cards"></div></section>
+<section id="feedback" class="recommend" aria-labelledby="fb-title"><p class="eyebrow">YOUR PICK</p><h2 id="fb-title">선택과 의견</h2><p>선택과 의견은 <b>이 브라우저의 localStorage</b>에만 저장됩니다(서버에 보내지 않음). 아래 요약을 복사해 대화창에 붙여 주세요.</p><textarea id="fbOut" class="su-fb" readonly rows="7" aria-label="선택·의견 요약"></textarea><div class="actions"><button type="button" class="primary" id="fbCopy">요약 복사</button><button type="button" class="save" id="fbReset">모두 지우기</button><span class="dev-note" id="fbNote" role="status"></span></div></section>
+</main><footer><span>Jarvis / Design Lab 05</span><span>탐색용 시안 · 샘플 데이터 · 서버 설정을 변경하지 않습니다</span><a href="/">현재 운영 화면</a></footer>
+</body></html>

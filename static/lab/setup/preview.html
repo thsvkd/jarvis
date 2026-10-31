@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark"><title>AI 셋업 · 시안 미리보기</title>
+<script src="/app/theme-init.js"></script><script src="/lab/setup/theme.js"></script>
+<link rel="icon" href="/shared/favicon.svg"><link rel="stylesheet" href="/app/tokens.css"><link rel="stylesheet" href="/app/shell.css"><link rel="stylesheet" href="/app/bento.css"><link rel="stylesheet" href="/lab/setup/setup.css">
+<script defer src="/shared/jarvis.js"></script><script defer src="/lab/setup/data.js"></script><script defer src="/lab/setup/view.js"></script>
+</head>
+<body class="su-preview">
+<nav class="su-top wrap" aria-label="랩 탐색">
+  <a href="/lab/setup/">← 시안 갤러리</a>
+  <span class="su-top-t" id="suName">시안</span>
+  <span class="su-sample">샘플 데이터 · 실행은 시뮬레이션</span>
+  <div class="seg su-theme" role="group" aria-label="화면 테마"><button type="button" data-theme-set="system">시스템</button><button type="button" data-theme-set="light">라이트</button><button type="button" data-theme-set="dark">다크</button></div>
+</nav>
+<main class="wrap">
+  <section class="sec" aria-labelledby="suTitle">
+    <div class="sec-head">
+      <h2 id="suTitle">AI 셋업</h2>
+      <p class="sec-sub" id="suSub">기기마다 jarvis 모듈의 상태·계획·실행 결과</p>
+    </div>
+    <div id="suBody"></div>
+  </section>
+</main>
+<dialog class="sheet" id="suSheet" aria-labelledby="suSheetTitle">
+  <div class="sheet-panel">
+    <div class="sheet-grab" aria-hidden="true"></div>
+    <header class="sheet-head">
+      <div class="sheet-head-main" id="suSheetHead"></div>
+      <button type="button" class="icon-btn sheet-close" data-close aria-label="닫기" autofocus><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </header>
+    <div class="sheet-body" id="suSheetBody"></div>
+  </div>
+</dialog>
+</body>
+</html>
