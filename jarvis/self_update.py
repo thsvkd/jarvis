@@ -111,6 +111,9 @@ def start(running=__version__):
         return 409, {"error": "Orca 업데이트가 끝난 뒤에 갱신하세요"}
     if orca_issue.job and orca_issue.job.get("state") == "running":
         return 409, {"error": "페어링 코드 발급이 끝난 뒤에 갱신하세요"}
+    from . import modules_api  # 적용 중에 재시작·갱신하면 설치가 반쯤 남는다
+    if modules_api.running():
+        return 409, {"error": "모듈 적용이 끝난 뒤에 갱신하세요"}
     if not _lock.acquire(blocking=False):
         return 409, {"error": "이미 갱신하고 있습니다"}
     try:

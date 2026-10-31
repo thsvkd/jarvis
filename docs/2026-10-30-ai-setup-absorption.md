@@ -120,6 +120,22 @@ jarvis `docs/TEST_SPEC.md` 에 옮길 후보다. 출처의 AI-n은 ai-setup TEST
 5. jarvis 모듈이 Windows S4U 서버의 소유 기록을 넘겨받으면, jarvis-a3 가 `orca_update._ai_setup_managed`(0dcf2de)의 보류를 지운다. 이어서 ai-setup-49 가 ai-setup 의 Orca 코드·테스트·SSoT 행을 지운다.
 6. 모든 관리 기기에 jarvis 게이트웨이를 설치하고 Orca 상태를 맞춘다(thsvkd-win 포함). grok-bot 은 관리 기기에서 뺐다.
 
+### 5.6 훅 모듈 설계 초안 (jarvis-a3, 2026-11-01, 사용자 확인 전)
+
+옮길 것: `res/hooks/danger_guard.py`·`merge_and_diff.py`·`send_to_trash.py`·`graft_sync_hidden.cjs`·`shims/rm`·`shims/RmShim.psm1`, 조각 `res/settings.json`, 테스트 `test_danger_guard`·`test_merge_and_diff`·`test_rm_shim`·`test_hook_compat`·`test_git_snapshot`(약 150건)·`RmShim.Tests.ps1`. Python·셸 파일은 그대로 옮기고(D11, 원본과 diff 로 대조), sh·ps1 설치 흐름(`setup_hooks.sh`·`setup_hooks.ps1`, `setup_common` 의 `install_hook_files`·`invoke_settings_merge`·`run_hook_self_test`)은 `jarvis/hooks_module.py` 의 계약으로 다시 쓴다.
+
+| 단계 | risk | 내용 |
+| --- | --- | --- |
+| trash | install 또는 sudo | 휴지통 도구가 없으면 `pip --user trash-cli`, 거절되면 `sudo -n apt-get install trash-cli`(POSIX 만) |
+| files | config | 배포본과 다이제스트가 다른 훅 파일만 `~/.claude/hooks` 에 쓴다. 영수증의 `hook_files` 에 없는 같은 이름 파일은 덮어쓰지 않고 막힘으로 보고한다 |
+| settings | config | `merge_and_diff` 로 `~/.claude/settings.json` 병합(권한·훅만, 나머지 키 보존, 백업). defaultMode 는 영수증에 기록된 값, 없으면 조각의 값(auto) |
+| selftest | read | 설치한 `danger_guard.py` 에 정해진 입력을 넣어 판정을 확인한다. 실패하면 apply 는 failed |
+
+- status: 배포본과 설치본의 다이제스트, settings 의 훅 등록 여부, 휴지통 도구, 마지막 셀프테스트. 다르면 `health=degraded` 와 update 계획.
+- 받아들이기: ai-setup 이 설치한 기기는 영수증(`hook_files`, 권한 기록)이 같으므로 같은 키를 읽어 이어서 관리한다(Orca 의 adopted 와 같은 방식).
+- D6: `danger_guard` 는 표준 라이브러리만 쓰는 형태를 유지한다. jarvis 작업 판정이 같은 엔진을 import 하는 것은 이 이식 뒤의 일이다.
+- 확인할 것: (1) Windows(RmShim·PowerShell 프로필)를 같은 단계에서 옮길지, POSIX 먼저 옮길지. (2) 이미 설치된 기기의 훅을 jarvis 가 갱신할 때 승인 정책(config 는 승인). (3) 설치기(`install.sh`)의 모듈 목록에 훅을 넣어 새 Mac 에서 바로 설치할지.
+
 ## 6. 열린 문제
 
 | ID | 문제 |
@@ -206,3 +222,4 @@ jarvis `docs/TEST_SPEC.md` 에 옮길 후보다. 출처의 AI-n은 ai-setup TEST
 - 2026-10-31 jarvis-a3: thsvkd-win 에서 사용자가 서버의 터미널을 닫자 러너가 다음 확인 주기에 S4U 서버를 1.4.245 로 전환했다(K10 실측). status health=ok, 다시 plan 하면 단계 없음.
 - 2026-10-31 jarvis-a3: 사용자 결정으로 D12 순서보다 jarvis 설치기(D3)를 먼저 만들었다. `install.sh`(macOS): uv venv, 최신 릴리스 묶음(sha256 확인), 설정·LaunchAgent(없을 때만), 모듈 plan → apply. git·Homebrew 가 없는 새 Mac 을 대상으로 한다. 앞으로 옮기는 모듈은 설치기의 모듈 목록에 더한다. 테스트 `tests/test_install_sh.py` 4건(BOOT-1), 변이 5종 모두 FAIL. thsvkd-kgolf-macmini 의 임시 폴더에서 Mac 도구 부분만 확인했다.
 - 2026-10-31 jarvis-a3: doctor 를 옮겼다. `jarvis/modules/doctor/doctor.py`(원본에서 카탈로그·훅 조각 경로만 바꿈, 사본 `catalog.json`·`settings.json` 은 하네스·훅 모듈을 옮길 때까지 ai-setup 과 같게 유지)와 테스트 14건(`tests/test_doctor.py`, 본문 그대로, pytest 결과와 같음). 계약 층 `jarvis/doctor_module.py`: status 가 도구별 위치(홈은 `~/`)·버전·설치 안내와 종류별 발견 항목(duplicate·hook_drift·secret·skill)을 내고, plan 은 단계가 없다. 테스트 4건(DOCTOR-1·7), 변이 4종 모두 FAIL. s2 읽기 전용 실행 9초. 사용자 결정으로 core 홈의 모듈 화면을 디자인 랩 05(`/lab/setup/`)로 설계한다.
+- 2026-11-01 jarvis-a3: 모듈 API(50adb31)를 별도 컨텍스트(opus, 보안 리뷰어)에서 적대적으로 리뷰했다. 높음 0, 중간 5, 낮음 7. 반영: M1 apply 단계 오류의 시간 초과는 명령 이름만, 나머지는 `redact_reason`, viewers 가 아니면 doctor 세부·작업 결과 문구를 뺌. M2 모듈 적용과 jarvis 갱신·Orca 업데이트·페어링 발급이 서로 409, 진행 표시 파일로 재시작 뒤 interrupted. M3 core 계획은 viewers 만, HEAD 는 실행하지 않음, 게이트웨이 계획 10초 캐시. M4 적용 요청·시작·끝을 로그 한 줄로 남김(승인자 식별·기록 위치는 O5 로 남음). M5 헤더 값 정확히 확인, viewers 아닌 tailnet·다른 헤더 값 테스트. L2 JSON 아닌 출력은 종료 코드만, L3 plan_id fullmatch, L4 id 가 modules 인 기기 경로, L6 출력을 임시 파일로. 남긴 것: L5(status·job 의 순간 불일치, 다음 폴링에 바로잡힘), L7(페어링 주소·로그인 셸 환경이 plan_id 에 없음, 같은 호스트명 기기), 서비스 재시작이 apply 하위 프로세스를 함께 끝내는 것(KillMode). 테스트 12건, 변이 8종 모두 FAIL, 전체 465건 OK.

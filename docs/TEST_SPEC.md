@@ -54,5 +54,5 @@ ai-setup 의 AI-1~AI-6 을 옮긴 것이다. 테스트 본문은 원본과 같�
 
 | ID | 케이스 | 테스트 | 상태 |
 | --- | --- | --- | --- |
-| SETUP-1 | WHEN core 의 AI 셋업 화면이 모듈 상태를 물으면 THE SYSTEM SHALL 기기마다 게이트웨이의 모듈 status 를 모으고(모듈별 캐시, 맞춤 헤더가 있을 때만 강제 새로고침), 닿지 않는 기기는 오류로 표시하며, 모듈 출력이 JSON 이 아니면 표준 오류의 마지막 줄을 오류로 낸다 | `tests/test_modules_api.py` | GREEN (단위) |
-| SETUP-2 | WHEN 화면에서 계획을 적용하면 THE SYSTEM SHALL viewers 와 `X-Jarvis-Action: module-apply` 가 있을 때만 그 plan_id 를 그 기기의 게이트웨이에 전달하고, 게이트웨이는 설정 core 의 요청만 받아 한 번에 하나의 apply 를 뒤에서 돌린다 | `tests/test_modules_api.py` | GREEN (단위) |
+| SETUP-1 | WHEN core 의 AI 셋업 화면이 모듈 상태를 물으면 THE SYSTEM SHALL 기기마다 게이트웨이의 모듈 status 를 모으고(모듈별 캐시, 맞춤 헤더가 있을 때만 강제 새로고침), 닿지 않는 기기는 오류로 표시하며, viewers 가 아닌 기기에는 doctor 세부·작업 결과 문구를 빼고 주고, 모듈 출력이 JSON 이 아니면 종료 코드만 오류로 낸다 | `tests/test_modules_api.py` | GREEN (단위) |
+| SETUP-2 | WHEN 화면에서 계획을 보거나 적용하면 THE SYSTEM SHALL viewers 만 계획을 받고, viewers 와 정확한 `X-Jarvis-Action: module-apply` 가 있을 때만 그 plan_id 를 그 기기의 게이트웨이에 전달하며, 게이트웨이는 설정 core 의 요청만 받아 한 번에 하나의 apply 를 뒤에서 돌린다(다른 적용·갱신·발급과 서로 배제, 재시작으로 끊긴 적용은 interrupted, 오류 문구에 페어링 링크를 남기지 않음) | `tests/test_modules_api.py` | GREEN (단위) |

@@ -103,6 +103,9 @@ def start(scope, address, port):
         if orca_update.job and orca_update.job.get("state") == "running":
             return 409, {"error": "Orca 업데이트가 끝난 뒤에 발급하세요", "update": orca_update.snapshot()}
         from . import self_update  # 받은 뒤 재시작하면 발급이 끊긴다
+        from . import modules_api  # 적용 중에 재시작·갱신하면 설치가 반쯤 남는다
+        if modules_api.running():
+            return 409, {"error": "모듈 적용이 끝난 뒤에 발급하세요"}
         if self_update._lock.locked():
             return 409, {"error": "jarvis 갱신이 끝난 뒤에 발급하세요"}
         if job and job["state"] == "failed" and time.time() - job["finished_at"] < COOLDOWN_S:

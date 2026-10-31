@@ -667,6 +667,9 @@ def start(expect=None):
         if orca_issue.job and orca_issue.job.get("state") == "running":
             return 409, {"error": "페어링 코드 발급이 끝난 뒤에 업데이트하세요", "issue": orca_issue.job}
         from . import self_update  # 받은 뒤 재시작하면 이 작업이 끊긴다
+        from . import modules_api  # 적용 중에 재시작·갱신하면 설치가 반쯤 남는다
+        if modules_api.running():
+            return 409, {"error": "모듈 적용이 끝난 뒤에 업데이트하세요"}
         if self_update._lock.locked():
             return 409, {"error": "jarvis 갱신이 끝난 뒤에 업데이트하세요"}
         if not _lock_file():

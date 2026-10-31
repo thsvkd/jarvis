@@ -70,11 +70,13 @@ core 홈의 AI 셋업 화면(디자인 랩 05 의 C 안)은 기기마다 모듈 
 | 경로 | 누가 | 동작 |
 | --- | --- | --- |
 | 게이트웨이 `GET /api/modules[?refresh=1]` | 설정 core 만 | 모듈마다 `status` 와 `checked_at`·`ok`, 마지막 apply 작업(`job`). status 는 모듈별로 캐시한다(orca 60초, doctor 600초). `refresh=1` 은 `X-Jarvis-Action: modules-refresh` 가 있어야 한다 |
-| 게이트웨이 `GET /api/modules/<이름>/plan` | 설정 core 만 | 그 모듈의 `plan` |
-| 게이트웨이 `POST /api/modules/<이름>/apply?plan_id=<sha256>` | 설정 core 만, `X-Jarvis-Action: module-apply` | 뒤에서 `apply --plan-id` 를 돌리고 바로 202 와 작업을 준다. 한 번에 하나만 돌리고, 진행 중이면 409 다. 끝나면 그 모듈의 status 캐시를 버린다 |
-| core `GET /api/devices/modules[?refresh=1]` | tailnet | 기기마다 위의 응답에 `id`·`host`·`status`(HTTP)를 붙여 모은다. 폴링이 실패 중인 기기는 묻지 않는다 |
-| core `GET /api/devices/<id>/modules/<이름>/plan` | tailnet | 그 기기의 plan 을 전달한다 |
+| 게이트웨이 `GET /api/modules/<이름>/plan` | 설정 core 만 | 그 모듈의 `plan`. 10초 동안 캐시해 몰린 요청도 하위 프로세스 하나로 처리한다 |
+| 게이트웨이 `POST /api/modules/<이름>/apply?plan_id=<sha256>` | 설정 core 만, `X-Jarvis-Action: module-apply` | 뒤에서 `apply --plan-id` 를 돌리고 바로 202 와 작업을 준다. 한 번에 하나만 돌리고, 다른 적용·jarvis 갱신·Orca 업데이트·페어링 발급이 진행 중이면 409 다(그 작업들도 적용 중에는 409). 시작할 때 `module-apply.json` 표시를 남겨, 적용 중 재시작하면 다음 조회의 작업이 `interrupted` 다. 끝나면 그 모듈의 status·plan 캐시를 버린다 |
+| core `GET /api/devices/modules[?refresh=1]` | tailnet | 기기마다 위의 응답에 `id`·`host`·`status`(HTTP)를 붙여 모은다. 폴링이 실패 중인 기기는 묻지 않는다. viewers 가 아니면(`full: false`) 모듈은 `module·installed·owned·version·latest·health·checked_at·ok·error` 만, 작업은 상태와 결과 종류만 준다(doctor 의 시크릿 위치·경로, 결과 문구는 viewers 만) |
+| core `GET /api/devices/<id>/modules/<이름>/plan` | viewers 만 | 그 기기의 plan 을 전달한다 |
 | core `POST /api/devices/<id>/modules/<이름>/apply?plan_id=…` | viewers 만, `X-Jarvis-Action: module-apply` | 그 기기에 전달한다. 화면에 보인 계획의 plan_id 만 보내므로, 그사이 계획이 바뀌었으면 apply 는 stale 이 된다 |
 
-- 게이트웨이는 모듈 명령을 하위 프로세스(`python -m jarvis module <이름> <동작> --json`)로 돌린다. 모듈 CLI 는 fd 1 을 바꾸므로 서버 스레드에서 부르지 않는다. 출력이 JSON 이 아니면 표준 오류의 마지막 줄을 `error` 로 낸다.
+- 게이트웨이는 모듈 명령을 하위 프로세스(`python -m jarvis module <이름> <동작> --json`)로 돌리고 출력은 임시 파일로 받는다. 모듈 CLI 는 fd 1 을 바꾸므로 서버 스레드에서 부르지 않는다. 출력이 JSON 이 아니면 종료 코드만 `error` 로 내고 표준 오류의 마지막 줄은 게이트웨이 로그에만 남긴다.
+- HEAD 요청은 점검·계획을 돌리지 않는다. 적용 요청(core: viewer IP·기기·모듈·plan_id 앞 12자, 게이트웨이: 시작·끝)은 로그에 한 줄씩 남긴다. 결과 본문과 페어링 값은 남기지 않는다.
+- 모듈 apply 의 단계 오류 문구는 페어링 링크를 가리고(`redact_reason`), 시간 초과는 명령 이름과 시간만 적는다(argv 에 페어링 링크가 들어갈 수 있다).
 - 승인 대기 목록과 휴대폰 알림(D7, O2)은 아직 없다. 지금은 viewer 가 화면에서 계획을 보고 실행을 누르는 것이 승인이다.

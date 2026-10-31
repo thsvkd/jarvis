@@ -9,6 +9,7 @@ import importlib.util
 import os
 import platform
 import socket
+import subprocess
 import sys
 import time
 
@@ -247,8 +248,10 @@ def apply(plan_id):
                 result, message = _linger(step)
             else:
                 result, message = "failed", "알 수 없는 단계"
+        except subprocess.TimeoutExpired as e:  # 문자열에 argv 전체(페어링 링크 포함)가 들어간다
+            result, message = "failed", f"{os.path.basename(str(e.cmd[0]))} 가 {e.timeout}초 안에 끝나지 않았습니다"
         except Exception as e:
-            result, message = "failed", f"{type(e).__name__}: {e}"
+            result, message = "failed", _server_tools().redact_reason(f"{type(e).__name__}: {e}")
         results.append(_step(step, result, message))
         # 이 단계가 함께 처리한 단계(갱신·설치 뒤의 skills)도 결과에 남긴다: 승인한 단계마다 결과가 하나씩 있다
         results += [_step(s, result, f"{step['id']} 단계에서 함께 처리") for s in current["steps"]

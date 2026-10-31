@@ -67,6 +67,13 @@ def _host_only(h):
     return h.rstrip(".")
 
 
+def _modules_path(path):
+    """AI 셋업 화면 경로. id 가 modules 인 기기의 /api/devices/modules/<무엇> 은 기기 경로로 둔다."""
+    parts = path.split("/")
+    return path in ("/api/modules", "/api/devices/modules") or (len(parts) == 5 and parts[2] == "modules") \
+        or (len(parts) == 7 and parts[2] == "devices" and parts[4] == "modules")
+
+
 def make_handler(collector, core=None):
     static_root = os.path.realpath(config.STATIC_DIR)
     mods = modules_api.CoreModules(core) if core else None
@@ -167,9 +174,13 @@ def make_handler(collector, core=None):
             force = parse_qs(u.query).get("refresh") == ["1"]
             if force and not post and self.headers.get("X-Jarvis-Action") != "modules-refresh":
                 return self._json({"error": "X-Jarvis-Action 헤더가 필요합니다"}, head, 403)
+            if post and self.headers.get("X-Jarvis-Action") != "module-apply":
+                return self._json({"error": "X-Jarvis-Action: module-apply 헤더가 필요합니다"}, head, 403)
             if parts[2] == "modules":
                 if not self._trusted(config.CORE):
                     return self._json({"error": "core 로 지정한 기기만 부를 수 있습니다"}, head, 403)
+                if head:  # HEAD 로 점검·계획을 돌리지 않는다
+                    return self._json({}, head)
                 if len(parts) == 3 and not post:
                     return self._json(modules_api.status(force), head)
                 if len(parts) == 5 and parts[4] == "plan" and not post:
@@ -181,19 +192,26 @@ def make_handler(collector, core=None):
                 return self._json({"error": "not found"}, head, 404)
             if not core:
                 return self._json({"error": "not found"}, head, 404)
+            if head:
+                return self._json({}, head)
+            viewer = self._trusted(config.VIEWERS, config.PROXIES)
             if path == "/api/devices/modules" and not post:
-                return self._json(mods.all(force), head)
+                return self._json(mods.all(force, full=viewer), head)
             if len(parts) != 7 or parts[4] != "modules" or not core.has(parts[3]) or parts[5] not in modules_api.module.MODULES:
                 return self._json({"error": "not found"}, head, 404)
             dev, name, what = parts[3], parts[5], parts[6]
-            if what == "plan" and not post:
+            if what not in ("plan", "apply") or (what == "apply") != post:
+                return self._json({"error": "not found"}, head, 404)
+            if not viewer:
+                return self._json({"error": "계획과 적용은 허용된 기기(viewers)에서만 할 수 있습니다"}, head, 403)
+            if what == "plan":
                 code, body = mods.plan(dev, name)
                 return self._json(body, head, code)
-            if what == "apply" and post:
-                if not self._trusted(config.VIEWERS, config.PROXIES):
-                    return self._json({"error": "적용은 허용된 기기(viewers)에서만 할 수 있습니다"}, head, 403)
-                code, body = mods.apply(dev, name, (parse_qs(u.query).get("plan_id") or [""])[0])
-                return self._json(body, head, code)
+            plan_id = (parse_qs(u.query).get("plan_id") or [""])[0]
+            code, body = mods.apply(dev, name, plan_id)
+            print(f"[jarvis] module apply 요청: viewer={self.client_address[0]} device={dev} module={name} "
+                  f"plan_id={plan_id[:12]} -> {code}", flush=True)
+            return self._json(body, head, code)
             return self._json({"error": "not found"}, head, 404)
 
         def _device(self, path, u, head):
@@ -355,7 +373,7 @@ def make_handler(collector, core=None):
                             return self._json({"error": "업데이트는 허용된 기기(viewers)에서만 할 수 있습니다"}, head, 403)
                         code, body = core.orca_update(dev)
                         return self._json(body, head, code)
-                    if path.startswith("/api/modules/") or (core and path.startswith("/api/devices/") and "/modules/" in path):
+                    if _modules_path(path):
                         return self._modules(path, u, head, post=True)
                     return self._json({"error": "not found"}, head, 404)
                 if path == "/api/snapshot":
@@ -407,8 +425,7 @@ def make_handler(collector, core=None):
                     return self._json(body, head, code)
                 if core and path == "/api/devices":
                     return self._json(core.list(), head)
-                if path == "/api/modules" or path.startswith("/api/modules/") or path == "/api/devices/modules" \
-                        or (core and path.startswith("/api/devices/") and "/modules/" in path):
+                if _modules_path(path):
                     return self._modules(path, u, head)
                 if core and path == "/api/devices/usage":
                     force = self._usage_force(u)
