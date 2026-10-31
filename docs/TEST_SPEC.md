@@ -21,3 +21,9 @@
 | ORCA-11 | WHEN uninstall 하면 THE SYSTEM SHALL 영수증에 기록한 패키지·스킬·서버만 지우고 나머지는 보존한다 | `tests/test_orca_module_install.py` (AI-34), `tests/test_orca_serve.py::Remove`, `tests/test_orca_module_contract.py::Apply`(받아들인 유닛·바뀐 유닛) | GREEN (단위) |
 | ORCA-12 | WHEN Orca 모듈이 jarvis 에 들어가면 THE SYSTEM SHALL ai-setup 의 `--tools orca` 와 `update-ai orca` 가 Orca 를 바꾸지 않고 jarvis 를 안내한다 | ai-setup `tests/test_stages.py::test_orca_desktop_points_to_jarvis_and_changes_nothing`, `tests/test_update_ai.py`(orca 대상 안내·exit 1), bats·Pester(`--tools`/`-Tools` 거부·영수증 보존) | GREEN (ai-setup 단위: a5a3353·2a9d5cc·b2bf4de, `scripts/test.sh` 종료 코드 0. kgolf 사본에서 안내 문구 실측) |
 | ORCA-13 | WHEN `apply` 가 받은 `--plan-id` 가 실행 직전에 다시 세운 계획과 다르면 THE SYSTEM SHALL 아무것도 실행하지 않고 `stale` 과 종료 코드 3 을 돌려준다 | `test_plan_id_is_bound_to_the_device`, `Apply::test_a_plan_id_that_no_longer_matches_runs_nothing_and_is_stale` | GREEN (단위; pi5-s3 실측에서 승인한 plan_id 로 실행) |
+
+## 설치기
+
+| ID | 케이스 | 테스트 | 상태 |
+| --- | --- | --- | --- |
+| BOOT-1 | WHEN macOS 에서 `install.sh --core <tailnet IP>` 를 실행하면 THE SYSTEM SHALL sha256 을 통과한 최신 릴리스를 풀고, 설정·LaunchAgent 를 없을 때만 만들어 띄우며, 모듈을 plan 의 plan_id 로 apply 한다. 다시 실행해도 기존 설정을 덮어쓰지 않는다. | `tests/test_install_sh.py` | 단위 GREEN (Mac 도구 부분은 thsvkd-kgolf-macmini 임시 폴더에서 확인: uv venv, 릴리스 sha256·압축 해제, plist lint. 새 Mac 전체 실행 미검증) |

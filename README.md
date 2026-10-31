@@ -207,7 +207,17 @@ s2(Linux)에서 `sys.platform` 을 darwin 으로 바꿔 크래시 없이 스냅�
 - `macmon pipe -s 1` 의 JSON 키(temp.cpu_temp_avg·gpu_usage·sys_power)
 - APFS 볼륨 목록(`/`·`/System/Volumes/Data`·`/Volumes/*` 만 남기는지), 인터페이스 이름(en0·utun·bridge)
 
-설치:
+설치(새 Mac 포함. git·Homebrew 가 없어도 된다):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh -s -- --core 100.115.245.91
+```
+
+`install.sh` 는 uv 로 Python venv(`~/.local/share/jarvis/venv`)를 만들고, 최신 릴리스 묶음을 sha256 으로 확인해 `~/Workspace/jarvis` 에 푼다.
+그다음 설정 파일과 LaunchAgent(`dev.jarvis`)를 만들고, 모듈(지금은 Orca)을 plan 으로 보인 뒤 그 plan_id 로 apply 한다.
+이미 있는 설정·LaunchAgent·저장소는 덮어쓰지 않으므로 다시 실행해도 된다. Tailscale·Orca·하네스 로그인과 core 의 `devices` 등록은 직접 한다.
+
+수동 설치:
 
 ```sh
 brew install python && python3 -m pip install psutil     # Python 3.11+ (시스템 python3 는 3.9 라 설정 파일을 못 읽는다)

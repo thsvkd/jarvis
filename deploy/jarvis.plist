@@ -21,7 +21,7 @@
   <key>WorkingDirectory</key><string>/Users/USER/Workspace/jarvis</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PATH</key><string>/Users/USER/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>PYTHONUNBUFFERED</key><string>1</string>
     <key>JARVIS_PORT</key><string>9300</string>
     <key>JARVIS_TRAY</key><string>1</string>
