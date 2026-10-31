@@ -5,7 +5,7 @@ import sys
 import threading
 import time
 
-from . import antigravity_usage, caam_usage, codex_native_usage, cswap_cached_usage, cswap_usage, gemini_usage, kimi_usage, minimax_usage, opencode_usage, orca_usage, provider_usage, zcode_usage
+from . import antigravity_usage, caam_usage, cli_login, codex_native_usage, cswap_cached_usage, cswap_usage, gemini_usage, kimi_usage, minimax_usage, opencode_usage, orca_usage, provider_usage, zcode_usage
 from .util import which_local
 
 _pool = ThreadPoolExecutor(max_workers=5, thread_name_prefix="jarvis-usage")
@@ -107,4 +107,10 @@ def read(force=False):
             unavailable.append(name)
         if accounts:
             providers.append({"id": name, "name": _names[name], "accounts": accounts})
-    return {"mode": "independent", "providers": providers, "unavailable": unavailable, "fetched_at": time.time()}
+    # Orca 경로와 같은 후속 처리: Grok 토큰 위임 갱신(grok CLI), 화면의 '다시 로그인' 버튼을 낼 CLI 목록
+    if any(a.get("failure") == "delegated-refresh-required" for p in providers if p["id"] == "grok" for a in p["accounts"]):
+        cli_login.refresh_grok()
+    body = {"mode": "independent", "providers": providers, "unavailable": unavailable, "fetched_at": time.time()}
+    if logins := cli_login.available():
+        body["logins"] = logins
+    return body

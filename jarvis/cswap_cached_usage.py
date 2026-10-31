@@ -29,6 +29,7 @@ def read():
             cache = {}
         accounts = roster.get("accounts", {}) if isinstance(roster, dict) else {}
         sequence = roster.get("sequence", []) if isinstance(roster, dict) else []
+        current = roster.get("activeAccountNumber") if isinstance(roster, dict) else None  # cswap switch 가 고친다
         cached = cache.get("accounts", {}) if isinstance(cache, dict) and cache.get("schemaVersion") == 2 else {}
         if not isinstance(accounts, dict) or not isinstance(sequence, list) or not isinstance(cached, dict):
             return None
@@ -70,7 +71,8 @@ def read():
             # 조직 UUID 는 내보내지 않는다
             org = ident.get("organizationName")
             org = orca_usage.org(org[:80], email) if isinstance(org, str) and org else None
-            result.append({"label": email, "org": org, "active": False,
+            # slot: '이 계정 사용' 버튼이 cswap switch 에 넘기는 슬롯 번호(기기마다 다르다)
+            result.append({"label": email, "org": org, "active": number == current, "slot": str(number),
                            "status": "ok" if has_usage else "error",
                            "error": None if has_usage else "저장된 사용량이 없습니다.", "note": None, "attention": False,
                            "failure": None, "plan": None, "updated_at": fetched, "windows": windows, "buckets": buckets,

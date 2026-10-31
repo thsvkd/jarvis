@@ -46,6 +46,21 @@ class CswapCachedTest(unittest.TestCase):
                 "2": {"email": "me@example.com", "organizationUuid": "u2", "lastGood": {"five_hour": {"pct": 2}}}}})
             rows = cswap_cached_usage.read()["accounts"]
         self.assertEqual([r["org"] for r in rows], [None, "Team"])
+
+    def test_rows_carry_the_slot_and_the_current_account(self):
+        """covers: USAGE-3. '이 계정 사용' 버튼에 필요한 슬롯 번호와 사용 중 계정을 cswap 상태 파일에서 읽는다"""
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(cswap_cached_usage, "_root", return_value=tmp):
+            os.mkdir(os.path.join(tmp, "cache"))
+            for name, body in (("sequence.json", {"sequence": [4, 6], "activeAccountNumber": 6, "accounts": {
+                    "4": {"email": "a@example.com"}, "6": {"email": "b@example.com"}}}),
+                    ("cache/usage.json", {"schemaVersion": 2, "accounts": {}})):
+                p = os.path.join(tmp, name)
+                with open(p, "w", encoding="utf-8") as f:
+                    json.dump(body, f)
+                os.chmod(p, 0o600)
+            with mock.patch("subprocess.run", side_effect=AssertionError("조회 명령 실행 금지")):
+                rows = cswap_cached_usage.read()["accounts"]
+        self.assertEqual([(r["slot"], r["active"]) for r in rows], [("4", False), ("6", True)])
         self.assertTrue(all(r["note"] is None and "dedupe" not in r for r in rows))
 
     def test_missing_cache_does_not_invent_usage(self):

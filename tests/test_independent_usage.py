@@ -46,6 +46,25 @@ class IndependentUsageTest(unittest.TestCase):
         self.assertNotIn("grok", data["unavailable"])
         self.assertIn("cursor", data["unavailable"])
 
+    def test_login_buttons_and_grok_refresh_follow_the_orca_path(self):
+        """covers: USAGE-3"""
+        self.orca.return_value = [{"id": "grok", "accounts": [{"label": "기본 계정", "failure": "delegated-refresh-required", "windows": [], "buckets": []}]}]
+        empty = {"status": "unavailable", "accounts": []}
+        with mock.patch.object(independent_usage, "_claude", return_value={"accounts": []}), \
+                mock.patch.object(independent_usage, "_codex", return_value=[]), \
+                mock.patch.object(independent_usage, "_caam", return_value=[]), \
+                mock.patch.object(independent_usage, "_opencode", return_value=empty), \
+                mock.patch.object(independent_usage.antigravity_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.gemini_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.kimi_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.minimax_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.zcode_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.cli_login, "available", return_value=["codex", "grok"]), \
+                mock.patch.object(independent_usage.cli_login, "refresh_grok") as refresh:
+            data = independent_usage.read(force=True)
+        self.assertEqual(data["logins"], ["codex", "grok"])
+        refresh.assert_called_once_with()
+
     def test_all_provider_results_are_returned_without_orca(self):
         """covers: USAGE-3"""
         account = {"label": "fixture@example.com"}
