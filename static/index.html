@@ -21,28 +21,16 @@
 <body>
 <a class="sh-skip" href="#main">본문으로 건너뛰기</a>
 
-<header id="jarvis-shell" data-page="home" data-sections="devices:기기,usage:AI 사용량,services:서비스,hardware:하드웨어,network:네트워크,runtime:런타임"></header>
+<header id="jarvis-shell" data-page="home"></header>
 <script src="/shared/jarvis.js"></script>
 <script src="/app/shell.js"></script>
-
-<nav class="lnav" id="lnav" aria-label="이 페이지의 섹션">
-  <div class="wrap lnav-in">
-    <a href="#overview" data-lsec="overview">개요</a>
-    <a href="#devices" data-lsec="devices">기기</a>
-    <a href="#usage" data-lsec="usage">AI 사용량</a>
-    <a href="#services" data-lsec="services">서비스<span class="lnav-n num" data-f="lnav.svc"></span></a>
-    <a href="#hardware" data-lsec="hardware">하드웨어</a>
-    <a href="#network" data-lsec="network">네트워크</a>
-    <a href="#runtime" data-lsec="runtime">런타임</a>
-  </div>
-</nav>
 
 <!-- 연결·수집 안내 띠: API 응답 없음(심각) · 응답 지연 · 일부 수집 지연(경고). 상태 변화 낭독은 공용 헤더가 한다(여기는 라이브 영역 아님) -->
 <div class="stale-banner" id="staleBanner" data-tone="crit" hidden>
   <div class="wrap"><i class="shape" aria-hidden="true"></i><p><strong data-f="stale.head">Jarvis API 가 응답하지 않아요.</strong> <span data-f="stale.msg">마지막으로 받은 데이터를 보여 주는 중이에요.</span> <a class="stale-go" id="staleGo" href="#" hidden>자기 진단 보기</a></p></div>
 </div>
 
-<main id="main" class="wrap">
+<main id="main" class="wrap" data-tabbed>
   <h1 class="sr" data-f="pageTitle">개요</h1>
 
   <div class="boot-error" id="bootError" hidden role="alert">
@@ -96,7 +84,7 @@
         <div class="collector-errors" id="collectorErrors" hidden></div>
       </article>
 
-      <section class="tile span-12 m-6 t-hwstrip" style="--i:2" aria-label="하드웨어 한눈에 — 누르면 아래 하드웨어 섹션으로">
+      <section class="tile span-12 m-6 t-hwstrip" style="--i:2" aria-label="하드웨어 한눈에 — 누르면 하드웨어 탭으로">
         <div class="hwd"><div class="hwd-row" id="hwStrip"></div></div>
       </section>
 

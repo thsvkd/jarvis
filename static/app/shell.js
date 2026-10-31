@@ -1,6 +1,6 @@
 /* Jarvis — 공용 제품 셸(헤더). 모든 페이지가 같은 머리띠를 쓴다:
- *   브랜드(Jarvis + 호스트·모델) · 주 탐색(개요 / · 네트워크 맵 /map/) · [섹션 바로가기] ·
- *   전체 상태 알약(누르면 경보 목록) · 실시간/지연/오프라인 표시 + 데이터 시각 · 접속 주소 메뉴(복사) · 테마(시스템/라이트/다크)
+ *   브랜드(Jarvis + 호스트·모델) · 전체 상태 알약(누르면 경보 목록) · 실시간/지연/오프라인 표시 + 데이터 시각 · 접속 주소 메뉴(복사) · 테마(시스템/라이트/다크)
+ *   그 아래 탭 바 한 줄: 개요 화면의 섹션(개요 · 기기 · AI 사용량 · 서비스 · 하드웨어 · 네트워크 · 런타임, /#<섹션>) · 네트워크 맵 /map/ · AI 셋업 /setup/
  *
  * ── 페이지에 붙이는 법 ───────────────────────────────────────────────────────────
  *   <head>
@@ -11,14 +11,14 @@
  *   </head>
  *   <body>
  *     <a class="sh-skip" href="#main">본문으로 건너뛰기</a>
- *     <header id="jarvis-shell" data-page="home|map|setup" [data-layout="full"] [data-sections="id:라벨,id:라벨"]></header>
+ *     <header id="jarvis-shell" data-page="home|map|setup" [data-layout="full"]></header>
  *     <script src="/shared/jarvis.js"></script>
  *     <script src="/app/shell.js"></script>              jarvis.js 바로 뒤, 페이지 스크립트보다 먼저(동기)
  *     … 본문 … <script src="/app/<page>.js"></script>   (또는 <head> 의 defer)
  *
  *   data-page      지금 페이지. 주 탐색의 aria-current 와 "경보 모두 보기" 링크를 정한다(없으면 경로로 추측)
  *   data-layout    "full" 이면 헤더 내용을 화면 폭 끝까지(지도처럼 꽉 찬 페이지)
- *   data-sections  넓은 화면(1320px↑)에서 주 탐색 옆에 보이는 섹션 바로가기. 스크롤 위치에 따라 aria-current="true"
+ *   개요 화면(home)은 주소 해시로 섹션 하나만 보인다: 해시가 가리키는 요소를 품은 .sec 에 data-tab-on(없으면 개요). reveal(el) 참고
  *
  * ── 데이터: 폴링은 페이지당 한 번 ────────────────────────────────────────────────
  *   이 파일은 JARVIS.subscribe 를 감싼다. 페이지는 지금처럼 JARVIS.subscribe(cb, opts) 를 한 번만 부르면 되고,
@@ -62,15 +62,9 @@
     (doc.body || root).insertBefore(el, doc.body ? doc.body.firstChild : null);
   }
   const PAGE = el.getAttribute("data-page") || (/^\/map(\/|$)/.test(location.pathname) ? "map" : "home");
-  const SECTIONS = (el.getAttribute("data-sections") || "")
-    .split(",").map((s) => s.trim()).filter(Boolean)
-    .map((s) => { const i = s.indexOf(":"); return i > 0 ? { id: s.slice(0, i).trim(), label: s.slice(i + 1).trim() } : null; })
-    .filter((s) => s && /^[A-Za-z][\w-]*$/.test(s.id));
 
   // ------------------------------------------------------------------ 아이콘(상수 SVG — 데이터 없음)
   const ICON = {
-    home: '<rect x="3.5" y="3.5" width="7.5" height="7.5" rx="2"/><rect x="13" y="3.5" width="7.5" height="4.5" rx="1.6"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="2"/><rect x="13" y="10" width="7.5" height="10.5" rx="2"/>',
-    map: '<circle cx="5.5" cy="6" r="2.3"/><circle cx="5.5" cy="18" r="2.3"/><circle cx="18.5" cy="12" r="2.3"/><path d="M7.8 6h2.7a3 3 0 0 1 3 3v0a3 3 0 0 0 3 3M7.8 18h2.7a3 3 0 0 0 3-3v0a3 3 0 0 1 3-3"/>',
     link: '<path d="M10 14a4.2 4.2 0 0 0 6 .2l2.8-2.8a4.2 4.2 0 0 0-6-6l-1.2 1.2"/><path d="M14 10a4.2 4.2 0 0 0-6-.2l-2.8 2.8a4.2 4.2 0 0 0 6 6l1.2-1.2"/>',
     copy: '<rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2.4"/><path d="M15.5 8.5V6.4A2.4 2.4 0 0 0 13.1 4H6.4A2.4 2.4 0 0 0 4 6.4v6.7a2.4 2.4 0 0 0 2.4 2.4h2.1"/>',
     check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
@@ -93,10 +87,17 @@
   const ic = (n, cls) => raw('<svg class="sh-ic' + (cls ? " " + cls : "") + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + ICON[n] + "</svg>");
   const MARK = raw('<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="2.5" y="2.5" width="11" height="8" rx="2.4"/><rect x="15.5" y="2.5" width="6" height="8" rx="2.4"/><rect x="2.5" y="12.5" width="6" height="9" rx="2.4"/><rect x="10.5" y="12.5" width="11" height="9" rx="2.4"/></svg>');
 
+  // 탭 바 하나: 개요 화면의 섹션 탭(sec: 섹션 id, 해시로 전환) 다음에 다른 화면(지도·셋업)
   const NAV = [
-    { id: "home", href: "/", label: "개요", icon: "home" },
-    { id: "map", href: "/map/", label: "네트워크 맵", short: "맵", icon: "map" },
-    { id: "setup", href: "/setup/", label: "AI 셋업", short: "셋업", icon: "cpu" },
+    { id: "home", href: "/#overview", label: "개요", sec: "overview" },
+    { id: "devices", href: "/#devices", label: "기기", sec: "devices" },
+    { id: "usage", href: "/#usage", label: "AI 사용량", sec: "usage" },
+    { id: "services", href: "/#services", label: "서비스", sec: "services" },
+    { id: "hardware", href: "/#hardware", label: "하드웨어", sec: "hardware" },
+    { id: "network", href: "/#network", label: "네트워크", sec: "network" },
+    { id: "runtime", href: "/#runtime", label: "런타임", sec: "runtime" },
+    { id: "map", href: "/map/", label: "네트워크 맵", short: "맵" },
+    { id: "setup", href: "/setup/", label: "AI 셋업", short: "셋업" },
   ];
   const THEMES = [
     { v: "system", label: "시스템", aria: "시스템 설정 따르기", icon: "system" },
@@ -128,8 +129,6 @@
     <span class="sh-mark" aria-hidden="true">${MARK}</span>
     <span class="sh-brand-text"><span class="sh-name"><b>Jarvis</b></span><span class="sh-host" data-sh="host">호스트 확인 중…</span></span>
   </a>
-  <nav class="sh-nav" aria-label="화면 전환">${NAV.map((n) => html`<a href="${n.href}" data-sh-nav="${n.id}"${n.id === PAGE ? raw(' aria-current="page"') : ""}>${ic(n.icon)}<span class="${"sh-tab-l" + (n.short ? " has-short" : "")}">${n.label}</span>${n.short ? html`<span class="sh-tab-s" aria-hidden="true">${n.short}</span>` : ""}</a>`)}</nav>
-  ${SECTIONS.length ? html`<nav class="sh-sections" aria-label="이 페이지의 섹션">${SECTIONS.map((s) => html`<a href="${"#" + s.id}" data-sh-sec="${s.id}">${s.label}</a>`)}</nav>` : ""}
   <div class="sh-right">
     <div class="sh-pop" data-sh-pop="alerts">
       <button type="button" class="sh-status" data-sh-tone="muted" aria-expanded="false" aria-controls="sh-alerts-pop" aria-label="전체 상태 확인 중 — 경보 목록">
@@ -159,6 +158,7 @@
     ${themeGroup(false)}
   </div>
 </div>
+<nav class="sh-nav" aria-label="화면 전환">${NAV.map((n) => html`<a href="${n.href}" data-sh-nav="${n.id}"${n.sec ? html` data-sh-sec="${n.sec}"` : ""}${n.id === PAGE ? raw(' aria-current="page"') : ""}><span class="${"sh-tab-l" + (n.short ? " has-short" : "")}">${n.label}</span>${n.short ? html`<span class="sh-tab-s" aria-hidden="true">${n.short}</span>` : ""}</a>`)}</nav>
 <p class="sh-sr" role="status" aria-live="polite" data-sh="sr"></p>`);
 
   const Q = Object.create(null);
@@ -327,35 +327,65 @@
     }
   });
 
-  // ------------------------------------------------------------------ 섹션 바로가기(스크롤 위치 표시)
-  if (SECTIONS.length) {
-    const links = Array.from(el.querySelectorAll("[data-sh-sec]"));
-    let rq = 0;
-    let current = null;
-    const spy = () => {
-      rq = 0;
-      const line = window.innerHeight * 0.35;
-      let cur = null;
-      for (const s of SECTIONS) {
-        const t = doc.getElementById(s.id);
-        if (t && t.getClientRects().length && t.getBoundingClientRect().top <= line) cur = s.id;
-      }
-      // 맨 아래까지 내렸으면 마지막 섹션(마지막 섹션이 화면보다 짧아도 표시되게)
-      if (window.innerHeight + window.scrollY >= doc.documentElement.scrollHeight - 4) {
-        const shown = SECTIONS.filter(s => doc.getElementById(s.id)?.getClientRects().length);
-        if (shown.length) cur = shown[shown.length - 1].id;
-      }
-      if (cur === current) return;
-      current = cur;
-      links.forEach((a) => setAttr(a, "aria-current", String(a.getAttribute("data-sh-sec") === cur)));
-    };
-    const req = () => { if (!rq) rq = requestAnimationFrame(spy); };
-    window.addEventListener("scroll", req, { passive: true });
-    window.addEventListener("resize", req, { passive: true });
-    if (doc.readyState === "loading") doc.addEventListener("DOMContentLoaded", req); else req();
+  // ------------------------------------------------------------------ 탭(개요 화면은 해시로 섹션 하나만 보인다)
+  //   #usage 처럼 섹션을 가리키면 그 섹션, 섹션 안 요소(#alerts · #hw-cpu)면 그것을 품은 섹션, 해시가 없으면 개요.
+  //   섹션 밖 해시(#svc=… 서비스 상세 시트, #main 건너뛰기)는 지금 탭을 그대로 둔다. 보이고 숨기기는 bento.css 가 data-tab-on 으로 한다.
+  const nav = el.querySelector(".sh-nav");
+  const navLinks = Array.from(el.querySelectorAll("[data-sh-nav]"));
+  const TABS = NAV.filter((n) => n.sec);
+  const TABBED = PAGE === "home" && !window.JarvisLab; // 랩 시안은 자기 배치를 쓴다
+  let tab = null;
+  const tabOf = (t) => { const s = t && t.closest(".sec"); return (s && TABS.find((n) => n.sec === s.id)) || null; };
+  function markNav(id) {
+    navLinks.forEach((a) => { if (a.getAttribute("data-sh-nav") === id) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
+    // 탭 바가 가로로 넘치면(좁은 화면) 지금 탭이 보이게 탭 바만 민다
+    const a = navLinks.find((x) => x.getAttribute("data-sh-nav") === id);
+    if (a && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = a.offsetLeft - (nav.clientWidth - a.offsetWidth) / 2;
+  }
+  function selectTab(n) {
+    if (n === tab) return false;
+    tab = n;
+    TABS.forEach((x) => { const s = doc.getElementById(x.sec); if (s) s.toggleAttribute("data-tab-on", x === n); });
+    markNav(n.id);
+    return true;
+  }
+  function route(moved) {
+    const h = location.hash.slice(1);
+    let t = null;
+    try { t = h ? doc.getElementById(decodeURIComponent(h)) : null; } catch (e) { /* 깨진 해시 */ }
+    const n = h ? tabOf(t) : TABS[0];
+    if (!n) { if (!tab) selectTab(TABS[0]); return; }
+    // 탭을 옮겼으면 새 탭의 맨 위(해시가 섹션 안 요소면 그 요소)에서 시작한다
+    if (selectTab(n) && moved) { if (t && t.id !== n.sec) t.scrollIntoView(); else window.scrollTo(0, 0); }
+  }
+  /** 다른 탭 안의 요소로 갈 때(개요의 경보 · 타일 → 그 섹션): 그 탭으로 바꾸고 기록에 남긴다(뒤로 가기로 돌아온다) */
+  function reveal(target) {
+    const n = TABBED ? tabOf(target) : null;
+    if (!n || n === tab) return;
+    try { history.pushState(null, "", location.pathname + location.search + "#" + n.sec); } catch (e) { /* 무시 */ }
+    selectTab(n);
+  }
+  if (TABBED) {
+    window.addEventListener("hashchange", () => route(true));
+    if (doc.readyState === "loading") doc.addEventListener("DOMContentLoaded", () => route(false)); else route(false);
+  } else markNav(PAGE);
+
+  // 기기 · AI 사용량 탭은 core 에서만 보인다(shell.css 가 data-core 없는 탭을 숨긴다). 개요 화면에서는 devices.js · usage.js 가 붙이고,
+  // 그 스크립트가 없는 화면(지도 · 셋업)은 개요에서 마지막으로 본 값을 쓴다 — 어느 화면에서든 같은 탭 바가 보이게.
+  const CORE_KEY = "jarvis.shellCore";
+  const secTabs = navLinks.filter((a) => a.hasAttribute("data-sh-sec"));
+  if (PAGE === "home") {
+    if (window.MutationObserver) new MutationObserver(() => {
+      try { localStorage.setItem(CORE_KEY, JSON.stringify(secTabs.filter((a) => a.hasAttribute("data-core")).map((a) => a.getAttribute("data-sh-sec")))); } catch (e) { /* 저장 불가 */ }
+    }).observe(nav, { subtree: true, attributeFilter: ["data-core"] });
+  } else if (!P.device) {
+    try {
+      const on = JSON.parse(localStorage.getItem(CORE_KEY));
+      if (Array.isArray(on)) secTabs.forEach((a) => a.toggleAttribute("data-core", on.includes(a.getAttribute("data-sh-sec"))));
+    } catch (e) { /* 값 없음 · 깨짐: core 전용 탭은 숨긴 채 */ }
   }
   // 지금 페이지의 탭을 다시 누르면 새로 읽지 않고 맨 위로
-  el.querySelector(".sh-nav").addEventListener("click", (e) => {
+  nav.addEventListener("click", (e) => {
     const a = e.target.closest("a[aria-current='page']");
     if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button) return;
     e.preventDefault();
@@ -427,6 +457,8 @@
   const shortUrl = (u) => String(u || "").replace(/^https?:\/\//i, "").replace(/\/$/, "");
   const isHere = (u) => { try { return new URL(u).origin === location.origin; } catch (e) { return false; } };
 
+  // 마지막으로 받은 호스트 표시(localStorage). core 에서 다른 기기(?device=)를 볼 때는 그 기기 몫으로 따로 둔다
+  const HOST_KEY = "jarvis.shellHost" + (P.device ? "." + P.device : "");
   const BASE_TITLE = document.title; // "개요 · Jarvis" → "개요 · <호스트> · Jarvis"
   function renderHost() {
     const m = S.meta || {};
@@ -434,9 +466,21 @@
     const host = m.host || h.hostname || "host";
     document.title = BASE_TITLE.replace(/Jarvis$/, host + " · Jarvis");
     const model = shortModel(h.model);
+    const title = [h.model, h.os, h.kernel ? "커널 " + h.kernel : null, h.arch].filter(Boolean).join(" · ") || host;
     P.render(Q.host, html`<b>${host}</b>${model ? " · " + model : ""}`);
-    setAttr(Q.host, "title", [h.model, h.os, h.kernel ? "커널 " + h.kernel : null, h.arch].filter(Boolean).join(" · ") || host);
+    setAttr(Q.host, "title", title);
+    const keep = JSON.stringify({ host, model, title }); // 3초 갱신마다 쓰지 않게 바뀔 때만 쓴다
+    try { if (localStorage.getItem(HOST_KEY) !== keep) localStorage.setItem(HOST_KEY, keep); } catch (e) { /* 저장 불가: 다음 화면은 처음처럼 보인다 */ }
   }
+  // 탭(개요·맵·셋업)은 페이지 전환이라 헤더를 매번 새로 그린다 — 지난 화면에서 받은 호스트를 먼저 보여 "호스트 확인 중…" 깜빡임을 없앤다.
+  // 첫 응답이 오면 renderHost 가 실제 값으로 덮는다. 저장된 값이 없을 때(첫 방문)만 자리표시 문구가 남는다.
+  try {
+    const c = JSON.parse(localStorage.getItem(HOST_KEY));
+    if (c && typeof c.host === "string") {
+      P.render(Q.host, html`<b>${c.host}</b>${c.model ? " · " + c.model : ""}`);
+      setAttr(Q.host, "title", String(c.title || c.host));
+    }
+  } catch (e) { /* 저장된 값 없음·깨짐: 자리표시 문구 유지 */ }
 
   function renderStatus() {
     const sum = S.summary || {};
@@ -1206,6 +1250,8 @@ ${href ? html`<a class="sh-pop-link" href="${href}">자기 진단 자세히 보�
     },
     /** 페이지가 정하는 경보 바로가기: (alert) => { href, label } | null. 헤더 경보 목록 각 줄에 링크로 붙는다. */
     alertLink: null,
+    /** reveal(el): 개요 화면에서 el 을 품은 섹션 탭으로 바꾼다(기록에 남김). 이미 그 탭이거나 탭 밖이면 그대로 */
+    reveal,
     // 공용 도구
     nodeName, runtimeState, STATE_L, HEALTH_L,
     LEVELS, expLevel, expCounts,

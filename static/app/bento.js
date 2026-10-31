@@ -14,7 +14,7 @@
  *  - 데이터 문자열은 전부 JARVIS.html(자동 이스케이프) 또는 textContent 로만 DOM 에 들어간다.
  *  - 상호작용하는 요소(카드 버튼·세그먼트·탭·검색창·시트)는 한 번만 만들고 값만 바꾼다(keyed).
  *    → 3초마다 갱신돼도 포커스·스크롤·열린 패널이 유지된다.
- *  - 애니메이션은 숫자 트윈(rAF, 끝나면 멈춤)과 CSS 전환뿐. 임베드·모션 줄이기면 끈다.
+ *  - 숫자 텍스트는 보간 없이 바로 최종 값으로 바뀐다. 움직임은 막대·링 같은 도형의 CSS 전환뿐이다.
  */
 (function () {
   "use strict";
@@ -142,32 +142,11 @@
     map.forEach((el, k) => { if (!seen.has(k)) { el.remove(); map.delete(k); } });
   }
 
-  // ------------------------------------------------------------------ 숫자 트윈
-  const tweens = new Map();
-  let rafId = 0;
+  // ------------------------------------------------------------------ 숫자
+  // 값은 보간 없이 바로 최종 값으로 쓴다. 수 초마다 갱신되는 실측치라 중간 값은 실제로 없던 값이고, 계속 움직이면 읽기 어렵다.
+  // 자릿수 흔들림은 .num·.big 등의 tabular-nums 가 막는다.
   function num(k, v, f) {
-    const el = elOf(k);
-    if (!el) return;
-    f = f || n0;
-    if (!isNum(v)) { tweens.delete(el); el._v = null; txt(el, f(null)); return; }
-    const from = el._v;
-    el._v = v;
-    if (!isNum(from) || from === v || calm() || document.hidden) { tweens.delete(el); txt(el, f(v)); return; }
-    tweens.set(el, { from, to: v, t0: performance.now(), f });
-    if (!rafId) rafId = requestAnimationFrame(step);
-  }
-  // 글자가 바뀌면 그 칸의 레이아웃이 다시 돈다 — 매 프레임이 아니라 90ms 마다만 쓴다(끝값은 늘 바로)
-  let tweenW = 0;
-  function step(t) {
-    rafId = 0;
-    const write = t - tweenW >= 90;
-    if (write) tweenW = t;
-    tweens.forEach((tw, el) => {
-      const k = clamp((t - tw.t0) / 650, 0, 1);
-      if (k >= 1) { txt(el, tw.f(tw.to)); tweens.delete(el); return; }
-      if (write) txt(el, tw.f(tw.from + (tw.to - tw.from) * (1 - Math.pow(1 - k, 3))));
-    });
-    if (tweens.size) rafId = requestAnimationFrame(step);
+    txt(k, (f || n0)(isNum(v) ? v : null));
   }
 
   // ------------------------------------------------------------------ 작은 조각
@@ -256,7 +235,6 @@
     txt("pageTitle", name + " 개요");
     const bits = [host.model, host.os, host.kernel ? "커널 " + host.kernel : null, host.arch, host.cores ? host.cores + "코어" : null, host.gpu_name].filter(Boolean);
     txt("hw.sub", bits.join(" · ") || "CPU · GPU · 메모리 · 온도 · 네트워크 · 저장소");
-    txt("lnav.svc", fmt.num((s.services || []).length));
     updateLive();
   }
   // 안내 띠: API 응답 없음(심각) · 응답 지연(경고) · API 는 정상인데 일부 수집기가 늦음(경고, 자기 진단 링크)
@@ -454,7 +432,7 @@
 
   // ------------------------------------------------------------------ 하드웨어 한눈에(지도 도크와 같은 부품)
   function renderHw(s) {
-    if (SH.hw) SH.hw.render($("#hwStrip"), s, { base: "", more: "아래 하드웨어 섹션에서 자세히" });
+    if (SH.hw) SH.hw.render($("#hwStrip"), s, { base: "", more: "하드웨어 탭에서 자세히" });
   }
 
   // ------------------------------------------------------------------ CPU
@@ -1454,6 +1432,7 @@
   // ------------------------------------------------------------------ 상세 시트
   const dlg = $("#sheet");
   let sheetId = null;
+  let sheetBack = ""; // 상세 시트를 열기 전의 해시(탭)
   const row = (k, v, sub) => html`<div class="row"><dt>${k}</dt><dd>${v == null || v === "" ? "–" : v}${sub ? html`<span class="sub">${sub}</span>` : ""}</dd></div>`;
   const grp = (title, body, tag) => html`<h3 class="grp-title">${title}</h3>${tag === "div" ? html`<div class="grp">${body}</div>` : html`<dl class="grp">${body}</dl>`}`;
   const yn = (b) => (b ? "예" : "아니요");
@@ -1643,6 +1622,7 @@
     if (changed) $("#sheetBody").scrollTop = 0;
     // 해시는 여는 순간에만 쓴다(3초 갱신은 건드리지 않음). 기록을 쌓지 않도록 replaceState.
     const want = "#svc=" + encodeURIComponent(id);
+    if (!/^#svc=/.test(location.hash || "")) sheetBack = location.hash; // 닫을 때 지금 탭(#services 등)으로 되돌린다
     if (!fromHash && location.hash !== want) {
       try { history.replaceState(null, "", location.pathname + location.search + want); } catch (e) { /* 무시 */ }
     }
@@ -1650,7 +1630,7 @@
   dlg.addEventListener("close", () => {
     sheetId = null;
     if (/^#svc=/.test(location.hash || "")) {
-      try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { /* 무시 */ }
+      try { history.replaceState(null, "", location.pathname + location.search + sheetBack); } catch (e) { /* 무시 */ }
     }
   });
   // 뒤로/앞으로·주소 직접 입력·다른 페이지(맵)의 /#svc= 링크
@@ -1665,6 +1645,7 @@
   // ------------------------------------------------------------------ 이동·강조
   function flash(tile) {
     if (!tile) return;
+    if (window.JarvisShell && JarvisShell.reveal) JarvisShell.reveal(tile); // 다른 탭(섹션) 안이면 그 탭으로 바꾼 뒤 스크롤
     tile.scrollIntoView({ behavior: calm() ? "auto" : "smooth", block: "start" });
     const h = tile.querySelector("h2, h3");
     if (h) { h.setAttribute("tabindex", "-1"); h.focus({ preventScroll: true }); }
@@ -1764,47 +1745,6 @@
   })();
   // 접었다 편 상세(전원 레일·브리지·터널 로그)는 열 때 바로 최신 값으로 채운다.
   ["#rails", "#bridges", "#tunErrors"].forEach((sel) => $(sel).addEventListener("toggle", () => { if (S) { renderTherm(S); renderNet(S); renderIngress(S); } }));
-
-  // ------------------------------------------------------------------ 섹션 바로가기(페이지 안)
-  // 1320px 이상에서는 공용 헤더의 섹션 링크(data-sections)가 같은 일을 한다 → 여기 막대는 CSS 로 숨고 계산도 쉰다.
-  (function bindLnav() {
-    const nav = $("#lnav");
-    if (!nav) return;
-    const sc = $(".lnav-in", nav);
-    const links = $$("a[data-lsec]", nav);
-    const mq = window.matchMedia("(max-width: 1319px)");
-    let rq = 0; let cur = null;
-    const spy = () => {
-      rq = 0;
-      if (!mq.matches || window.JarvisLab?.concept?.id === "inbox") return;
-      const line = nav.getBoundingClientRect().bottom + 40;
-      let c = links[0].getAttribute("data-lsec");
-      for (const a of links) {
-        const t = document.getElementById(a.getAttribute("data-lsec"));
-        if (t && t.getClientRects().length && t.getBoundingClientRect().top <= line) c = a.getAttribute("data-lsec");
-      }
-      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
-        const shown = links.filter(a => document.getElementById(a.dataset.lsec)?.getClientRects().length);
-        if (shown.length) c = shown[shown.length - 1].getAttribute("data-lsec");
-      }
-      if (c === cur) return;
-      cur = c;
-      links.forEach((a) => {
-        if (a.getAttribute("data-lsec") === c) a.setAttribute("aria-current", "true"); else a.removeAttribute("aria-current");
-      });
-      const a = links.find((x) => x.getAttribute("data-lsec") === c);
-      if (a && sc.scrollWidth > sc.clientWidth + 1) {
-        const ar = a.getBoundingClientRect(); const sr = sc.getBoundingClientRect();
-        if (ar.left < sr.left + 12) sc.scrollLeft += ar.left - sr.left - 12;
-        else if (ar.right > sr.right - 12) sc.scrollLeft += ar.right - sr.right + 12;
-      }
-    };
-    const req = () => { if (!rq) rq = requestAnimationFrame(spy); };
-    window.addEventListener("scroll", req, { passive: true });
-    window.addEventListener("resize", req, { passive: true });
-    if (mq.addEventListener) mq.addEventListener("change", req); else if (mq.addListener) mq.addListener(req);
-    req();
-  })();
 
   // ------------------------------------------------------------------ 구독
   const RENDER = [renderMeta, renderHero, renderAlerts, renderHw, renderMap, renderServices, renderCpu, renderGpu, renderMem, renderTherm, renderNet, renderDisk, renderIngress, renderTraffic, renderTail, renderPorts, renderContainers, renderUnits, renderChanges, renderProcs, renderFoot, renderSheet, maybeHistory];

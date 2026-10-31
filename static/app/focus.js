@@ -3,7 +3,7 @@
  "use strict";
  const L=window.JarvisLab||window.JarvisFocus;if(!L||(window.JarvisLab&&L.concept.id!=="focus-plus"))return;
  document.body.dataset.focusLayout="refined";
- const P=window.JARVIS,{html,fmt,labels}=P,$=s=>document.querySelector(s);
+ const P=window.JARVIS,{html,labels}=P,$=s=>document.querySelector(s);
  let ids=null,last=null,lastState={};
  try{const v=JSON.parse(L.getPref("pins","null"));if(Array.isArray(v)&&v.length)ids=[...new Set(v.filter(x=>typeof x==="string"))];}catch(e){}
  if(ids&&!ids.length)ids=null;
@@ -50,7 +50,6 @@
   for(const cat of groups){const sv=s.services.find(x=>x.category===cat);if(sv)pick.push(sv.id);if(pick.length===6)break;}
   for(const sv of s.services){if(pick.length>=6)break;if(!pick.includes(sv.id))pick.push(sv.id);}return pick;
  }
- const pct=v=>Number.isFinite(v)?fmt.pct(v,0):"확인 불가";
  const previous=L.update;
  L.update=function(s,st){
   if(!s)return;last=s;if(st)lastState=st;
@@ -70,17 +69,12 @@
   const bad=s.services.filter(x=>["down","degraded","unknown"].includes(x.status));
   const outside=bad.filter(x=>!selected.includes(x.id));attention.hidden=!outside.length;
   P.render(attention,html`<span>고정 목록 밖의 문제·확인 불가 ${outside.length}개</span>${outside.map(x=>html`<button type="button" class="issue" data-tone="${P.tone(x.status)}" data-sid="${x.id}"><i class="shape"></i><b>${x.name||x.id}</b><span>${labels.status[x.status]||"확인 불가"}</span></button>`)}`);
-  const sys=s.system||{},ts=s.tailscale||{},ctr=s.summary.containers||{},errors=s.meta.errors||{};
-  const now=s.meta.generated_at,recent=(s.changes||[]).filter(x=>Number.isFinite(x.t)&&x.t<=now&&now-x.t<=3600);
+  const errors=s.meta.errors||{};
   const errorFor=names=>names.some(n=>errors[n]);
   const staleFor=names=>(s.monitor?.collectors||[]).some(c=>names.includes(c.name)&&c.stale);
-  const summaries={
-   hardware:"CPU "+pct(sys.cpu?.usage_pct)+" · 메모리 "+pct(sys.memory?.usage_pct)+" · 디스크 "+pct(sys.disks?.find(d=>d.mount==="/")?.usage_pct),
-   network:(ts.peers_online??"–")+" / "+(ts.peers_total??"–")+" 피어 온라인 · "+(s.ingress?.caddy?.routes||[]).length+"개 경로",
-   runtime:"컨테이너 "+(ctr.running??"–")+" / "+(ctr.total??"–")+" 실행 · 실패 유닛 "+s.units.filter(x=>x.active==="failed").length+" · 최근 1시간 변경 "+recent.length+"건",
-   map:(s.ingress?.caddy?.routes||[]).length+"개 경로 · 문제·확인 불가 "+bad.length+"개"
-  };
-  const sources={hardware:["system_fast","system"],network:["tailscale","caddy","tunnel","dns","probes","listeners","neighbors","caddy_log"],runtime:["docker","systemd","inventory","pm2","processes","listeners","hermes"],map:["caddy","tailscale","tunnel","dns","probes","docker"]};
+  // 접기 상자는 지도 하나만 남았다(하드웨어·네트워크·런타임은 각자 탭이다)
+  const summaries={map:(s.ingress?.caddy?.routes||[]).length+"개 경로 · 문제·확인 불가 "+bad.length+"개"};
+  const sources={map:["caddy","tailscale","tunnel","dns","probes","docker"]};
   for(const [key,value] of Object.entries(summaries)){
    const n=document.querySelector('[data-fold-count="'+key+'"]');if(n){const prefix=lastState.stale?"연결 지연":errorFor(sources[key])?"수집 오류":staleFor(sources[key])?"수집 지연":"";n.textContent=(prefix?prefix+" · ":"")+value;}
   }

@@ -52,7 +52,8 @@
  *   자간: --ls-tight -0.015em · --ls-heading -0.035em · --ls-display -0.045em · --ls-wide 0.04em(대문자 라벨·코드)
  *   --font (Pretendard) · --mono (JetBrains Mono → Geist Mono → 시스템)
  *   --ease · --dur-fast .15s · --dur .2s · --dur-slow .6s
- *   --sh-h          헤더 높이(60px, 모바일 56px) — 스티키 오프셋·scroll-padding 에 쓴다
+ *   --sh-h          헤더 윗줄 높이(60px, 모바일 56px) — 스티키 오프셋·scroll-padding 에 쓴다
+ *   --sh-tabs-h     헤더 아랫줄(탭 바) 높이 — 헤더 전체 높이 = --sh-h + --sh-tabs-h
  */
 
 /* ------------------------------------------------------------------ 토큰: 라이트(기본) */
@@ -140,6 +141,7 @@
   --dur-fast: 0.15s; --dur: 0.2s; --dur-slow: 0.6s;
 
   --sh-h: 60px;
+  --sh-tabs-h: 44px;
 }
 
 /* ------------------------------------------------------------------ 토큰: 다크 (명시 선택) */

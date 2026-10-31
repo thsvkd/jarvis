@@ -29,6 +29,8 @@
   const worstOf = (sts) => sts.reduce((w, s) => ((RANK[s] || 0) > (RANK[w] || 0) ? s : w), "up");
   const TYPE_CAT = { internal: "internal", host: "host", service: "public", infra: "infra" };
   const ZONE_ORDER = { "zone:internet": 0, "zone:tailnet": 1, "zone:lan": 2 };
+  // 진입 구역의 경로 색(물리 미니맵의 mm-seg 와 같은 --kc). 정상이면 이 색으로 그려 꺼진 것처럼 보이지 않게 한다
+  const ZONE_K = { "zone:internet": "public", "zone:tailnet": "tailnet", "zone:lan": "lan" };
   const ZONE_IC = {
     "zone:internet": '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z"/>',
     "zone:tailnet": '<g stroke="none" fill="currentColor"><circle cx="5" cy="12" r="2.6"/><circle cx="12" cy="12" r="2.6"/><circle cx="19" cy="12" r="2.6"/><circle cx="12" cy="19" r="2.6"/><circle cx="5" cy="5" r="2.6" opacity=".35"/><circle cx="12" cy="5" r="2.6" opacity=".35"/><circle cx="19" cy="5" r="2.6" opacity=".35"/><circle cx="5" cy="19" r="2.6" opacity=".35"/><circle cx="19" cy="19" r="2.6" opacity=".35"/></g>',
@@ -319,7 +321,7 @@
       } else if (v.kind === "zone") {
         const lw = tw(v.label, 12.5, 650);
         const det = L.lv === 0 && v.detail && !L.drop.has(v.id) ? html`<text class="mm-d" x="${r1(31 + lw + 7)}" y="${mid}" dominant-baseline="central">${v.detail}</text>` : "";
-        nodes.push(html`<g class="mm-n mm-zone" data-tone="${v.tone}" transform="${tr}"><rect class="mm-box" width="${p.w}" height="${p.h}" rx="${p.h / 2}"/><g class="mm-ic" transform="${"translate(11 " + r1(mid - 7) + ") scale(.5833)"}">${raw(ZONE_IC[v.id] || ZONE_IC["zone:internet"])}</g><text class="mm-l" x="31" y="${mid}" dominant-baseline="central">${v.label}</text>${det}</g>`);
+        nodes.push(html`<g class="mm-n mm-zone" data-tone="${v.tone}" data-k="${ZONE_K[v.id] || ""}" transform="${tr}"><rect class="mm-box" width="${p.w}" height="${p.h}" rx="${p.h / 2}"/><g class="mm-ic" transform="${"translate(11 " + r1(mid - 7) + ") scale(.5833)"}">${raw(ZONE_IC[v.id] || ZONE_IC["zone:internet"])}</g><text class="mm-l" x="31" y="${mid}" dominant-baseline="central">${v.label}</text>${det}</g>`);
       } else {
         const lw = tw(v.label, 12.5, 650);
         const det = L.lv === 0 && v.detail && !L.drop.has(v.id) ? html`<text class="mm-d" x="${r1(26 + lw + 7)}" y="${mid}" dominant-baseline="central">${v.detail}</text>` : "";
@@ -381,7 +383,7 @@
         const bad = v.bad ? html`${shape(v.tone, p.x + 14 + tw(label, 12, 650) + 8, p.y, 3.6)}` : "";
         nodes.push(html`<g class="mm-n mm-grp mm-dot" data-tone="${v.tone}" data-cat="${v.cat}"><rect class="mm-acc" x="${r1(p.x - R)}" y="${r1(p.y - R)}" width="${R * 2}" height="${R * 2}" rx="3"/><text class="mm-l" x="${r1(p.x + 11)}" y="${p.y}" dominant-baseline="central">${label}</text>${bad}</g>`);
       } else if (v.kind === "zone") {
-        nodes.push(html`<g class="mm-n mm-zone mm-dot" data-tone="${v.tone}"><circle class="mm-ring" cx="${p.x}" cy="${p.y}" r="${R}"/><text class="mm-l" x="${r1(p.x - R)}" y="${r1(p.y + 9)}" dominant-baseline="hanging">${v.label}</text></g>`);
+        nodes.push(html`<g class="mm-n mm-zone mm-dot" data-tone="${v.tone}" data-k="${ZONE_K[v.id] || ""}"><circle class="mm-ring" cx="${p.x}" cy="${p.y}" r="${R}"/><text class="mm-l" x="${r1(p.x - R)}" y="${r1(p.y + 9)}" dominant-baseline="hanging">${v.label}</text></g>`);
       } else {
         const below = p.c % 2 === 0;
         const lw = tw(v.label, 12, 650);

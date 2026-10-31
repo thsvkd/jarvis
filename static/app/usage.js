@@ -6,7 +6,7 @@
  "use strict";
  const P=window.JARVIS,{html}=P,$=s=>document.querySelector(s);
  const sec=$("#usage");if(!sec||P.device)return; // 다른 기기를 보는 중이면 숨긴 채로 둔다
- const showNav=on=>document.querySelectorAll('[data-sh-sec="usage"],[data-lsec="usage"]').forEach(a=>a.toggleAttribute("data-core",on));
+ const showNav=on=>document.querySelectorAll('[data-sh-sec="usage"]').forEach(a=>a.toggleAttribute("data-core",on));
  const MODE_KEY="jarvis.usage.mode";
  const S={devs:null,prov:"all",hot:false,busy:new Set(),dlg:null,login:null,
   mode:(()=>{try{return localStorage.getItem(MODE_KEY)==="full"?"full":"brief";}catch(e){return "brief";}})()};

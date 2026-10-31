@@ -5,8 +5,6 @@
 .focus-fold>summary>.ic{transition:transform var(--dur) var(--ease);width:15px;height:15px}
 .focus-fold[open]>summary>.ic{transform:rotate(180deg)}
 .focus-fold[open]{padding-bottom:var(--pad)}
-.focus-fold>.sec{padding-top:0}
-.focus-fold>.sec>.sec-head{margin-top:4px}
 #overview>.bento>.focus-fold{grid-column:1/-1;margin-top:0}
 .focus-fold>#mapTile{box-shadow:none;padding:var(--sp-3) 0 0;background:transparent}
 .focus-more{margin:18px 0;display:flex;align-items:center;gap:16px;font-size:var(--fs-md);color:var(--text-2)}

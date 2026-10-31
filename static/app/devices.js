@@ -7,9 +7,9 @@
  "use strict";
  const P=window.JARVIS,{html,fmt}=P,$=s=>document.querySelector(s);
  const sec=$("#devices");if(!sec)return;
- // 섹션 바로가기(공용 헤더·좁은 화면 막대)의 '기기'는 core 에서만 보인다
- // (CSS 가 data-core 없는 링크를 숨긴다: 게이트웨이에서 처음 그릴 때도 깜빡이지 않게)
- const showNav=on=>document.querySelectorAll('[data-sh-sec="devices"],[data-lsec="devices"]').forEach(a=>a.toggleAttribute("data-core",on));
+ // 헤더 탭 바의 '기기' 탭은 core 에서만 보인다
+ // (shell.css 가 data-core 없는 탭을 숨긴다: 게이트웨이에서 처음 그릴 때도 깜빡이지 않게)
+ const showNav=on=>document.querySelectorAll('[data-sh-sec="devices"]').forEach(a=>a.toggleAttribute("data-core",on));
  if(P.device){ // 다른 기기를 보는 중: 어느 기기인지와 돌아갈 길
   const bar=$("#devBar");bar.hidden=false;
   const show=d=>P.render(bar,html`<span><b>${(d&&d.host)||P.device}</b> 기기를 보고 있습니다.</span>${d&&!d.reachable?html` <span class="dev-err">${d.ok_at?"응답 없음":"접속 불가"}${d.error?": "+d.error:""}</span>`:""} <a href="/#devices" data-all-devices>전체 기기로</a>`);

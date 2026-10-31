@@ -43,4 +43,136 @@ assert.equal(h`<!-- it's --><script>var a=${"1"}</script>`, "<!-- it's --><scrip
 assert.equal(h`<script>var s="it's"; if (a<b) {}</script><a class=${"x"}>`, `<script>var s="it's"; if (a<b) {}</script><a class=>`);
 assert.equal(h`<style>a::after{content:"'"}</style>${"<"}`, `<style>a::after{content:"'"}</style>&lt;`);
 
+// 탭 전환 회귀: 헤더(shell.js)는 페이지마다 새로 그려진다. 지난 화면에서 받은 호스트가 저장돼 있으면 "호스트 확인 중…" 으로 되돌리지 않는다
+{
+  // 어떤 속성이든 받는 가짜 DOM 노드. 헤더 템플릿의 data-sh 노드만 쓰는 값(innerHTML)을 가진다.
+  const node = (own = {}) => new Proxy(function () {}, {
+    get: (t, k) => (k in own ? own[k] : k === "length" ? 0 : k === Symbol.toPrimitive ? () => "" : node()),
+    set: (t, k, v) => { own[k] = v; return true; },
+    apply: () => node(),
+  });
+  const mountShell = (store) => {
+    const host = node({ getAttribute: (n) => (n === "data-sh" ? "host" : null), innerHTML: "호스트 확인 중…" });
+    const names = ["live", "ovFull", "ovShort", "ovN", "ring", "liveT", "clock", "accN", "acc", "sr"];
+    const header = node({ querySelectorAll: (q) => (q === "[data-sh]" ? [host, ...names.map((n) => node({ getAttribute: () => n }))] : []) });
+    const document = node({ getElementById: () => header, querySelectorAll: () => [], title: "개요 · Jarvis" });
+    const c = { document, location: { search: "", pathname: "/" }, URLSearchParams, console, Intl, Date, setTimeout, clearTimeout, setInterval, addEventListener() {},
+      localStorage: { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = v; } }, matchMedia: () => ({ matches: false }) };
+    c.window = c;
+    vm.createContext(c);
+    for (const f of [path, new URL("../static/app/shell.js", import.meta.url)]) vm.runInContext(readFileSync(f, "utf8"), c);
+    return host;
+  };
+  assert.equal(mountShell({ "jarvis.shellHost": JSON.stringify({ host: "s2", model: "Pi 5", title: "t" }) }).innerHTML, "<b>s2</b> · Pi 5");
+  assert.equal(mountShell({}).innerHTML, "호스트 확인 중…"); // 처음 불러올 때만 자리표시 문구
+}
+
+// 탭 바 하나: 개요 화면은 주소 해시로 섹션 하나만 보인다(shell.js 가 data-tab-on, bento.css 가 나머지를 숨긴다).
+// 기기·AI 사용량 탭은 core 에서만(shell.css 가 data-core 없는 탭을 숨긴다. 지도·셋업은 개요에서 기억한 값).
+{
+  const node = (own = {}) => new Proxy(function () {}, {
+    get: (t, k) => (k in own ? own[k] : k === "length" ? 0 : k === Symbol.toPrimitive ? () => "" : node()),
+    set: (t, k, v) => { own[k] = v; return true; },
+    apply: () => node(),
+  });
+  const scrolled = [];
+  class El {
+    constructor(attrs = {}, parent = null, cls = "") { this.a = new Map(Object.entries(attrs)); this.parentElement = parent; this.cls = cls; }
+    get id() { return this.a.get("id") || ""; }
+    getAttribute(n) { return this.a.has(n) ? this.a.get(n) : null; }
+    setAttribute(n, v) { this.a.set(n, String(v)); }
+    removeAttribute(n) { this.a.delete(n); }
+    hasAttribute(n) { return this.a.has(n); }
+    toggleAttribute(n, on) { if (on) this.a.set(n, ""); else this.a.delete(n); return on; }
+    closest(sel) { for (let e = this; e; e = e.parentElement) if (sel === ".sec" && e.cls === "sec") return e; return null; }
+    scrollIntoView() { scrolled.push(this.id); }
+    addEventListener() {}
+  }
+  const mount = ({ page, hash = "", store = {}, sections = {} }) => {
+    const nav = new El();
+    nav.scrollWidth = nav.clientWidth = 0;
+    let links = [];
+    const names = ["host", "live", "ovFull", "ovShort", "ovN", "ring", "liveT", "clock", "accN", "acc", "sr"];
+    const header = node({
+      getAttribute: (n) => (n === "data-page" ? page : null),
+      set innerHTML(s) { // 셸이 그린 탭 링크를 그대로 읽는다
+        links = [...s.matchAll(/<a href="([^"]*)" data-sh-nav="([^"]*)"(?: data-sh-sec="([^"]*)")?( aria-current="page")?/g)]
+          .map(([, href, id, sec, cur]) => new El({ href, "data-sh-nav": id, ...(sec ? { "data-sh-sec": sec } : {}), ...(cur ? { "aria-current": "page" } : {}) }, nav));
+      },
+      querySelector: (q) => (q === ".sh-nav" ? nav : node()),
+      querySelectorAll: (q) => (q === "[data-sh]" ? names.map((n) => node({ getAttribute: () => n })) : q === "[data-sh-nav]" ? links : []),
+    });
+    const main = new El({ id: "main" });
+    const els = {};
+    for (const [id, kids] of Object.entries(sections)) {
+      els[id] = new El({ id }, main, "sec");
+      for (const k of kids) els[k] = new El({ id: k }, els[id]);
+    }
+    const document = node({ getElementById: (id) => (id === "jarvis-shell" ? header : els[id] || node()), querySelectorAll: () => [], title: "개요 · Jarvis", readyState: "complete" });
+    const on = {};
+    const location = { search: "", pathname: page === "home" ? "/" : "/" + page + "/", hash };
+    const c = { document, location, URLSearchParams, console, Intl, Date, setTimeout, clearTimeout, setInterval, matchMedia: () => ({ matches: false }),
+      addEventListener: (t, fn) => { (on[t] = on[t] || []).push(fn); },
+      history: { pushState: (s, t, url) => { location.hash = url.slice(url.indexOf("#")); } },
+      scrollTo: () => scrolled.push("top"),
+      localStorage: { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = v; } } };
+    c.window = c;
+    vm.createContext(c);
+    for (const f of [path, new URL("../static/app/shell.js", import.meta.url)]) vm.runInContext(readFileSync(f, "utf8"), c);
+    const go = (h) => { location.hash = h; (on.hashchange || []).forEach((fn) => fn()); };
+    const shown = () => Object.values(els).filter((e) => e.hasAttribute("data-tab-on")).map((e) => e.id);
+    const current = () => links.filter((a) => a.getAttribute("aria-current") === "page").map((a) => a.getAttribute("data-sh-nav"));
+    const tab = (id) => links.find((a) => a.getAttribute("data-sh-nav") === id);
+    return { go, shown, current, tab, links, els, location, shell: c.JarvisShell };
+  };
+  const SECS = { overview: ["alerts"], devices: [], usage: [], services: ["svcGroups"], hardware: ["hw-cpu"], network: [], runtime: [] };
+
+  // 탭 바는 하나: 개요 화면의 섹션 다음에 다른 화면
+  const home = mount({ page: "home", hash: "#usage", sections: SECS });
+  assert.deepEqual(home.links.map((a) => a.getAttribute("data-sh-nav")), ["home", "devices", "usage", "services", "hardware", "network", "runtime", "map", "setup"]);
+  // 딥 링크(/#usage): 그 섹션 하나만 보이고 그 탭이 지금 탭
+  assert.deepEqual(home.shown(), ["usage"]);
+  assert.deepEqual(home.current(), ["usage"]);
+  // 해시 전환(뒤로 가기 포함): 섹션 안 요소면 그 섹션 탭으로 바꾸고 그 요소로 스크롤
+  scrolled.length = 0;
+  home.go("#hw-cpu");
+  assert.deepEqual(home.shown(), ["hardware"]);
+  assert.deepEqual(home.current(), ["hardware"]);
+  assert.deepEqual(scrolled, ["hw-cpu"]);
+  // 섹션 밖 해시(서비스 상세 시트 · 본문 건너뛰기)는 지금 탭을 그대로 둔다
+  home.go("#svc=caddy");
+  home.go("#main");
+  assert.deepEqual(home.shown(), ["hardware"]);
+  // 해시가 없으면 개요, 탭을 옮기면 맨 위에서 시작
+  scrolled.length = 0;
+  home.go("");
+  assert.deepEqual(home.shown(), ["overview"]);
+  assert.deepEqual(home.current(), ["home"]);
+  assert.deepEqual(scrolled, ["top"]);
+  // 개요의 타일 · 경보에서 다른 섹션으로 가면(bento.js flash) 그 탭으로 바뀌고 기록에 남는다
+  home.shell.reveal(home.els.svcGroups);
+  assert.deepEqual(home.shown(), ["services"]);
+  assert.equal(home.location.hash, "#services");
+
+  // core 가 아니면(아무도 data-core 를 붙이지 않음) 기기 · AI 사용량 탭은 CSS 로 숨는다
+  assert.equal(home.tab("devices").hasAttribute("data-core"), false);
+  assert.equal(home.tab("usage").hasAttribute("data-core"), false);
+  const shellCss = readFileSync(new URL("../static/app/shell.css", import.meta.url), "utf8");
+  assert.match(shellCss, /\.sh-nav \[data-sh-sec="devices"\]:not\(\[data-core\]\), \.sh-nav \[data-sh-sec="usage"\]:not\(\[data-core\]\) \{ display: none; \}/);
+  // 고른 섹션 하나만 보인다(나머지 .sec 는 숨김, 고른 섹션이 이 기기에 없으면 개요)
+  const bentoCss = readFileSync(new URL("../static/app/bento.css", import.meta.url), "utf8");
+  assert.match(bentoCss, /#main\[data-tabbed\] > \.sec:not\(#overview\):not\(\[data-tab-on\]\) \{ display: none; \}/);
+assert.doesNotMatch(bentoCss, /(^|\n)#main > \.sec/); // 셋업 페이지(data-tabbed 없음)의 섹션은 숨기지 않는다
+
+  // 지도 · 셋업: 섹션을 건드리지 않고 그 화면 탭이 지금 탭. core 전용 탭은 개요에서 기억한 값을 따른다
+  const map = mount({ page: "map", store: { "jarvis.shellCore": '["usage"]' }, sections: SECS });
+  assert.deepEqual(map.shown(), []);
+  assert.deepEqual(map.current(), ["map"]);
+  assert.equal(map.tab("usage").hasAttribute("data-core"), true);
+  assert.equal(map.tab("devices").hasAttribute("data-core"), false);
+  const setup = mount({ page: "setup", sections: SECS });
+  assert.deepEqual(setup.current(), ["setup"]);
+  assert.equal(setup.tab("usage").hasAttribute("data-core"), false); // 기억한 값이 없으면(게이트웨이 · 첫 방문) 숨긴 채
+}
+
 console.log("ok");

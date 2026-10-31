@@ -17,7 +17,6 @@
   d.addEventListener("toggle",()=>L.setPref("fold."+key,String(d.open)));
  }
  fold($("#mapTile"),"map","네트워크 맵 · 구성과 노출 경로");
- for(const id of ["hardware","network","runtime"]){const s=$("#"+id);fold(s,id,s.querySelector(".sec-head h2").textContent);}
  const more=document.createElement("button");more.type="button";more.id="focus-more-services";more.className="focus-more seg-action";more.setAttribute("aria-expanded",String(showAll));$("#svcGroups").after(more);
  function reveal(target){for(const d of folds.values())if(d.contains(target))d.open=true;}
  function hashTarget(hash){try{return document.getElementById(decodeURIComponent(hash.replace(/^#/,"")));}catch(e){return null;}}
