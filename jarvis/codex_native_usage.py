@@ -2,13 +2,14 @@
 
 https://github.com/Dicklesworthstone/coding_agent_account_manager/blob/v0.1.24/internal/usage/codex.go
 """
+import base64
 import json
 import math
 import os
 import time
 import urllib.request
 
-from . import caam_usage, opencode_usage
+from . import caam_usage, opencode_usage, provider_usage
 
 
 def _http(token, account):
@@ -22,6 +23,20 @@ def _http(token, account):
     if len(data) > 1_000_000:
         raise ValueError("oversized response")
     return json.loads(data)
+
+
+def _email(tokens, account):
+    """id_token 의 검증된 이메일. 같은 로그인(chatgpt_account_id 가 account_id 와 같음)일 때만 쓴다. 모르면 기본 계정."""
+    try:
+        part = tokens.get("id_token").split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+        auth = claims.get("https://api.openai.com/auth") or {}
+        if claims.get("email_verified") is True and auth.get("chatgpt_account_id") == account:
+            email = provider_usage._email(claims)
+            return "기본 계정" if email == "이름 없는 계정" else email
+    except (AttributeError, IndexError, TypeError, ValueError):
+        pass
+    return "기본 계정"
 
 
 def read():
@@ -53,7 +68,7 @@ def read():
             windows.append({"key": caam_usage._key(duration), "used": round(used), "resets_at": reset})
         if not windows:
             return []
-        return [{"label": "기본 계정", "org": None, "active": True, "status": "ok", "error": None,
+        return [{"label": _email(tokens, account), "org": None, "active": True, "status": "ok", "error": None,
                  "note": None, "attention": False, "failure": None, "plan": None, "updated_at": time.time(),
                  "windows": windows, "buckets": [], "extra": None, "credits": None, "source": "codex"}]
     except (OSError, ValueError, TypeError):
