@@ -49,6 +49,19 @@ _ENV["GIT_TERMINAL_PROMPT"] = "0"  # 서비스·pythonw 에서는 답할 사람�
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
+def console_python(argv):
+    """argv 가 pythonw 로 Python 을 띄우면 같은 폴더의 python.exe 로 바꾼다(창 없는 jarvis 가 띄우는 Python 자식).
+
+    pythonw 자식은 콘솔이 없고 이 숨김 처리도 하지 않아, 그 아래의 npm·grok 같은 콘솔 프로그램이 저마다 새 콘솔 창을 연다
+    (update-ai·npm-release, thsvkd-win 실측). python.exe 에 CREATE_NO_WINDOW 를 붙이면 숨은 콘솔을 자손이 물려받는다."""
+    if isinstance(argv, (list, tuple)) and argv and isinstance(argv[0], str) \
+            and os.path.basename(argv[0]).lower() == "pythonw.exe":
+        console = os.path.join(os.path.dirname(argv[0]), "python.exe")
+        if os.path.isfile(console):
+            return type(argv)([console, *argv[1:]])
+    return argv
+
+
 def hide_child_consoles():
     """콘솔 없이(pythonw) 돌 때만 모든 자식 프로세스에 CREATE_NO_WINDOW 를 붙인다. ai-setup 에서 옮긴 Orca 모듈처럼
     플래그 없이 powershell·schtasks·orca CLI 를 부르는 곳까지 한 번에 막는다. 콘솔에서 돌면(터미널·ssh) 자식이 그 콘솔을
@@ -63,6 +76,9 @@ def hide_child_consoles():
     def no_window(self, *args, creationflags=0, **kwargs):
         if not creationflags & (subprocess.CREATE_NEW_CONSOLE | subprocess.DETACHED_PROCESS):
             creationflags |= _NO_WINDOW
+            args = (console_python(args[0]),) + args[1:] if args else args
+            if "args" in kwargs:
+                kwargs["args"] = console_python(kwargs["args"])
         init(self, *args, creationflags=creationflags, **kwargs)
 
     subprocess.Popen.__init__ = no_window

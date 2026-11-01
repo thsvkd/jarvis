@@ -549,4 +549,17 @@ def test_a_trailing_full_stop_is_not_part_of_the_version(tmp_path):
     assert update_ai.is_current(update_ai.version_of(str(stub)), "1.0.105")
 
 
+def test_windows_codex_runs_the_official_installer_without_the_profile(monkeypatch):
+    """covers: HARNESS-4
+    사용자 PowerShell 프로필이 있으면 `codex update` 가 띄운 공식 설치기가 StrictMode 에서 멈춘다(kgolf 실측)."""
+    calls = []
+    monkeypatch.setattr(update_ai.os, "name", "nt")
+    monkeypatch.setattr(update_ai, "run_step", lambda label, argv, **kw: calls.append(argv) or True)
+    monkeypatch.setattr(update_ai, "codex_daemon_sync", lambda path, allow: ([], []))
+    entry = {"id": "codex", "update": ["codex", "update"]}
+    update_ai.update_target(entry, r"C:\bin\codex.exe", "default", ["codex", "update"])
+    assert calls[0][:2] == ["powershell", "-NoProfile"]
+    assert "chatgpt.com/codex/install.ps1" in calls[0][-1]
+
+
 load_tests = collect(globals())

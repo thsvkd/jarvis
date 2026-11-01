@@ -36,6 +36,8 @@ from stages import ORCA_MOVED  # noqa: E402
 
 CATALOG = ROOT / "res" / "catalog.json"
 # 시험은 UPDATE_AI_CODEX_LATEST 로 가짜 주소(file://)를 준다(네트워크에 닿지 않게)
+CODEX_WINDOWS_UPDATE = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-c",
+                        "$env:CODEX_NON_INTERACTIVE=1; irm https://chatgpt.com/codex/install.ps1 | iex"]
 CODEX_LATEST = os.environ.get("UPDATE_AI_CODEX_LATEST") or "https://api.github.com/repos/openai/codex/releases/latest"
 # 세션이 쓰는 파일을 그 자리에서 바꾸거나 세션을 끝내는 설치 방식. 세션이 돌면 --allow-interrupt 없이는 손대지 않는다.
 INTERRUPTING = ("npm", "winget")
@@ -457,6 +459,10 @@ def update_target(entry, path, method, value, allow_interrupt=False):
         # 기본값이면 brew 가 올린 직후 이전 버전(Cellar·Caskroom)을 지워 실행 중인 세션의 파일이 사라진다.
         outcome = run_step("package", ["brew", "upgrade"] + (["--cask"] if method == "brew_cask" else []) + [value],
                            env=dict(os.environ, HOMEBREW_NO_INSTALL_CLEANUP="1"))
+    elif method == "default" and entry["id"] == "codex" and os.name == "nt":
+        # `codex update` 는 공식 설치기를 프로필을 읽는 powershell 로 띄운다. 사용자 프로필(oh-my-posh 등)이 있으면
+        # 설치기의 StrictMode 가 RuntimeInformation::OSArchitecture 에서 멈춘다(kgolf 실측). 같은 공식 명령을 -NoProfile 로 부른다
+        outcome = run_step("self-update", CODEX_WINDOWS_UPDATE)
     elif method == "default":
         outcome = run_step("self-update", [path] + list(value[1:]))
     else:
