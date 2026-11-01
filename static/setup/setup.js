@@ -5,7 +5,7 @@
  *   GET  /api/devices/<id>/modules/<이름>/plan                                  모듈 계약의 plan(viewers 만)
  *   POST /api/devices/<id>/modules/<이름>/apply?plan_id=…  (X-Jarvis-Action: module-apply, viewers 만) → 202 작업.
  *        게이트웨이의 job 은 기기마다 하나(job.module 로 어느 모듈인지 안다)이고 한 번에 하나만 돈다
- * 모듈: 실행할 수 있는 모듈(Orca·훅)은 같은 흐름(상태 → 계획 → 승인 → 실행 → 결과)으로, doctor 는 읽기 전용 점검으로,
+ * 모듈: 실행할 수 있는 모듈(Orca·훅·셋업·하네스)은 같은 흐름(상태 → 계획 → 승인 → 실행 → 결과)으로, doctor 는 읽기 전용 점검으로,
  *   이 화면이 모르는 모듈은 이름·health 만 보인다(다음 모듈이 와도 깨지지 않게).
  * 승인 목록·휴대폰 알림·결과 기록 API 는 아직 없다(D7): '승인 대기'는 이 화면에서 연 계획 중 승인이 필요한 것이고, 실행을 누르는 것이 승인이다.
  * 시크릿: doctor 는 파일 위치와 키 이름만 준다. 이 화면도 그것만 보인다. */
@@ -28,13 +28,13 @@
     secret: { tone: "crit", label: "평문 시크릿", hint: "값은 표시하지 않습니다. 환경 변수로 옮기세요." },
     hook_drift: { tone: "warn", label: "은퇴한 훅이 남은 설정", hint: "ai-setup 이 은퇴시킨 훅을 아직 부르고 있습니다." },
     duplicate: { tone: "warn", label: "PATH 중복 설치", hint: "PATH 에서 먼저 나오는 쪽이 실행됩니다." },
-    missing: { tone: "info", label: "설치되지 않은 하네스", hint: "설치는 하네스 모듈을 옮긴 뒤 여기서 합니다. 지금은 명령만 안내합니다." },
+    missing: { tone: "info", label: "설치되지 않은 하네스", hint: "설치는 셋업 모듈의 계획에서 합니다." },
     skill: { tone: "muted", label: "lock 밖의 스킬", hint: "그대로 둡니다." } };
   const KIND_ORDER = ["secret", "hook_drift", "duplicate", "missing", "skill"];
   const HOOK_FILE = { ok: ["ok", "같음"], missing: ["info", "없음 — 새로 씀"], changed: ["info", "옛 판 — 새로 씀"],
     foreign: ["crit", "덮어쓰지 않음(설치 기록에 없는 파일)"] };
-  const LEGACY = "하네스·스킬·플러그인·MCP 는 아직 ai-setup 이 관리합니다.";
-  const MIGRATION = [["Orca(시범)", true], ["doctor", true], ["훅", true], ["하네스", false], ["스킬·플러그인·MCP", false]];
+  const LEGACY = "ai-setup 의 기능을 모두 jarvis 모듈로 옮겼습니다. AGENTS.md 는 프로젝트 폴더 단위라 python -m jarvis agentsmd 로 씁니다.";
+  const MIGRATION = [["Orca(시범)", true], ["doctor", true], ["훅", true], ["하네스", true], ["스킬·플러그인·MCP", true], ["나머지 설정", true]];
   const VIEWERS_ONLY = "doctor 세부·계획·실행은 허용된 기기(viewers)에서만 볼 수 있습니다.";
   const POLL_RUN = 3000, POLL_IDLE = 60000;
   const tone = (t, label) => ({ tone: t, label });
@@ -77,9 +77,23 @@
         if (!x.python) out.push("python 없음");
         return out.join(" · ");
       } },
+    setup: { name: "셋업", run: true, todo: new Set(["할 일 있음", "상태 확인 실패"]),
+      state(s) {
+        if (s.health !== "ok") return tone("info", "할 일 있음");
+        return tone("ok", s.installed ? "이상 없음" : "기록 없음");
+      },
+      brief: (s) => (s.details && (s.details.pending || []).length ? "할 일 " + s.details.pending.length + "건" : "") },
+    harness: { name: "하네스", run: true, todo: new Set(["갱신 가능", "상태 확인 실패"]),
+      state(s) {
+        if (!s.installed) return tone("muted", "설치 안 됨");
+        if (s.health !== "ok") return tone("info", "갱신 가능");
+        return tone("ok", "최신");
+      },
+      brief: (s) => (s.details ? (s.details.tools || []).filter((t) => t.state === "outdated").map((t) => t.id + " → " + t.latest).join(" · ") : "") },
     doctor: { name: "doctor", run: false },
   };
-  const ORDER = ["orca", "hooks", "doctor"];
+  const ORDER = ["orca", "hooks", "setup", "harness", "doctor"];
+  const TOOL = { current: ["ok", "최신"], outdated: ["info", "갱신 가능"], unknown: ["muted", "최신 확인 불가"] };
   const rank = (m) => (ORDER.includes(m) ? ORDER.indexOf(m) : ORDER.length);
   const label = (m) => (MODS[m] ? MODS[m].name : m);
   const runnable = (m) => !!(MODS[m] && MODS[m].run);
@@ -176,6 +190,15 @@
         extra = html`<ul class="su-files" aria-label="훅 파일">${files.map((f) => { const t = HOOK_FILE[f.state] || ["muted", f.state];
           return html`<li data-tone="${t[0]}"><i class="shape" aria-hidden="true"></i><code>${f.name}</code><span>${t[1]}</span></li>`; })}</ul>${(x.settings_changes || []).length ? html`<div class="su-chg"><p class="su-k">~/.claude/settings.json 에 바뀔 항목 ${x.settings_changes.length}건</p><ul>${x.settings_changes.map((c) => html`<li><code>${c}</code></li>`)}</ul></div>` : ""}`;
       }
+    } else if (m === "setup" && s.details) {
+      head = html`<div class="su-ver"><span class="su-k">하네스</span><b>${(x.harnesses || []).join(", ") || "없음"}</b></div>`;
+      const rec = x.recorded || {};
+      facts.push(html`<span>설치 기록 <b>${Object.keys(rec).length}</b>종</span>`);
+      if ((x.pending || []).length) extra = html`<ul class="su-files" aria-label="할 일">${x.pending.map((t) => html`<li data-tone="info"><i class="shape" aria-hidden="true"></i><span>${t}</span></li>`)}</ul>`;
+    } else if (m === "harness" && s.details) {
+      head = html`<div class="su-ver"><span class="su-k">도구</span><b>${(x.tools || []).length}</b></div>`;
+      extra = html`<ul class="su-files" aria-label="하네스·도구">${(x.tools || []).map((t) => { const k = TOOL[t.state] || ["muted", t.state];
+        return html`<li data-tone="${k[0]}"><i class="shape" aria-hidden="true"></i><code>${t.id}</code><span>${t.version || "?"}${t.state === "outdated" ? " → " + t.latest : ""} · ${k[1]}</span></li>`; })}</ul>`;
     }
     if (s.installed != null && MODS[m]) facts.push(html`<span>소유 <b>${s.owned ? "jarvis 설치" : "기록만"}</b></span>`);
     facts.push(html`<span>${ago(s.checked_at)} 확인</span>`);
@@ -322,7 +345,7 @@
       ${run.length ? html`<p class="su-grp-k">실행할 수 있는 모듈</p>${run.map((m) => html`<div><h3 class="grp-title">${label(m)}</h3><div class="grp su-grp">${runFlow(d, m)}</div></div>`)}` : ""}
       ${ms.includes("doctor") ? html`<p class="su-grp-k">읽기 전용 점검</p><div><h3 class="grp-title">doctor</h3><div class="grp su-grp">${doctor(d)}</div></div>` : ""}
       ${other.length ? html`<p class="su-grp-k">그 밖의 모듈</p><div class="grp su-grp"><ul class="su-gen">${other.map((m) => html`<li><b>${m}</b>${status(d, m)}</li>`)}</ul><p class="su-muted">이 화면이 아직 자세히 그리지 않는 모듈입니다.</p></div>` : ""}
-      <div><h3 class="grp-title">아직 ai-setup 이 관리</h3><div class="grp su-grp"><p class="su-muted">${LEGACY}</p>${order()}</div></div>`
+      <div><h3 class="grp-title">ai-setup 에서 옮긴 순서</h3><div class="grp su-grp"><p class="su-muted">${LEGACY}</p>${order()}</div></div>`
       : html`<div class="grp su-grp"><p class="su-muted">${d.error || "기기에 닿지 못했습니다."}</p></div>`);
   }
   function openDrawer(id) { S.drawer = id; drawer(); if (!sheet.open) sheet.showModal(); }

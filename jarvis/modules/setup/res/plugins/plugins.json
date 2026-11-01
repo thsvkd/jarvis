@@ -1,0 +1,10 @@
+[
+  {"marketplace": "Yeachan-Heo/oh-my-claudecode", "plugin": "oh-my-claudecode@omc", "default": true},
+  {"marketplace": "snflkd/fluent-korean", "plugin": "fluent-korean@fluent-korean", "default": true},
+  {"marketplace": "DietrichGebert/ponytail", "plugin": "ponytail@ponytail", "default": true},
+  {"marketplace": "openai/codex-plugin-cc", "plugin": "codex@openai-codex", "default": true},
+  {"marketplace": "anthropics/claude-plugins-official", "plugin": "commit-commands@claude-plugins-official", "default": true},
+  {"marketplace": "anthropics/claude-plugins-official", "plugin": "context7@claude-plugins-official", "default": true},
+  {"marketplace": "anthropics/claude-plugins-official", "plugin": "typescript-lsp@claude-plugins-official", "default": true},
+  {"marketplace": "anthropics/claude-plugins-official", "plugin": "pyright-lsp@claude-plugins-official", "default": true}
+]

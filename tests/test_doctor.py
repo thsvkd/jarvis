@@ -10,7 +10,7 @@ from pytest_compat import collect, pytest  # noqa: E402,F401
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCTOR = ROOT / "jarvis" / "modules" / "doctor" / "doctor.py"
-CATALOG = json.loads((DOCTOR.parent / "catalog.json").read_text(encoding="utf-8"))
+CATALOG = json.loads((DOCTOR.parent.parent / "setup" / "res" / "catalog.json").read_text(encoding="utf-8"))
 WINDOWS = os.name == "nt"
 PLATFORM = "windows" if WINDOWS else ("macos" if sys.platform == "darwin" else "linux")
 SECRET = "sk-test-0123456789abcdef"

@@ -1,0 +1,15 @@
+{
+  "name": "cache-ttl-status",
+  "version": "0.1.0",
+  "description": "Show the prompt cache time left (cache:57m) as a status line under the prompt",
+  "author": { "name": "ai-setup" },
+  "userConfig": {
+    "ttl": {
+      "type": "string",
+      "title": "Prompt cache TTL",
+      "description": "How long a cache entry lives after a request reads or writes it. Updated from the session when the model is switched.",
+      "options": ["1h", "5m"],
+      "default": "1h"
+    }
+  }
+}

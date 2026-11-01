@@ -220,7 +220,7 @@ curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh 
 ```
 
 `install.sh` 는 uv 로 Python venv(`~/.local/share/jarvis/venv`)를 만들고, 최신 릴리스 묶음을 sha256 으로 확인해 `~/Workspace/jarvis` 에 푼다.
-그다음 설정 파일과 LaunchAgent(`dev.jarvis`)를 만들고, 모듈(Orca·훅)을 plan 으로 보인 뒤 그 plan_id 로 apply 한다.
+그다음 설정 파일과 LaunchAgent(`dev.jarvis`)를 만들고, 모듈(Orca·훅·셋업)을 plan 으로 보인 뒤 그 plan_id 로 apply 한다.
 이미 있는 설정·LaunchAgent·저장소는 덮어쓰지 않으므로 다시 실행해도 된다. Tailscale·Orca·하네스 로그인과 core 의 `devices` 등록은 직접 한다.
 
 수동 설치:
@@ -261,6 +261,15 @@ Orca 업데이트는 core 홈의 기기 목록에서 **Orca 업데이트 확인 
 기기에서 직접 할 때는 `python -m jarvis module orca plan --json` 으로 계획을 보고, 그 `plan_id` 로 `apply --json --plan-id <id>` 를 실행한다.
 python 은 게이트웨이 서비스가 쓰는 것을 쓴다(Mac 의 PATH 첫 `python3` 는 psutil 이 없는 시스템 3.9 일 수 있다: LaunchAgent 의 `/opt/homebrew/bin/python3` 나 venv).
 하네스·도구 점검은 `python -m jarvis module doctor status --json` 이다. 읽기 전용이며 설치 위치·버전, 중복 설치, 은퇴한 훅, 평문 시크릿의 위치와 키 이름(값은 내지 않는다), lock 밖 스킬을 보고한다.
+
+ai-setup 이 하던 설치·갱신도 같은 모듈 계약으로 한다(core 홈의 AI 셋업 화면 또는 같은 CLI).
+
+| 모듈 | 하는 일 |
+| --- | --- |
+| `setup` | 하네스(claude·codex 와 영수증의 하네스)·Claude 플러그인·번들 스킬·CodeGraph·MCP 등록·줄바꿈 키·출력 스타일·mod·OMC HUD·Tailscale 을 없는 것만 설치하고, 이미 설치한 설정은 배포본이 바뀌면 다시 적용한다. 엔진은 ai-setup 에서 옮긴 `jarvis/modules/setup/` 이다 |
+| `harness` | 설치된 하네스·도구를 최신으로 올린다(update-ai). codex 관리형 데몬이 CLI 와 어긋나면 데몬 재시작을 승인 단계로 보인다 |
+
+개별 설정만 다시 적용하려면 옮긴 워커 진입점을 그대로 쓴다: `bash jarvis/modules/setup/scripts/setup.sh --keybinds`(Windows 는 `setup.ps1 -Keybinds`). 프로젝트 폴더의 AGENTS.md·CLAUDE.md 는 그 폴더에서 `python -m jarvis agentsmd [--harness claude,codex] [--force] [--dry-run]` 로 쓴다.
 
 | OS | 설치본 하나 | 업데이트 주체 |
 | --- | --- | --- |

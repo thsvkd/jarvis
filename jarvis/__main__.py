@@ -31,6 +31,21 @@ def _confirm():
             time.sleep(60)
 
 
+def agentsmd(args):
+    """지금 폴더(프로젝트)에 AGENTS.md·CLAUDE.md 를 쓴다. ai-setup 의 setup_agentsmd 워커를 그대로 부른다.
+
+    프로젝트 폴더 단위라 기기 모듈(setup)에 넣지 않았다. 인자는 워커와 같다: --harness L, --force, --dry-run.
+    """
+    import subprocess
+    scripts = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modules", "setup", "scripts")
+    if os.name == "nt":  # PowerShell 워커는 -Harness·-Force·-DryRun 이름만 받는다(엔진의 _worker 와 같은 변환)
+        args = ["-" + "".join(p.capitalize() for p in a[2:].split("-")) if a.startswith("--") else a for a in args]
+        argv = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", os.path.join(scripts, "setup_agentsmd.ps1"), *args]
+    else:
+        argv = ["bash", os.path.join(scripts, "setup_agentsmd.sh"), *args]
+    return subprocess.run(argv).returncode
+
+
 def main():
     hide_child_consoles()
     if sys.argv[1:2] == ["update"]:
@@ -38,6 +53,8 @@ def main():
     if sys.argv[1:2] == ["module"]:
         from . import module
         return module.cli(sys.argv[2:])
+    if sys.argv[1:2] == ["agentsmd"]:
+        return agentsmd(sys.argv[2:])
     if sys.argv[1:2] == ["--version"]:
         print(f"jarvis {__version__}" + (" (릴리스)" if launch.release() else " (저장소)"))
         return 0

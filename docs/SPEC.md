@@ -1,6 +1,6 @@
 # SPEC
 
-> 상태: 확정(2026-10-30 사용자 확인 K1, K4·K10 은 5라운드). 범위: ai-setup 흡수의 모듈 계약과 Orca 모듈. 결정의 배경은 `2026-10-30-ai-setup-absorption.md` 가 소유한다.
+> 상태: 확정(2026-10-30 사용자 확인 K1, K4·K10 은 5라운드). setup·harness 모듈 절은 잠정(2026-11-01, 확인 전). 범위: ai-setup 흡수의 모듈 계약과 각 모듈. 결정의 배경은 `2026-10-30-ai-setup-absorption.md` 가 소유한다.
 
 ## 모듈 계약
 
@@ -56,7 +56,7 @@ jarvis 본체는 모듈을 라이브러리로 부른다. 부트스트랩과 시�
 
 ## doctor 모듈
 
-코드는 `jarvis/modules/doctor/` 다. `doctor.py` 는 ai-setup `res/doctor/doctor.py` 를 옮긴 것으로 단독 실행(사람용 보고, 종료 코드 0·1·2)도 그대로 된다. 하네스·도구 목록(`catalog.json`)은 ai-setup `res/catalog.json` 의 사본이다. 하네스 모듈을 옮길 때 원본도 jarvis 로 넘어오며, 그때까지는 ai-setup 의 것과 내용을 같게 유지한다. 현재 훅 조각은 훅 모듈의 `jarvis/modules/hooks/settings.json` 을 읽는다.
+코드는 `jarvis/modules/doctor/` 다. `doctor.py` 는 ai-setup `res/doctor/doctor.py` 를 옮긴 것으로 단독 실행(사람용 보고, 종료 코드 0·1·2)도 그대로 된다. 하네스·도구 목록은 setup 모듈의 `jarvis/modules/setup/res/catalog.json` 한 벌을 읽는다. 현재 훅 조각은 훅 모듈의 `jarvis/modules/hooks/settings.json` 을 읽는다.
 
 - 읽기 전용이다. 홈 아래 어떤 파일도 만들거나 바꾸지 않는다. 버전 확인은 홈·설정·캐시 위치를 임시 폴더로 돌린 환경에서 한다.
 - `status.details` 는 `{tools: [{id, kind: harness/tool, found: [PATH 순서의 실행 파일], version, hint}], findings: [{kind, message}]}` 다. `found` 의 홈 아래 경로는 `~/` 로 줄인다. `hint` 는 없는 항목의 그 플랫폼 설치 명령이다.
@@ -69,7 +69,7 @@ core 홈의 AI 셋업 화면(디자인 랩 05 의 C 안)은 기기마다 모듈 
 
 | 경로 | 누가 | 동작 |
 | --- | --- | --- |
-| 게이트웨이 `GET /api/modules[?refresh=1]` | 설정 core 만 | 모듈마다 `status` 와 `checked_at`·`ok`, 마지막 apply 작업(`job`). status 는 모듈별로 캐시한다(orca 60초, doctor 600초). `refresh=1` 은 `X-Jarvis-Action: modules-refresh` 가 있어야 한다 |
+| 게이트웨이 `GET /api/modules[?refresh=1]` | 설정 core 만 | 모듈마다 `status` 와 `checked_at`·`ok`, 마지막 apply 작업(`job`). status 는 모듈별로 캐시하고(orca 60초, hooks·setup 300초, doctor 600초, harness 1800초), 오래된 것만 모듈마다 병렬로 다시 읽는다. `refresh=1` 은 `X-Jarvis-Action: modules-refresh` 가 있어야 한다 |
 | 게이트웨이 `GET /api/modules/<이름>/plan` | 설정 core 만 | 그 모듈의 `plan`. 10초 동안 캐시해 몰린 요청도 하위 프로세스 하나로 처리한다 |
 | 게이트웨이 `POST /api/modules/<이름>/apply?plan_id=<sha256>` | 설정 core 만, `X-Jarvis-Action: module-apply` | 뒤에서 `apply --plan-id` 를 돌리고 바로 202 와 작업을 준다. 한 번에 하나만 돌리고, 다른 적용·jarvis 갱신·Orca 업데이트·페어링 발급이 진행 중이면 409 다(그 작업들도 적용 중에는 409). 시작할 때 `module-apply.json` 표시를 남겨, 적용 중 재시작하면 다음 조회의 작업이 `interrupted` 다. 끝나면 그 모듈의 status·plan 캐시를 버린다 |
 | core `GET /api/devices/modules[?refresh=1]` | tailnet | 기기마다 위의 응답에 `id`·`host`·`status`(HTTP)를 붙여 모은다. 폴링이 실패 중인 기기는 묻지 않는다. viewers 가 아니면(`full: false`) 모듈은 `module·installed·owned·version·latest·health·checked_at·ok·error` 만, 작업은 상태와 결과 종류만 준다(doctor 의 시크릿 위치·경로, 결과 문구는 viewers 만) |
@@ -92,3 +92,25 @@ core 홈의 AI 셋업 화면(디자인 랩 05 의 C 안)은 기기마다 모듈 
 - 훅을 실행할 명령(조각의 `{{PY}}`)은 ai-setup 과 같은 순서로 찾는다(POSIX: `python3` → `python`, Windows: `python` → `python3` → `py -3` → `py`). 권한 모드(`permissions.defaultMode`)는 사용자가 지금 쓰는 값을 유지하고(병합기가 모르는 값이면 조각에서 defaultMode 를 빼고 병합한다), 없으면 조각의 값(auto)이다. 계획 요약은 권한 모드·훅 등록·권한 목록 변경을 앞에 둔다.
 - status·plan 은 아무것도 쓰지 않는다. 병합은 메모리에서 미리 돌려 보고, 셀프테스트(guard.log 를 쓴다)는 apply 에서만 돈다.
 - ai-setup 이 설치한 기기는 영수증의 같은 키(`hook_files`, 권한 기록)를 읽어 이어서 관리한다. uninstall 은 영수증에 기록한 파일과 설치가 넣은 settings 항목만 걷어내고, 영수증의 다른 단계 기록은 남긴다. 영수증에 `hook_files` 가 없는 옛 설치는 ai-setup 과 같은 정해진 목록을 지운다. status 의 `version` 은 설치본, `latest` 는 배포본의 다이제스트다.
+
+## setup 모듈 (잠정)
+
+코드는 `jarvis/modules/setup/` 이다. ai-setup 의 `res/`(단계 엔진 `stages.py`, 카탈로그, 플러그인 목록, 번들 스킬, 키바인드·출력 스타일·mod·OMC HUD 워커, npm-release, update-ai, AGENTS.md 틀)와 `scripts/`(워커와 `setup.sh`·`setup.ps1`)를 같은 배치로 옮겼다. 온보딩 TUI 와 `install.sh`·`install.ps1` 부트스트랩은 옮기지 않았다. 옮긴 `setup.sh`·`setup.ps1` 은 개별 옵션(`--keybinds`·`--skills` 등)을 그대로 받고, 인자가 없으면 아무것도 설치하지 않고 이 모듈을 안내한다. 계약 층은 `jarvis/setup_module.py` 다.
+
+- 계획: 엔진의 `plan_actions` 에 단계 `base·harness·plugins·skills·codegraph·mcp·newline·claude_special·tools`(agentsmd 제외)를 넘긴 쓰기 액션이다. 하네스는 claude·codex 와 영수증 `harness_installs` 의 하네스, 줄바꿈 키는 영수증에 기록된 값이다. Jarvis 역할·herdr 는 고르지 않는다. 단계 id 는 `<순번>-<stage>`, risk 는 sudo 가 들어간 명령(Linux 의 Tailscale 설치기 포함)이면 `sudo`, 설치(base·harness·codegraph·tools·플러그인 설치)는 `install`, 나머지는 `config` 다(uninstall 계획은 모두 `remove`).
+- 다시 적용(refresh): 영수증에 기록된 설정(줄바꿈 키·번들 스킬·출력 스타일·mod·OMC HUD)은 그 워커 배포본(`res/<워커>` 와 워커 스크립트, 점으로 시작하는 경로·`__pycache__` 제외)의 다이제스트가 jarvis 상태 폴더의 `setup-refresh.json` 과 다를 때 `refresh-<id>` 단계(argv 는 워커 스크립트)로 다시 적용한다. 출력 스타일·OMC HUD 워커는 플러그인이 없으면 마켓플레이스에서 설치하므로 `install`, 나머지는 `config` 다. 다시 적용이나 그 설정의 설치 액션이 성공하면 그 다이제스트를 기록한다. 기록이 없는 기기는 처음 한 번 모두 다시 적용한다(2026-11-01 사용자 결정). ai-setup 에서 `--keybinds`·`--skills` 등을 다시 실행하던 갱신 경로이며, 사용자가 고친 파일은 워커가 그대로 둔다. 옮긴 `setup.sh --keybinds` 를 직접 실행해도 이 기록은 바뀌지 않는다(다음 계획에 한 번 더 나온다).
+- MCP: 같은 이름(codegraph)의 서버가 이미 등록된 하네스(claude `~/.claude.json` 의 mcpServers, codex `~/.codex/config.toml` 의 `[mcp_servers.codegraph]`, gemini `~/.gemini/settings.json`, opencode 설정의 `mcp`)에는 등록을 계획하지도 기록하지도 않는다. grok·copilot·agy 는 설정 위치가 문서에 없어 보지 않는다.
+- apply: 액션을 하나씩 엔진의 `execute` 로 돌린다. 한 stage 안에서 실패하면 그 stage 의 나머지는 `skipped` 다. 그 stage 에 기대는 뒤 stage(`codegraph·harness←base`, `plugins·skills←harness`, `mcp←harness·codegraph`, `claude_special←harness·plugins`)도 앞 stage 가 실패하거나 건너뛰었으면 `skipped` 이고, 독립인 stage 와 refresh 단계는 계속한다. 결과는 단계마다 낸다(실패가 하나라도 있으면 `failed`). 엔진이 성공한 액션의 효과를 영수증에 기록한다. 게이트웨이 PATH 에는 `~/.local/bin`·nvm 이 없으므로 엔진의 PATH 보강과 harness 의 PATH 보강을 함께 쓴다.
+- sudo(2026-11-01 사용자 결정 "sudo 단계도 안전하게"): 게이트웨이에는 TTY 가 없으므로 계획의 모든 sudo 는 `sudo -n` 으로 바꿔 비밀번호를 기다리며 멈추지 않게 한다. plan 은 `sudo -n true` 로 비밀번호 없는 sudo(NOPASSWD 또는 유효한 캐시)를 쓸 수 있는지 보고 sudo 단계에 `sudo: ok|password` 를 붙인다(plan_id 에 묶인다). status 는 sudo 를 부르지 않는다(읽을 때마다 auth 로그에 남지 않게). `password` 인 단계는 apply 가 실행하지 않고 `skipped` 와 터미널에서 칠 명령을 남기며, 나머지 단계는 계속한다(원래 AI-35).
+- uninstall: 엔진의 제거 계획(영수증에 기록한 것만)이다. dry-run 의 plan_id 를 받아야 실행한다. jarvis 게이트웨이 유닛과 Tailscale 은 지우지 않고 영수증 기록도 남긴다(원격으로 지우면 연결이 끊긴다, 2026-11-01 사용자 결정).
+- status: `details` 는 `{harnesses: [PATH 에 있는 하네스], recorded: {영수증 키: 기록}, pending: [단계 요약], sudo_steps: <sudo 단계 수>}`, 할 일이 있으면 `health=degraded` 다. 읽기만 한다(npm 확인은 로그·알림 캐시를 끄고 부른다). macOS 의 Tailscale 앱(앱 번들 안의 CLI)은 설치된 것으로 본다.
+- AGENTS.md 는 프로젝트 폴더 단위라 이 모듈에 넣지 않았다. `python -m jarvis agentsmd [--harness L] [--force] [--dry-run]` 이 지금 폴더에 옮긴 `setup_agentsmd` 워커를 부른다.
+
+## harness 모듈 (잠정)
+
+ai-setup 의 update-ai(`jarvis/modules/setup/res/update/update_ai.py`)를 감싼다. 계약 층은 `jarvis/harness_module.py` 다. 설치는 하지 않는다(setup 모듈).
+
+- status·plan: update-ai `--check` 와 같은 함수로 설치된 카탈로그 항목의 설치 방식·설치본·최신 판을 읽는다. 최신이 아닌 것은 `update` 단계(`update-ai --only <id>`, `target` 은 최신 판), 최신을 확인할 수 없으면 보고만 한다. codex 의 최신 판은 Codex 자신의 갱신 확인과 같은 GitHub 최신 릴리스(`rust-v<판>` 태그)로 읽는다. codex 관리형 데몬이나 실행 중 서버가 설치된 CLI 보다 오래되면(더 새로우면 그대로 둔다) `codex-daemon` 단계(`--allow-interrupt`, 돌고 있는 Codex 작업을 끊을 수 있어 `config`)다.
+- apply: 데몬 단계가 있으면 먼저 `update_ai.py --only codex --allow-interrupt` 를 따로 돌린다(이 플래그는 실행 전체에 걸리므로 다른 대상과 함께 넘기지 않는다). 나머지 대상은 플래그 없이 `--only <id,...>` 로 올린다. 결과는 다시 읽은 판으로 단계마다 판정한다(데몬 단계는 데몬·실행 중 서버 행 모두). 세션이 돌아 update-ai 가 보류한 대상은 `deferred` 다. update-ai 는 3000초 안에 끝내고, 넘으면 프로세스 그룹째 끊는다.
+- PATH 는 update-ai.sh 와 같이 사용자 bin·nvm 의 node(높은 판 먼저)·Homebrew 를 앞에 둔다(Windows 는 그대로).
+- uninstall 은 지울 것이 없다(하네스 제거는 setup 의 uninstall).

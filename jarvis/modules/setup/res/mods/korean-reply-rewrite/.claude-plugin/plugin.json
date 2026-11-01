@@ -1,0 +1,6 @@
+{
+  "name": "korean-reply-rewrite",
+  "version": "0.1.0",
+  "description": "Store English main-loop reply blocks in Korean after a Korean prompt, so the history stops pulling replies into English",
+  "author": { "name": "ai-setup" }
+}

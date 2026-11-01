@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-CATALOG = HERE / "catalog.json"
+CATALOG = HERE.parent / "setup" / "res" / "catalog.json"  # 하네스·도구 목록은 setup 모듈과 한 벌이다
 FRAGMENT = HERE.parent / "hooks" / "settings.json"
 RECEIPT = Path(".claude") / ".claude-code-setup.json"
 

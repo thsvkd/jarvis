@@ -1,0 +1,6 @@
+{
+  "name": "bash-diff-filter",
+  "version": "0.1.0",
+  "description": "Drop the OMC HUD stdin cache from the Bash changed-files view",
+  "author": { "name": "ai-setup" }
+}

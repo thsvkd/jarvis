@@ -2,7 +2,7 @@
 
 ## 개요
 
-jarvis 는 기기마다 상주하는 게이트웨이(호스트 자원·서비스·Orca 상태)와 그것을 모아 보여 주는 core 홈이다. ai-setup 의 기능(하네스 설치·갱신, 훅, 스킬·플러그인·MCP, Orca)을 모듈 단위로 흡수하는 중이다(`docs/2026-10-30-ai-setup-absorption.md`). 구조·설정·운영 방법은 `README.md` 가 소유한다.
+jarvis 는 기기마다 상주하는 게이트웨이(호스트 자원·서비스·Orca 상태)와 그것을 모아 보여 주는 core 홈이다. ai-setup 의 기능(하네스 설치·갱신, 훅, 스킬·플러그인·MCP, Orca)을 모듈 단위로 흡수했다(`docs/2026-10-30-ai-setup-absorption.md`). 구조·설정·운영 방법은 `README.md` 가 소유한다.
 
 ## 원칙
 
@@ -35,9 +35,10 @@ jarvis 는 기기마다 상주하는 게이트웨이(호스트 자원·서비스
 | 전체 단위 테스트 | `JARVIS_CONFIG=/dev/null python3 -m unittest discover -s tests` |
 | 단일 테스트 | `JARVIS_CONFIG=/dev/null python3 -m unittest tests.test_orca_module_install -v` |
 | 화면 공용 JS | `node tests/test_jarvis_js.mjs` |
+| 옮긴 셋업 셸 진입점 | `bats tests/setup.bats`, `pwsh -NoProfile -c "Invoke-Pester tests/Setup.Tests.ps1, tests/RmShim.Tests.ps1"` |
 | 스냅샷 스키마 비교 | `README.md` 의 검증 절 |
 
-테스트는 표준 라이브러리 unittest 만 쓴다(외부 러너·의존성을 들이지 않는다).
+테스트는 표준 라이브러리 unittest 만 쓴다(외부 러너·의존성을 들이지 않는다). ai-setup 에서 옮긴 셸 진입점의 bats·Pester 테스트만 예외로 원래 러너로 돈다.
 
 ## 규칙
 

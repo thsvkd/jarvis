@@ -19,7 +19,8 @@ from concurrent.futures import ThreadPoolExecutor
 from . import config, module
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TTL = {"orca": 60, "doctor": 600, "hooks": 300}  # status 캐시(초). doctor 는 하네스마다 --version 을 불러 수 초 걸린다
+TTL = {"orca": 60, "doctor": 600, "hooks": 300, "setup": 300, "harness": 1800}  # status 캐시(초). doctor 는 하네스마다 --version 을,
+# harness 는 최신 버전을 레지스트리·릴리스에 물어 수 초 걸린다
 STATUS_TIMEOUT_S = 120
 PLAN_TIMEOUT_S = 120
 APPLY_TIMEOUT_S = 3600
@@ -89,12 +90,14 @@ def status(force=False):
     """게이트웨이 GET /api/modules: 모듈마다 status 와 마지막 apply 작업."""
     out = {}
     with _status_lock:  # 같은 점검을 동시에 두 번 돌리지 않는다
+        stale = [n for n in module.MODULES if force or _cache.get(n, (0, 0, None))[2] is None
+                 or time.time() - _cache[n][0] > TTL.get(n, 60)]
+        # 모듈마다 하위 프로세스라 함께 돌린다. 차례로 돌리면 합이 core 의 기다림(STATUS_TIMEOUT_S + 10)을 넘는다
+        with ThreadPoolExecutor(max_workers=max(1, len(stale))) as pool:
+            for name, (code, body) in zip(stale, pool.map(lambda n: run(n, "status", timeout=STATUS_TIMEOUT_S), stale)):
+                _cache[name] = (time.time(), code, body)
         for name in module.MODULES:
-            at, code, body = _cache.get(name, (0, 0, None))
-            if force or body is None or time.time() - at > TTL.get(name, 60):
-                code, body = run(name, "status", timeout=STATUS_TIMEOUT_S)
-                at = time.time()
-                _cache[name] = (at, code, body)
+            at, code, body = _cache[name]
             out[name] = {**body, "checked_at": at, "ok": code == 0}
     with _job_lock:
         if not job and os.path.exists(MARK):  # 적용 중에 게이트웨이가 재시작했다
