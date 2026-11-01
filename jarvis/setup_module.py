@@ -158,6 +158,11 @@ def _plan(world, uninstall=False, check_sudo=True):
     for i, a in enumerate(actions, 1):
         step = {"id": f"{i}-{a.stage}", "summary": a.detail, "risk": "remove" if uninstall else _risk(a), "argv": list(a.argv),
                 "stage": a.stage}
+        # plan_id 가 실제로 돌 본문까지 묶게 한다: 하네스 설치는 카탈로그 명령, 설정 워커는 그 배포본의 다이제스트
+        if a.argv[:1] == ("install-harness",):
+            step["cmd"] = s._catalog_command(a.argv[-1], uninstall)
+        elif a.argv and a.argv[0] in INSTALLS:
+            step["digest"] = _refresh_digest(INSTALLS[a.argv[0]])
         if _needs_sudo(a):
             step["sudo"] = "unknown" if sudo is None else "ok" if sudo else "password"
             if sudo is False:

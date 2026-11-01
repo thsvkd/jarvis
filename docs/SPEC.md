@@ -1,6 +1,6 @@
 # SPEC
 
-> 상태: 확정(2026-10-30 사용자 확인 K1, K4·K10 은 5라운드). setup·harness 모듈 절은 잠정(2026-11-01, 확인 전). 범위: ai-setup 흡수의 모듈 계약과 각 모듈. 결정의 배경은 `2026-10-30-ai-setup-absorption.md` 가 소유한다.
+> 상태: 확정(2026-10-30 사용자 확인 K1, K4·K10 은 5라운드). setup·harness 모듈 절은 2026-11-01 확정. 범위: ai-setup 흡수의 모듈 계약과 각 모듈. 결정의 배경은 `2026-10-30-ai-setup-absorption.md` 가 소유한다.
 
 ## 모듈 계약
 
@@ -93,7 +93,7 @@ core 홈의 AI 셋업 화면(디자인 랩 05 의 C 안)은 기기마다 모듈 
 - status·plan 은 아무것도 쓰지 않는다. 병합은 메모리에서 미리 돌려 보고, 셀프테스트(guard.log 를 쓴다)는 apply 에서만 돈다.
 - ai-setup 이 설치한 기기는 영수증의 같은 키(`hook_files`, 권한 기록)를 읽어 이어서 관리한다. uninstall 은 영수증에 기록한 파일과 설치가 넣은 settings 항목만 걷어내고, 영수증의 다른 단계 기록은 남긴다. 영수증에 `hook_files` 가 없는 옛 설치는 ai-setup 과 같은 정해진 목록을 지운다. status 의 `version` 은 설치본, `latest` 는 배포본의 다이제스트다.
 
-## setup 모듈 (잠정)
+## setup 모듈
 
 코드는 `jarvis/modules/setup/` 이다. ai-setup 의 `res/`(단계 엔진 `stages.py`, 카탈로그, 플러그인 목록, 번들 스킬, 키바인드·출력 스타일·mod·OMC HUD 워커, npm-release, update-ai, AGENTS.md 틀)와 `scripts/`(워커와 `setup.sh`·`setup.ps1`)를 같은 배치로 옮겼다. 온보딩 TUI 와 `install.sh`·`install.ps1` 부트스트랩은 옮기지 않았다. 옮긴 `setup.sh`·`setup.ps1` 은 개별 옵션(`--keybinds`·`--skills` 등)을 그대로 받고, 인자가 없으면 아무것도 설치하지 않고 이 모듈을 안내한다. 계약 층은 `jarvis/setup_module.py` 다.
 
@@ -104,13 +104,16 @@ core 홈의 AI 셋업 화면(디자인 랩 05 의 C 안)은 기기마다 모듈 
 - sudo(2026-11-01 사용자 결정 "sudo 단계도 안전하게"): 게이트웨이에는 TTY 가 없으므로 계획의 모든 sudo 는 `sudo -n` 으로 바꿔 비밀번호를 기다리며 멈추지 않게 한다. plan 은 `sudo -n true` 로 비밀번호 없는 sudo(NOPASSWD 또는 유효한 캐시)를 쓸 수 있는지 보고 sudo 단계에 `sudo: ok|password` 를 붙인다(plan_id 에 묶인다). status 는 sudo 를 부르지 않는다(읽을 때마다 auth 로그에 남지 않게). `password` 인 단계는 apply 가 실행하지 않고 `skipped` 와 터미널에서 칠 명령을 남기며, 나머지 단계는 계속한다(원래 AI-35).
 - uninstall: 엔진의 제거 계획(영수증에 기록한 것만)이다. dry-run 의 plan_id 를 받아야 실행한다. jarvis 게이트웨이 유닛과 Tailscale 은 지우지 않고 영수증 기록도 남긴다(원격으로 지우면 연결이 끊긴다, 2026-11-01 사용자 결정).
 - status: `details` 는 `{harnesses: [PATH 에 있는 하네스], recorded: {영수증 키: 기록}, pending: [단계 요약], sudo_steps: <sudo 단계 수>}`, 할 일이 있으면 `health=degraded` 다. 읽기만 한다(npm 확인은 로그·알림 캐시를 끄고 부른다). macOS 의 Tailscale 앱(앱 번들 안의 CLI)은 설치된 것으로 본다.
+- 하네스 설치 단계는 카탈로그의 설치 명령(`cmd`)을, 설정 워커의 설치 단계는 그 워커 배포본의 다이제스트(`digest`)를 단계에 넣어 plan_id 에 묶는다(승인한 계획과 다른 본문이 돌면 stale).
+- AGENTS.md 틀은 `res/templates/*.md.tmpl` 이다(이름이 AGENTS.md·CLAUDE.md 면 그 폴더를 만지는 에이전트가 지시로 읽는다).
 - AGENTS.md 는 프로젝트 폴더 단위라 이 모듈에 넣지 않았다. `python -m jarvis agentsmd [--harness L] [--force] [--dry-run]` 이 지금 폴더에 옮긴 `setup_agentsmd` 워커를 부른다.
 
-## harness 모듈 (잠정)
+## harness 모듈
 
 ai-setup 의 update-ai(`jarvis/modules/setup/res/update/update_ai.py`)를 감싼다. 계약 층은 `jarvis/harness_module.py` 다. 설치는 하지 않는다(setup 모듈).
 
 - status·plan: update-ai `--check` 와 같은 함수로 설치된 카탈로그 항목의 설치 방식·설치본·최신 판을 읽는다. 최신이 아닌 것은 `update` 단계(`update-ai --only <id>`, `target` 은 최신 판), 최신을 확인할 수 없으면 보고만 한다. codex 의 최신 판은 Codex 자신의 갱신 확인과 같은 GitHub 최신 릴리스(`rust-v<판>` 태그)로 읽는다. codex 관리형 데몬이나 실행 중 서버가 설치된 CLI 보다 오래되면(더 새로우면 그대로 둔다) `codex-daemon` 단계(`--allow-interrupt`, 돌고 있는 Codex 작업을 끊을 수 있어 `config`)다.
 - apply: 데몬 단계가 있으면 먼저 `update_ai.py --only codex --allow-interrupt` 를 따로 돌린다(이 플래그는 실행 전체에 걸리므로 다른 대상과 함께 넘기지 않는다). 나머지 대상은 플래그 없이 `--only <id,...>` 로 올린다. 결과는 다시 읽은 판으로 단계마다 판정한다(데몬 단계는 데몬·실행 중 서버 행 모두). 세션이 돌아 update-ai 가 보류한 대상은 `deferred` 다. update-ai 는 3000초 안에 끝내고, 넘으면 프로세스 그룹째 끊는다.
+- 설치본 판(`--version`)은 doctor 와 같이 홈·설정·캐시를 임시 폴더로 돌린 환경에서 먼저 읽는다(gemini·opencode 는 `--version` 만 불러도 홈에 쓴다). 그 환경에서 판을 내지 못하는 것(래퍼를 거치는 codex, 설정이 필요한 grok)은 update-ai 와 같은 실제 홈으로 다시 읽는다(판정이 update-ai 와 갈리지 않게). 설치본 판을 모르면 계획하지 않는다. 최신 판과 codex 데몬은 실제 홈으로 읽는다.
 - PATH 는 update-ai.sh 와 같이 사용자 bin·nvm 의 node(높은 판 먼저)·Homebrew 를 앞에 둔다(Windows 는 그대로).
 - uninstall 은 지울 것이 없다(하네스 제거는 setup 의 uninstall).

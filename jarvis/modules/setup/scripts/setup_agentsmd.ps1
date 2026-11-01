@@ -123,13 +123,13 @@ Write-Host "🔧 Installing project instructions... (harnesses: $($selected -joi
 
 # AGENTS.md is the shared source for every harness, including Claude Code, which
 # reaches it through the CLAUDE.md import.
-Install-InstructionFile -Source (Join-Path $RepoRoot "res\AGENTS.md") -Target (Join-Path $ProjectDir "AGENTS.md")
+Install-InstructionFile -Source (Join-Path $RepoRoot "res\templates\AGENTS.md.tmpl") -Target (Join-Path $ProjectDir "AGENTS.md")
 
 if ($selected.Contains("claude")) {
     $claudeTarget = Join-Path $ProjectDir "CLAUDE.md"
     $hadClaudeMd = Test-Path $claudeTarget
 
-    Install-InstructionFile -Source (Join-Path $RepoRoot "res\CLAUDE.md") -Target $claudeTarget
+    Install-InstructionFile -Source (Join-Path $RepoRoot "res\templates\CLAUDE.md.tmpl") -Target $claudeTarget
 
     # Skipping an existing CLAUDE.md is the right default -- it is user content.
     # But if that file does not import AGENTS.md, Claude Code never reads the

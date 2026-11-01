@@ -1,4 +1,4 @@
-"""macOS 설치기(install.sh): 가짜 uname·uv·launchctl 과 가짜 jarvis 릴리스로 돌린다. 실제 홈·launchd·Orca 는 건드리지 않는다."""
+"""설치기(install.sh): 가짜 uname·uv·launchctl·systemctl 과 가짜 jarvis 릴리스로 돌린다. 실제 홈·launchd·systemd·Orca 는 건드리지 않는다."""
 import hashlib
 import json
 import os
@@ -16,6 +16,9 @@ STUBS = {
 if [ "$1" = venv ]; then mkdir -p "$4/bin" && ln -sf "$(command -v python3)" "$4/bin/python"; fi''',
     "launchctl": '''echo "launchctl $*" >> "$LOG"
 case "$1" in print) [ -f "$HOME/.loaded" ] ;; bootstrap) touch "$HOME/.loaded" ;; esac''',
+    "systemctl": '''echo "systemctl $*" >> "$LOG"
+case "$2" in is-active) [ -f "$HOME/.active" ] ;; enable) touch "$HOME/.active" ;; esac''',
+    "loginctl": 'echo "loginctl $*" >> "$LOG"',
 }
 
 FAKE_MAIN = '''import json, os, sys
@@ -45,6 +48,7 @@ class InstallTest(unittest.TestCase):
         os.makedirs(os.path.join(src, "jarvis"))
         os.makedirs(os.path.join(src, "deploy"))
         shutil.copy(os.path.join(ROOT, "deploy", "jarvis.plist"), os.path.join(src, "deploy"))
+        shutil.copy(os.path.join(ROOT, "deploy", "jarvis.service"), os.path.join(src, "deploy"))
         with open(os.path.join(src, "jarvis", "__init__.py"), "w"):
             pass
         with open(os.path.join(src, "jarvis", "__main__.py"), "w") as f:
@@ -60,6 +64,10 @@ class InstallTest(unittest.TestCase):
         self.log = os.path.join(self.tmp, "log")
         self.env = {"HOME": self.home, "LOG": self.log, "PATH": bin_dir + ":/usr/bin:/bin",
                     "JARVIS_MANIFEST": "file://" + self.manifest}
+
+    def linux(self):
+        with open(os.path.join(self.env["PATH"].split(":")[0], "uname"), "w") as f:
+            f.write("#!/bin/sh\necho Linux\n")
 
     def run_install(self, *args):
         return subprocess.run(["sh", os.path.join(ROOT, "install.sh"), *args], env=self.env,
@@ -120,6 +128,52 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertEqual(os.listdir(self.home), [])
         self.assertFalse(os.path.exists(self.log))
+
+    def test_fresh_linux_gets_a_user_unit_on_the_venv_python_and_the_modules(self):
+        """covers: BOOT-2"""
+        self.linux()
+        r = self.run_install("--core", "100.115.245.91")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        unit = self.read(".config", "systemd", "user", "jarvis.service")
+        self.assertIn(f"ExecStart={self.home}/.local/share/jarvis/venv/bin/python -m jarvis", unit)
+        self.assertNotIn("/usr/bin/python3", unit)
+        config = self.read(".config", "jarvis", "config.toml")
+        self.assertIn('core = ["100.115.245.91"]', config)
+        self.assertNotIn("[infra_units]", config)  # Linux 는 기본 유닛 이름을 쓴다
+        self.assertFalse(os.path.exists(os.path.join(self.home, "Library")))
+        with open(self.log) as f:
+            log = f.read().splitlines()
+        self.assertIn("loginctl enable-linger " + os.environ.get("USER", subprocess.check_output(["id", "-un"], text=True).strip()), log)
+        self.assertIn("systemctl --user enable --now jarvis", log)
+        self.assertNotIn("uv pip install --quiet --python %s/.local/share/jarvis/venv/bin/python psutil pystray pillow" % self.home, log)
+        self.assertEqual([line for line in log if line.startswith("jarvis ")],
+                         ["jarvis module orca plan --json", "jarvis module orca apply --json --plan-id abc123",
+                          "jarvis module hooks plan --json", "jarvis module hooks apply --json --plan-id abc123",
+                          "jarvis module setup plan --json", "jarvis module setup apply --json --plan-id abc123"])
+
+    def test_linux_rerun_keeps_the_unit_and_does_not_restart_a_running_gateway(self):
+        """covers: BOOT-2"""
+        self.linux()
+        self.assertEqual(self.run_install("--core", "100.115.245.91").returncode, 0)
+        unit = os.path.join(self.home, ".config", "systemd", "user", "jarvis.service")
+        with open(unit, "a") as f:
+            f.write("# 사용자가 고친 줄\n")
+        before = self.read(".config", "systemd", "user", "jarvis.service")
+        os.remove(self.log)
+        r = self.run_install()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.read(".config", "systemd", "user", "jarvis.service"), before)
+        with open(self.log) as f:
+            self.assertNotIn("systemctl --user enable --now jarvis", f.read())
+
+    def test_other_systems_are_refused_before_writing(self):
+        """covers: BOOT-2"""
+        with open(os.path.join(self.env["PATH"].split(":")[0], "uname"), "w") as f:
+            f.write("#!/bin/sh\necho MINGW64_NT\n")
+        r = self.run_install("--core", "100.115.245.91")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("install.ps1", r.stderr)
+        self.assertEqual(os.listdir(self.home), [])
 
 
 if __name__ == "__main__":

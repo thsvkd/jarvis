@@ -131,14 +131,14 @@ echo "🔧 Installing project instructions... (harnesses: $(printf '%s' "$SELECT
 
 # AGENTS.md is the shared source for every harness, including Claude Code, which
 # reaches it through the CLAUDE.md import.
-install_file "$REPO_ROOT/res/AGENTS.md" "$PROJECT_DIR/AGENTS.md"
+install_file "$REPO_ROOT/res/templates/AGENTS.md.tmpl" "$PROJECT_DIR/AGENTS.md"
 
 if has_harness claude; then
     CLAUDE_TARGET="$PROJECT_DIR/CLAUDE.md"
     HAD_CLAUDE_MD=0
     [[ -f "$CLAUDE_TARGET" ]] && HAD_CLAUDE_MD=1
 
-    install_file "$REPO_ROOT/res/CLAUDE.md" "$CLAUDE_TARGET"
+    install_file "$REPO_ROOT/res/templates/CLAUDE.md.tmpl" "$CLAUDE_TARGET"
 
     # Skipping an existing CLAUDE.md is the right default -- it is user content.
     # But if that file does not import AGENTS.md, Claude Code never reads the

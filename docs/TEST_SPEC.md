@@ -1,6 +1,6 @@
 # TEST_SPEC
 
-> 상태: 확정(2026-10-30 사용자 확인 K1, ORCA-8 은 사용자 결정으로 고침, Windows 갱신 방식 K4·K10 은 5라운드). 셋업·하네스·AGENTS.md 절은 잠정이다(2026-11-01 사용자 결정 "AI-n 을 옮겨 잠정 등록", 확인 전). 목록의 추가·수정·삭제는 사용자만 닫는다.
+> 상태: 확정(2026-10-30 사용자 확인 K1, ORCA-8 은 사용자 결정으로 고침, Windows 갱신 방식 K4·K10 은 5라운드). 셋업·하네스 갱신·AGENTS.md 절과 BOOT-2·3 은 2026-11-01 사용자가 확정했다. 목록의 추가·수정·삭제는 사용자만 닫는다.
 > 모든 케이스는 격리된 임시 HOME 과 대체한 명령으로 검증한다. 실제 사용자 홈, 실제 Orca 서비스, 실제 설치기, 실제 페어링은 쓰지 않는다.
 > 테스트는 docstring·주석에 `covers: ORCA-n` 을 적는다. ai-setup 에서 옮긴 테스트는 괄호 안에 원래 ID(AI-n)를 남긴다.
 
@@ -42,6 +42,8 @@
 
 | ID | 케이스 | 테스트 | 상태 |
 | --- | --- | --- | --- |
+| BOOT-2 | WHEN Linux 에서 `install.sh --core <tailnet IP>` 를 실행하면 THE SYSTEM SHALL macOS 와 같은 릴리스·설정·모듈 흐름에 LaunchAgent 대신 venv 의 python 을 부르는 systemd 사용자 유닛을 없을 때만 만들어 켜고(linger 를 시도), 다시 실행해도 유닛을 바꾸거나 돌고 있는 게이트웨이를 다시 띄우지 않으며, 그 밖의 시스템은 아무것도 쓰기 전에 거절한다 | `tests/test_install_sh.py` | GREEN (단위. 실제 새 Linux 기기 전체 실행 미검증) |
+| BOOT-3 | WHEN Windows 관리자 PowerShell 에서 `install.ps1 -Core <tailnet IP>` 를 실행하면 THE SYSTEM SHALL Python 3.11+ 가 없을 때만 winget 으로 깔고, sha256 을 통과한 최신 릴리스를 없을 때만 풀며, 설정을 없을 때만 BOM 없는 UTF-8 로 만들고, 게이트웨이 예약 작업이 없을 때만 `deploy\install-windows.ps1` 을 실행한 뒤(다시 실행해도 돌고 있는 게이트웨이를 다시 띄우지 않는다) 모듈 plan → apply 를 실행한다. tailnet 이 아닌 core·관리자 아님은 아무것도 쓰기 전에 거절하고, `-DryRun` 은 할 일만 보이며, `irm \| iex` 로 실행해도 셸을 닫지 않는다 | kgolf 실측(Windows PowerShell 5.1, scriptblock 실행) | 부분 (kgolf(5.1) 실측: -DryRun 은 이미 있는 저장소·설정·게이트웨이 작업을 건너뛰고 모듈 단계만 보임, tailnet 밖·자리 범위 밖 core 거절, scriptblock 실행에서 셸 유지, 설정 쓰기는 CRLF·LF 원본 모두 BOM 없는 UTF-8 로 tomllib 이 core 를 읽고 한국어 보존. Pester 는 BOM 없음·파싱만. 새 Windows 기기 전체 실행 미검증) |
 | BOOT-1 | WHEN macOS 에서 `install.sh --core <tailnet IP>` 를 실행하면 THE SYSTEM SHALL sha256 을 통과한 최신 릴리스를 풀고, 설정·LaunchAgent 를 없을 때만 만들어 띄우며, 모듈을 plan 의 plan_id 로 apply 한다. 다시 실행해도 기존 설정을 덮어쓰지 않는다. | `tests/test_install_sh.py` | 단위 GREEN (Mac 도구 부분은 thsvkd-kgolf-macmini 임시 폴더에서 확인: uv venv, 릴리스 sha256·압축 해제, plist lint. 새 Mac 전체 실행 미검증) |
 
 ## doctor
@@ -76,7 +78,7 @@ ai-setup 의 AI-1~AI-6 을 옮긴 것이다. 테스트 본문은 원본과 같�
 | HOOKS-3 | WHEN `~/.claude/hooks` 에 설치 기록에 없는 같은 이름 파일이 있으면 THE SYSTEM SHALL 그 파일을 덮어쓰지도 영수증에 넣지도 않고 막힘으로 보고한다(다른 파일이 모두 최신이어도, 몇 번을 apply 해도) | `tests/test_hooks_module.py` | GREEN (단위) |
 | HOOKS-4 | WHEN 훅을 uninstall 하면 THE SYSTEM SHALL dry-run 의 plan_id 가 맞을 때만 기록한 파일과 설치가 넣은 settings 항목만 지우고 영수증의 다른 단계 기록은 남긴다 | `tests/test_hooks_module.py` | GREEN (단위) |
 
-## 셋업 (잠정)
+## 셋업
 
 ai-setup 의 단계형 설치(`res/stages.py` 와 워커)를 `jarvis/modules/setup/` 로 옮긴 것이다. 옮긴 테스트(`tests/test_stages.py`·`test_keybinds.py`·`test_skills.py`·`test_mods.py`·`test_output_style.py`·`test_omc_hud.py`·`test_npm_release.py`·`test_setup_scripts.py`·`test_update_ai.py`, bats `tests/setup.bats`, Pester `tests/Setup.Tests.ps1`)는 원본 그대로(대상 경로와 아래 표시한 것만 바꿈) 함께 돈다. 옮기지 않은 것: 온보딩 TUI(`res/onboard.py`·`res/tui.py`, 원래 AI-45~47 은 core 의 AI 셋업 화면이 대신한다), `install.sh`·`install.ps1` 부트스트랩, ai-setup 진입점의 jarvis 안내(원래 AI-66·68·69 는 ai-setup 에 남는다).
 
@@ -91,7 +93,7 @@ ai-setup 의 단계형 설치(`res/stages.py` 와 워커)를 `jarvis/modules/set
 | SETUP-9 | WHEN 하네스의 선행 조건(예: Node 버전)이 맞지 않으면 THE SYSTEM SHALL 설치하지 않고 필요한 조건을 안내한다 | – | 미착수 (ai-setup 에서도 미착수) · 원래 AI-16 |
 | SETUP-10 | WHEN `--dry-run` 과 함께 설치 단계를 실행하면 THE SYSTEM SHALL 호출할 명령만 출력하고 아무것도 실행하지 않는다 | – | 미착수 (ai-setup 에서도 미착수) · 원래 AI-17 |
 | SETUP-11 | WHEN `--install-harness` 를 `--uninstall` 과 함께 실행하면 THE SYSTEM SHALL 영수증에 기록된 항목만 기록된 설치 방식의 제거 명령으로 지우고, 원래 있던 항목과 설정·인증 디렉터리는 남긴다 | – | 미착수 (ai-setup 에서도 미착수) · 원래 AI-34 |
-| SETUP-12 | WHEN setup 모듈이 sudo 가 필요한 단계를 계획·실행하면 THE SYSTEM SHALL 명령 전체를 계획에 보이고, 모든 sudo 를 `sudo -n` 으로 불러 비밀번호를 기다리지 않으며, 비밀번호 없는 sudo 를 쓸 수 없으면 실행하지 않고 건너뛴 것으로 보고(터미널에서 칠 명령을 남김)한 뒤 나머지 단계를 계속한다 | `tests/test_setup_module.py::test_sudo_steps_never_prompt_and_are_skipped_without_passwordless_sudo` | GREEN (단위. 원래 AI-35 의 "TTY 가 아니면 건너뜀"을 사용자 결정(2026-11-01 "sudo 단계도 안전하게 진행할 대책")으로 "비밀번호 없는 sudo 가 없으면 건너뜀"으로 바꿈. 옮긴 setup.sh 를 터미널에서 직접 부르는 경로는 확인하지 않음) · 원래 AI-35 |
+| SETUP-12 | WHEN setup 모듈이 sudo 가 필요한 단계를 계획·실행하면 THE SYSTEM SHALL 명령 전체를 계획에 보이고, 모든 sudo 를 `sudo -n` 으로 불러 비밀번호를 기다리지 않으며, 비밀번호 없는 sudo 를 쓸 수 없으면 실행하지 않고 건너뛴 것으로 보고(터미널에서 칠 명령을 남김)한 뒤 나머지 단계를 계속한다 | `tests/test_setup_module.py::test_sudo_steps_never_prompt_and_are_skipped_without_passwordless_sudo` | GREEN (단위. 원래 AI-35 의 "TTY 가 아니면 건너뜀"을 사용자 결정(2026-11-01 "sudo 단계도 안전하게 진행할 대책")으로 "비밀번호 없는 sudo 가 없으면 건너뜀"으로 바꿈. 옮긴 setup.sh 를 터미널에서 직접 부르는 경로는 2026-11-01 가짜 TTY 실측: git 이 없는 PATH 에서 `setup.sh --stages base` 가 TTY 를 붙인 채 `sudo apt-get install -y git` 을 실행) · 원래 AI-35 |
 | SETUP-13 | WHEN 옮긴 `setup.sh`·`setup.ps1` 을 인자 없이 실행하면 THE SYSTEM SHALL 아무것도 설치하지 않고 jarvis setup 모듈(core 의 AI 셋업 화면)을 안내한 뒤 종료 코드 1 로 끝낸다 | `tests/test_keybinds.py::test_ci_skips_onboarding_and_installs_all_with_shift_enter`, bats `setup.sh with no args points to the jarvis setup module …`, Pester `no arguments points to the jarvis setup module …` | GREEN (단위. 온보딩을 옮기지 않아 종료 코드가 0 에서 1 로 바뀜) · 원래 AI-36·AI-42 |
 | SETUP-14 | WHEN tools 단계나 `--stages all --uninstall` 을 실행하면 THE SYSTEM SHALL Orca 를 설치·제거하지 않고 영수증의 `tool_installs.orca`·`tool_installs.orca_server` 를 그대로 둔다(jarvis 의 Orca 모듈이 같은 키를 읽고 제거한다) | `tests/test_stages.py::test_tools_and_full_uninstall_leave_orca_and_its_receipt_records_to_jarvis`, bats `setup.sh --uninstall keeps the hooks …` | GREEN · 원래 AI-67 |
 | SETUP-15 | WHEN 선택한 플러그인이 이미 설치되어 있으면 THE SYSTEM SHALL 다시 설치하지 않고 영수증에 기록하지 않는다 | – | 미착수 (ai-setup 에서도 미착수) · 원래 AI-19 |
@@ -116,7 +118,7 @@ ai-setup 의 단계형 설치(`res/stages.py` 와 워커)를 `jarvis/modules/set
 | SETUP-34 | WHEN 같은 단계 선택을 첫 계획이 만든 상태에 다시 계획하면 THE SYSTEM SHALL 추가 쓰기 액션을 내지 않는다 | `test_second_plan_against_post_state_does_not_write` | GREEN · 원래 AI-43 |
 | SETUP-35 | WHEN Jarvis 역할을 고르지 않으면 THE SYSTEM SHALL Jarvis 설치를 계획하지 않고, Tailscale 제거는 logout 을 포함하지 않으며, 기록하지 않은 Jarvis 유닛은 지우지 않는다 | `test_jarvis_herdr_and_setcap_follow_explicit_choice`, `test_uninstall_removes_only_recorded_units_and_packages` | GREEN · 원래 AI-44 |
 
-## 하네스 갱신 (잠정)
+## 하네스 갱신
 
 ai-setup 의 update-ai(`res/update/update_ai.py`)를 옮긴 것이다. 아래 HARNESS-4 부터는 옮긴 엔진의 케이스이고, 테스트는 원본 그대로인 `tests/test_update_ai.py`·`tests/test_npm_release.py` 다.
 
@@ -141,8 +143,8 @@ ai-setup 의 update-ai(`res/update/update_ai.py`)를 옮긴 것이다. 아래 HA
 | HARNESS-17 | WHEN brew 로 설치된 대상을 업데이트하면 THE SYSTEM SHALL `HOMEBREW_NO_INSTALL_CLEANUP=1` 을 주고 실행한다 | `test_brew_update_keeps_the_old_version_for_running_sessions` | GREEN (단위; macOS 실측 전) · 원래 AI-62 |
 | HARNESS-18 | WHEN `update-ai` 가 확인한 설치본이 최신 릴리스와 같거나 더 새로우면 THE SYSTEM SHALL `--check` 와 갱신 뒤 검사 모두에서 최신으로 판정한다 | `tests/test_update_ai.py::test_an_install_newer_than_the_latest_release_counts_as_up_to_date` | GREEN (단위) · 원래 AI-65 |
 
-## AGENTS.md (잠정)
+## AGENTS.md
 
 | ID | 케이스 | 테스트 | 상태 |
 | --- | --- | --- | --- |
-| AGENTSMD-1 | WHEN `python -m jarvis agentsmd [--harness L] [--force] [--dry-run]` 를 실행하면 THE SYSTEM SHALL 지금 폴더에 ai-setup 의 setup_agentsmd 워커와 같은 결과(고른 하네스의 AGENTS.md·CLAUDE.md, 있는 파일은 --force 없이 두기)를 만든다 | `tests/test_setup_module.py::AgentsMdCliTest`, bats `setup_agentsmd.sh …` 10건, Pester `project instructions harness selection` | GREEN (단위. Windows 의 CLI 경로는 미검증) |
+| AGENTSMD-1 | WHEN `python -m jarvis agentsmd [--harness L] [--force] [--dry-run]` 를 실행하면 THE SYSTEM SHALL 지금 폴더에 ai-setup 의 setup_agentsmd 워커와 같은 결과(고른 하네스의 AGENTS.md·CLAUDE.md, 있는 파일은 --force 없이 두기)를 만든다 | `tests/test_setup_module.py::AgentsMdCliTest`, bats `setup_agentsmd.sh …` 10건, Pester `project instructions harness selection` | GREEN (단위. kgolf(Windows) 임시 폴더 실측: dry-run 은 아무것도 쓰지 않음, claude,codex 는 AGENTS.md·CLAUDE.md(`@AGENTS.md`), 모르는 하네스는 종료 코드 1) |

@@ -428,6 +428,21 @@ Describe "Windows .ps1 encoding regression (BOM)" {
 # 명령의 0이 아닌 종료 코드가 예외로 승격되어 첫 설치가 통째로 실패한다 (실측 재현됨). 이 저장소는
 # 공유 send2trash 패키지를 설치/제거하며 동적으로 재현하는 대신, 방어 코드가 소스에 남아있는지
 # 정적으로 확인한다 (동적 재현은 Phase 2 수기 검증에서 이미 수행함 — docs/HANDOFF.md 참고).
+Describe "jarvis install.ps1 (irm | iex path)" {
+    # irm | iex 는 BOM 을 U+FEFF 문자로 남겨 5.1 파서가 첫 줄부터 무너진다(ai-setup 의 같은 가드를 옮김)
+    It "install.ps1 must start without a BOM" {
+        $bytes = [System.IO.File]::ReadAllBytes((Join-Path $script:RepoRoot "..\..\..\install.ps1"))
+        $hasBom = ($bytes.Length -ge 3) -and ($bytes[0] -eq 0xEF) -and ($bytes[1] -eq 0xBB) -and ($bytes[2] -eq 0xBF)
+        $hasBom | Should -Be $false
+    }
+
+    It "install.ps1 parses" {
+        $errors = $null; $tokens = $null
+        [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:RepoRoot "..\..\..\install.ps1"), [ref]$tokens, [ref]$errors)
+        $errors.Count | Should -Be 0
+    }
+}
+
 Describe "native command error escalation guard regression (S1)" {
     It "scripts that judge native commands by LASTEXITCODE explicitly turn off PSNativeCommandUseErrorActionPreference" {
         $files = @(

@@ -1,6 +1,8 @@
 """harness 모듈의 계약 층: update-ai 엔진을 가짜로 바꿔 status·plan·apply 가 무엇을 읽고 부르는지 본다.
 실제 하네스·레지스트리·update-ai 는 부르지 않는다."""
 import os
+import re
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,7 +17,7 @@ class FakeUpdateAi:
     def __init__(self, catalog, installed, latest, daemon=None):
         self.CATALOG = catalog
         self.installed, self.latest, self.daemon = installed, latest, daemon
-        self.calls = []
+        self.calls, self.homes = [], []
 
     def locations(self, name):
         return [f"/bin/{name}"] if name in self.installed else []
@@ -23,8 +25,12 @@ class FakeUpdateAi:
     def method_for(self, entry, path):
         return "default", None
 
-    def version_of(self, path):
-        return self.installed[os.path.basename(path)]
+    VERSION_RE = re.compile(r"\d+\.\d+\.\d+[-.\w]*")
+
+    def run_quiet(self, argv, timeout=60, env=None):
+        """`<bin> --version` 만 온다. 어느 홈으로 불렀는지 기록한다."""
+        self.homes.append((env or os.environ).get("HOME"))
+        return subprocess.CompletedProcess(argv, 0, self.installed[os.path.basename(argv[0])] + "\n", "")
 
     def latest_of(self, entry, path, method, value):
         self.calls.append(("latest", entry["id"]))
@@ -89,6 +95,28 @@ class HarnessModuleTest(unittest.TestCase):
                          [("gemini", "update", ["update-ai", "--only", "gemini"], "0.66.0")])
         self.assertNotIn(("latest", "codex"), self.fake.calls)  # 설치되지 않은 것은 묻지도 않는다
         self.assertEqual(self.updates, [])
+
+    def test_versions_are_read_in_a_scratch_home(self):
+        """covers: HARNESS-1
+        gemini·opencode 는 --version 만 불러도 홈에 상태 파일을 쓴다. status 는 실제 홈을 건드리지 않는다."""
+        self.use(installed={"claude": "2.0.0", "gemini": "0.65.0"}, latest={})
+        harness.status()
+        self.assertEqual(len(self.fake.homes), 2)
+        self.assertTrue(all(h and h != os.path.expanduser("~") and "jarvis-harness-" in h for h in self.fake.homes), self.fake.homes)
+        self.assertFalse(any(os.path.exists(h) for h in self.fake.homes))  # 끝나면 지운다
+
+    def test_a_version_the_scratch_home_cannot_read_falls_back_to_the_real_home(self):
+        """covers: HARNESS-1
+        래퍼를 거치는 codex·설정이 있어야 도는 grok 은 임시 홈에서 판을 내지 못한다. update-ai 와 같은 실제 홈으로
+        다시 읽어야 계획과 갱신 뒤 판정이 update-ai 와 갈리지 않는다(빈 판을 outdated 로 보면 늘 실패한다)."""
+        self.use(installed={"gemini": "0.66.0"}, latest={"gemini": "0.66.0"})
+        self.fake.run_quiet = lambda argv, timeout=60, env=None: subprocess.CompletedProcess(argv, 1, "", "no config")
+        self.fake.version_of = lambda path: self.fake.installed[os.path.basename(path)]
+        self.assertEqual(harness.status()["details"]["tools"][0]["state"], "current")
+        self.assertEqual(harness.plan()["steps"], [])
+        self.fake.version_of = lambda path: ""  # 어디서도 판을 모르면 계획하지 않는다
+        self.assertEqual(harness.status()["details"]["tools"][0]["state"], "unknown")
+        self.assertEqual(harness.plan()["steps"], [])
 
     def test_unknown_latest_is_reported_but_not_planned(self):
         """covers: HARNESS-1"""

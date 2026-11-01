@@ -161,6 +161,7 @@ core 홈(`/`) 위쪽에 기기 목록과 페어링 버튼이 생기고, `/?devic
 모니터는 도커가 아니라 **호스트 프로세스**다. 도커가 멈춰도 모니터는 살아서 "Docker 다운"을 보여 줘야 하고,
 호스트 전체(프로세스·cgroup·소켓·PMIC)를 봐야 하므로 컨테이너 격리가 이득이 없다.
 Linux 기기(s2·pit5·pi5-s3·cm5-1)는 모두 systemd 사용자 유닛 `jarvis`(deploy/jarvis.service)로 돈다.
+새 Linux 기기는 macOS 와 같은 `install.sh` 한 줄로 설치한다(아래 macOS 절). 유닛만 venv 의 python 을 부르는 사용자 유닛으로 만들고 linger 를 켠다.
 
 ```sh
 systemctl --user status jarvis           # 상태
@@ -213,15 +214,15 @@ s2(Linux)에서 `sys.platform` 을 darwin 으로 바꿔 크래시 없이 스냅�
 - `macmon pipe -s 1` 의 JSON 키(temp.cpu_temp_avg·gpu_usage·sys_power)
 - APFS 볼륨 목록(`/`·`/System/Volumes/Data`·`/Volumes/*` 만 남기는지), 인터페이스 이름(en0·utun·bridge)
 
-설치(새 Mac 포함. git·Homebrew 가 없어도 된다):
+설치(새 Mac·Linux 포함. git·Homebrew 가 없어도 된다):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh -s -- --core 100.115.245.91
 ```
 
 `install.sh` 는 uv 로 Python venv(`~/.local/share/jarvis/venv`)를 만들고, 최신 릴리스 묶음을 sha256 으로 확인해 `~/Workspace/jarvis` 에 푼다.
-그다음 설정 파일과 LaunchAgent(`dev.jarvis`)를 만들고, 모듈(Orca·훅·셋업)을 plan 으로 보인 뒤 그 plan_id 로 apply 한다.
-이미 있는 설정·LaunchAgent·저장소는 덮어쓰지 않으므로 다시 실행해도 된다. Tailscale·Orca·하네스 로그인과 core 의 `devices` 등록은 직접 한다.
+그다음 설정 파일과 LaunchAgent(`dev.jarvis`, Linux 는 systemd 사용자 유닛 `jarvis`)를 만들고, 모듈(Orca·훅·셋업)을 plan 으로 보인 뒤 그 plan_id 로 apply 한다.
+이미 있는 설정·LaunchAgent·유닛·저장소는 덮어쓰지 않으므로 다시 실행해도 된다. Tailscale·Orca·하네스 로그인과 core 의 `devices` 등록은 직접 한다.
 
 수동 설치:
 
@@ -242,6 +243,12 @@ launchctl bootout gui/$(id -u)/dev.jarvis                 # 잠시 끄기(다음
 
 Windows 는 게이트웨이로만 돈다: Orca 데스크톱 앱(`%APPDATA%\orca`)의 페어링 코드와 호스트 자원(CPU·메모리·디스크·네트워크·프로세스).
 서비스 관리자·Docker·Caddy 수집은 없다. SSH 세션에서 띄운 프로세스는 세션이 끝나면 죽으므로 예약 작업(로그온 시)으로 돌린다.
+
+새 기기는 관리자 PowerShell 에서 한 줄로 설치한다. Python 이 없으면 winget 으로 깔고, 최신 릴리스를 sha256 으로 확인해 `%USERPROFILE%\Workspace\jarvis` 에 푼 뒤 아래 `deploy\install-windows.ps1` 과 모듈(Orca·훅·셋업) 적용까지 한다. `-DryRun` 은 할 일만 보인다.
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/thsvkd/jarvis/main/install.ps1))) -Core 100.115.245.91
+```
 
 ```powershell
 # 저장소: git clone https://github.com/thsvkd/jarvis.git (갱신은 core 의 jarvis 업데이트 버튼이 GitHub 릴리스를 받는다)

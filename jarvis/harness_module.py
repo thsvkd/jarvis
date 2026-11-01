@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -71,29 +72,45 @@ def _rows():
     """update-ai --check 의 표를 구조로. [{id, method, version, latest, state}]"""
     u = tools()
     rows, table = [], None
-    catalog = json.loads(Path(u.CATALOG).read_text(encoding="utf-8"))
-    with _env_path(), contextlib.redirect_stdout(sys.stderr):
-        for entry in catalog:
-            found = u.locations(entry["detect"]["bin"])
-            if not found:
-                continue
-            path = found[0]
-            method, value = u.method_for(entry, path)
-            before = u.version_of(path)
-            latest = u.latest_of(entry, path, method, value)
-            state = "unknown" if not latest else ("current" if u.is_current(before, latest) else "outdated")
-            rows.append({"id": entry["id"], "method": method, "version": before, "latest": latest or None, "state": state})
-            if entry["id"] == "codex":
-                if table is None:
-                    table = u.process_table()
-                # 데몬은 설치된 CLI 에 맞춘다(update-ai 가 --from-cli 로 고정한다). 최신 릴리스와 비교하면 CLI 만
-                # 뒤처져도 데몬 재시작이 계획에 끼어든다
-                for name, st, have, want in u.codex_check_rows(path, before or latest, table):
-                    # update-ai 처럼 데몬이 CLI 보다 새로우면 그대로 둔다(내리지 않는다)
-                    current = st == "up to date" or (have and want and u.is_current(have, want))
-                    rows.append({"id": name, "method": "codex daemon", "version": have, "latest": want,
-                                 "state": "current" if current else "outdated"})
+    scratch = tempfile.mkdtemp(prefix="jarvis-harness-")
+    try:
+        catalog = json.loads(Path(u.CATALOG).read_text(encoding="utf-8"))
+        with _env_path(), contextlib.redirect_stdout(sys.stderr):
+            for entry in catalog:
+                found = u.locations(entry["detect"]["bin"])
+                if not found:
+                    continue
+                path = found[0]
+                method, value = u.method_for(entry, path)
+                before = _version(u, path, scratch)
+                latest = u.latest_of(entry, path, method, value)
+                # 설치본 판을 모르면 갱신 여부도 모른다(계획하지 않는다)
+                state = "unknown" if not latest or not before else ("current" if u.is_current(before, latest) else "outdated")
+                rows.append({"id": entry["id"], "method": method, "version": before, "latest": latest or None, "state": state})
+                if entry["id"] == "codex":
+                    if table is None:
+                        table = u.process_table()
+                    # 데몬은 설치된 CLI 에 맞춘다(update-ai 가 --from-cli 로 고정한다). 최신 릴리스와 비교하면 CLI 만
+                    # 뒤처져도 데몬 재시작이 계획에 끼어든다
+                    for name, st, have, want in u.codex_check_rows(path, before or latest, table):
+                        # update-ai 처럼 데몬이 CLI 보다 새로우면 그대로 둔다(내리지 않는다)
+                        current = st == "up to date" or (have and want and u.is_current(have, want))
+                        rows.append({"id": name, "method": "codex daemon", "version": have, "latest": want,
+                                     "state": "current" if current else "outdated"})
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
     return rows
+
+
+def _version(u, path, scratch):
+    """update-ai 의 version_of 와 같지만 먼저 doctor 처럼 홈·설정·캐시를 임시 폴더로 돌려 부른다
+    (gemini·opencode 는 --version 만 불러도 홈에 상태 파일을 쓴다). 그 홈에서 판을 내지 못하는 것(래퍼를 거치는
+    codex, 설정이 있어야 도는 grok)은 update-ai 와 같은 실제 홈으로 다시 읽는다. 판정이 update-ai 와 갈리면
+    계획한 갱신이 끝나도 실패로 남기 때문이다."""
+    from .doctor_module import tools as doctor
+    out = u.run_quiet([path, "--version"], timeout=30, env=doctor().probe_env(scratch))
+    match = out and out.returncode == 0 and u.VERSION_RE.search((out.stdout or "") + (out.stderr or ""))
+    return match.group(0) if match else u.version_of(path)
 
 
 def status():
