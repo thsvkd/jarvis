@@ -92,11 +92,14 @@ def _rows():
                         table = u.process_table()
                     # 데몬은 설치된 CLI 에 맞춘다(update-ai 가 --from-cli 로 고정한다). 최신 릴리스와 비교하면 CLI 만
                     # 뒤처져도 데몬 재시작이 계획에 끼어든다
-                    for name, st, have, want in u.codex_check_rows(path, before or latest, table):
-                        # update-ai 처럼 데몬이 CLI 보다 새로우면 그대로 둔다(내리지 않는다)
+                    daemon_rows = u.codex_check_rows(path, before or latest, table)
+                    managed = any(name == "codex-daemon" for name, *_ in daemon_rows)
+                    for name, st, have, want in daemon_rows:
+                        # update-ai 처럼 데몬이 CLI 보다 새로우면 그대로 둔다(내리지 않는다). 관리형 설치가 없으면
+                        # 실행 중 서버는 다른 것(Orca 등)이 띄운 것이라 update-ai 가 맞출 수 없다: 보고만 한다
                         current = st == "up to date" or (have and want and u.is_current(have, want))
                         rows.append({"id": name, "method": "codex daemon", "version": have, "latest": want,
-                                     "state": "current" if current else "outdated"})
+                                     "state": "current" if current else "outdated" if managed else "unknown"})
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
     return rows

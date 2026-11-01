@@ -180,16 +180,10 @@ class HarnessModuleTest(unittest.TestCase):
         self.assertEqual([s["id"] for s in p["steps"]], ["codex-daemon"])
         self.assertEqual(harness.apply(p["plan_id"])["status"], "done")
         self.use(installed={"codex": "0.166.0"}, latest={"codex": "0.166.0"}, daemon=(None, "0.159.3"))
-        p = harness.plan()  # 관리형 설치 없이 실행 중 서버만 있어도 그 행으로 판정한다
-        self.assertEqual([s["id"] for s in p["steps"]], ["codex-daemon"])
-        self.assertEqual(harness.apply(p["plan_id"])["status"], "done")  # 서버가 CLI 판으로 다시 뜨면 성공이다
-        self.fake.daemon = (None, "0.159.3")
-        p = harness.plan()
-        self.patch.stop()
-        with mock.patch.object(harness, "_update", return_value=(0, set())):
-            r = harness.apply(p["plan_id"])
-        self.patch.start()
-        self.assertEqual(r["status"], "failed", r)  # 서버가 그대로면 실패다(데몬 행이 없다고 성공으로 보지 않는다)
+        # 관리형 설치가 없으면 실행 중 서버는 Orca 등이 띄운 것이라 update-ai 가 맞출 수 없다(pit5 실측). 보고만 한다
+        rows = {r["id"]: r["state"] for r in harness.status()["details"]["tools"]}
+        self.assertEqual(rows["codex-server"], "unknown")
+        self.assertEqual(harness.plan()["steps"], [])
 
     def test_a_daemon_newer_than_the_cli_is_left_alone(self):
         """covers: HARNESS-1"""
