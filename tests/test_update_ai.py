@@ -533,4 +533,20 @@ def test_codex_latest_is_read_from_its_github_release_tag(tmp_path, monkeypatch)
     assert update_ai.latest_of(entry, "/bin/codex", "default", None) == ""
 
 
+def test_a_trailing_full_stop_is_not_part_of_the_version(tmp_path):
+    """covers: HARNESS-4
+    copilot 은 "GitHub Copilot CLI 1.0.105." 를 낸다. 마침표가 붙으면 최신 판과 같아도 갱신 실패로 남는다."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    if WINDOWS:
+        stub = bin_dir / "copilot.cmd"
+        stub.write_text("@echo GitHub Copilot CLI 1.0.105.\r\n", encoding="utf-8")
+    else:
+        stub = bin_dir / "copilot"
+        stub.write_text("#!/bin/sh\necho 'GitHub Copilot CLI 1.0.105.'\n", encoding="utf-8")
+        stub.chmod(0o755)
+    assert update_ai.version_of(str(stub)) == "1.0.105"
+    assert update_ai.is_current(update_ai.version_of(str(stub)), "1.0.105")
+
+
 load_tests = collect(globals())

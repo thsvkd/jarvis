@@ -110,7 +110,7 @@ def _version(u, path, scratch):
     from .doctor_module import tools as doctor
     out = u.run_quiet([path, "--version"], timeout=30, env=doctor().probe_env(scratch))
     match = out and out.returncode == 0 and u.VERSION_RE.search((out.stdout or "") + (out.stderr or ""))
-    return match.group(0) if match else u.version_of(path)
+    return match.group(0).rstrip(".") if match else u.version_of(path)
 
 
 def status():

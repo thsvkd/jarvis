@@ -144,7 +144,8 @@ def version_of(path):
     if not out or out.returncode != 0:
         return ""
     match = VERSION_RE.search((out.stdout or "") + (out.stderr or ""))
-    return match.group(0) if match else ""
+    # "GitHub Copilot CLI 1.0.105." 처럼 문장 끝 마침표가 붙는다. 붙은 채로 두면 최신 판과 같아도 다르게 본다
+    return match.group(0).rstrip(".") if match else ""
 
 
 def latest_of(entry, path, method, value):
