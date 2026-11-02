@@ -22,22 +22,12 @@
 <body>
 <a class="sh-skip" href="#main">본문으로 건너뛰기</a>
 
-<header id="jarvis-shell" data-page="home" data-sections="services:서비스,hardware:하드웨어,network:네트워크,runtime:런타임"></header>
+<header id="jarvis-shell" data-page="home"></header>
 <script src="/shared/jarvis.js"></script>
 <script src="/lab/concepts.js"></script>
 <script src="/lab/session.js"></script>
 <script src="/lab/proposal/bridge.js"></script>
 <script src="/app/shell.js"></script>
-
-<nav class="lnav" id="lnav" aria-label="이 페이지의 섹션">
-  <div class="wrap lnav-in">
-    <a href="#overview" data-lsec="overview">개요</a>
-    <a href="#services" data-lsec="services">서비스<span class="lnav-n num" data-f="lnav.svc"></span></a>
-    <a href="#hardware" data-lsec="hardware">하드웨어</a>
-    <a href="#network" data-lsec="network">네트워크</a>
-    <a href="#runtime" data-lsec="runtime">런타임</a>
-  </div>
-</nav>
 
 <!-- 연결·수집 안내 띠: API 응답 없음(심각) · 응답 지연 · 일부 수집 지연(경고). 상태 변화 낭독은 공용 헤더가 한다(여기는 라이브 영역 아님) -->
 <div class="stale-banner" id="staleBanner" data-tone="crit" hidden>
@@ -53,6 +43,7 @@
     <span data-f="boot.msg">잠시 후 자동으로 다시 시도해요.</span>
   </div>
 
+  <p class="dev-bar" id="devBar" hidden></p>
   <!-- ============================================================ 개요: 건강 · 경보 · 네트워크 맵 -->
   <section id="overview" class="sec" aria-label="개요">
     <div class="bento">
@@ -98,7 +89,7 @@
         <div class="collector-errors" id="collectorErrors" hidden></div>
       </article>
 
-      <section class="tile span-12 m-6 t-hwstrip" style="--i:2" aria-label="하드웨어 한눈에 — 누르면 아래 하드웨어 섹션으로">
+      <section class="tile span-12 m-6 t-hwstrip" style="--i:2" aria-label="하드웨어 한눈에 — 누르면 하드웨어 탭으로">
         <div class="hwd"><div class="hwd-row" id="hwStrip"></div></div>
       </section>
 
@@ -130,6 +121,36 @@
         <div class="mini" id="miniMap" aria-hidden="true"></div>
       </article>
     </div>
+  </section>
+
+  <!-- ============================================================ core: 기기 목록 · Orca 페어링 (설정 devices 가 있을 때만) -->
+  <section id="devices" class="sec" aria-labelledby="h-dev" hidden>
+    <div class="sec-head">
+      <h2 id="h-dev">기기 · Orca 페어링</h2>
+      <button type="button" class="seg-action" id="devUpdateAll" hidden>Orca 모두 업데이트</button>
+      <button type="button" class="seg-action" id="devJarvisAll" hidden>jarvis 모두 업데이트</button>
+      <p class="sec-sub">이 core 가 모으는 기기 · 연결은 페어링 코드, 업데이트 확인은 버전 비교, 업데이트는 그 기기 Orca 패키지와 전역 스킬, jarvis 업데이트는 GitHub main 을 받아 그 기기 jarvis 를 재시작</p>
+      <p class="dev-note" id="devUpdateNote" role="status"></p>
+    </div>
+    <p class="orca-help">데스크톱: Orca 의 원격 환경 추가에 코드를 붙여 넣거나 <code>orca environment add --name &lt;이름&gt; --pairing-code &lt;코드&gt;</code>. 모바일: Orca 앱으로 QR 을 찍는다. 대기 코드가 없으면 이미 페어링된 기기의 코드를 보여 준다(그 기기와 자격을 함께 쓴다).</p>
+    <div class="bento" id="devList"></div>
+  </section>
+
+  <!-- ============================================================ core: 기기별 AI 구독 사용량 (설정 devices 가 있을 때만) -->
+  <section id="usage" class="sec" aria-labelledby="h-usage" hidden>
+    <div class="sec-head">
+      <h2 id="h-usage">AI 구독 사용량</h2>
+      <p class="sec-sub">각 기기의 구독 계정 한도를 Orca 설정과 독립적으로 확인합니다. 화면은 1분마다 갱신합니다.</p>
+    </div>
+    <div class="ul-bar">
+      <div class="seg" role="group" aria-label="프로바이더" id="ulProv"></div>
+      <button type="button" class="seg-action" id="ulHot" aria-pressed="false">주의 필요만</button>
+      <div class="seg" role="group" aria-label="표 보기 방식" id="ulMode"><button type="button" data-mode="brief">간략히</button><button type="button" data-mode="full">자세히</button></div>
+      <button type="button" class="icon-btn" id="ulAll" aria-label="모든 기기 새로고침" title="모든 기기 새로고침" aria-busy="false" aria-disabled="false"></button>
+      <span class="dev-note" id="ulNote" role="status"></span>
+    </div>
+    <div id="ulBody"><p class="ul-muted">불러오는 중…</p></div>
+    <dialog id="ulDlg" class="ul-dlg" aria-labelledby="ulDlgT"><div class="ul-dlg-h"><h3 id="ulDlgT"></h3><button type="button" class="seg-action" data-close>닫기</button></div><div id="ulDlgB"></div></dialog>
   </section>
 
   <!-- ============================================================ 서비스 -->
@@ -532,5 +553,7 @@
 <script src="/lab/proposal/proposal.js"></script>
 <script src="/app/focus.js"></script>
 <script src="/app/bento.js"></script>
+<script src="/app/devices.js"></script>
+<script src="/app/usage.js"></script>
 </body>
 </html>
