@@ -391,7 +391,8 @@
   const CORE_KEY = "jarvis.shellCore";
   const secTabs = navLinks.filter((a) => a.hasAttribute("data-sh-sec"));
   if (PAGE === "home") {
-    if (window.MutationObserver) new MutationObserver(() => {
+    // 디자인 랩(window.JarvisLab)은 운영 마크업을 빌려 쓸 뿐이라 운영 설정에 쓰지 않는다
+    if (window.MutationObserver && !window.JarvisLab) new MutationObserver(() => {
       try { localStorage.setItem(CORE_KEY, JSON.stringify(secTabs.filter((a) => a.hasAttribute("data-core")).map((a) => a.getAttribute("data-sh-sec")))); } catch (e) { /* 저장 불가 */ }
     }).observe(nav, { subtree: true, attributeFilter: ["data-core"] });
   } else if (!P.device) {
