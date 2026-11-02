@@ -1,4 +1,4 @@
-// covers: USAGE-1. 실행: node tests/test_usage_summary.mjs
+// covers: USAGE-1, USAGE-4. 실행: node tests/test_usage_summary.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
@@ -68,4 +68,27 @@ assert.doesNotMatch(summary(), /a@example\.com/);
 assert.match(summary(), /b@example\.com/);
 assert.doesNotMatch(summary(), /기본 계정/);
 assert.match(rendered(), /주의 필요 계정<\/span><b>1<\/b>/);
+
+// 요약 카드의 인증 실패 계정에는 메시지와 함께 다시 로그인 버튼이 나온다(상세 acct 와 같다)
+devices[1].providers[1].accounts[0] = { ...devices[1].providers[1].accounts[0], status: "error",
+  failure: "delegated-refresh-required", error: "401 unauthorized", windows: [], buckets: [] };
+click({ prov: "all" });
+assert.match(summary(), /로그인이 만료되었거나 풀렸습니다/);
+assert.doesNotMatch(summary(), /data-login/); // 이 기기는 로그인할 CLI 목록을 아직 안 줬다
+devices[1].logins = ["codex", "grok"];
+click({ prov: "all" });
+assert.match(summary(), /data-login="second" data-lp="codex"/);
+assert.match(summary(), /Codex 다시 로그인/);
+
+// 기기 행의 '로그인' 버튼은 저장한 자격이 없다고 확인된 프로바이더에만 나온다
+devices[0].fresh_logins = ["codex"];
+click({ prov: "all" });
+assert.match(rendered(), /data-login="first" data-lp="codex"/);
+assert.match(rendered(), /Codex 로그인/);
+devices[0].fresh_logins = ["claude"]; // claude 는 행이 있어 남겨둔다
+click({ prov: "all" });
+assert.doesNotMatch(rendered(), /data-login="first"/);
+devices[0].fresh_logins = [];
+click({ prov: "all" });
+assert.doesNotMatch(rendered(), /data-login="first"/); // 자격 없음이 확인되지 않으면 버튼을 내지 않는다
 console.log("usage summary ok");

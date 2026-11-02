@@ -29,6 +29,7 @@
 | USAGE-1 | WHEN core 홈에서 AI 구독 사용량을 보면 THE SYSTEM SHALL 기기별 표 위에 프로바이더별 계정과 각 한도 창·오류·값의 기기와 확인 시각을 표시하고 기존 필터를 적용한다. 같은 프로바이더의 이메일·조직이 같은 계정은 사용량이 있는 값 중 최근 값을 한 번 표시하며, 이메일이 없으면 기기별로 구분한다. 서로 다른 한도 창은 합산하지 않는다. | `tests/test_usage_summary.mjs` | 단위 검증 |
 | USAGE-2 | WHEN Grok·Antigravity 사용량에 연결된 계정 이메일을 안전하게 확인할 수 있으면 THE SYSTEM SHALL 이메일을 표시하고, 확인할 수 없으면 기본 계정으로 표시하며 자격 증명·계정 ID 는 내보내지 않는다. | `tests/test_provider_usage.py`, `tests/test_antigravity_usage.py`, `tests/test_orca_usage.py::NormalizeTest` | 부분 (Antigravity 활성 계정 s2 실측; 다른 기기와 Grok 실계정 미검증) |
 | USAGE-3 | WHEN core 홈에서 AI 구독 사용량을 조회하면 THE SYSTEM SHALL Orca 의 실행·계정 설정·응답과 독립적으로 각 프로바이더와 계정의 사용량을 표시하고, 계정·한도를 확인할 수 없는 경우 그 상태를 명시하며, 자격 증명과 계정 ID 를 내보내거나 로그인을 변경하지 않는다. | `tests/test_provider_usage.py`, `tests/test_codex_native_usage.py`, `tests/test_cswap_cached_usage.py`, `tests/test_opencode_usage.py`, `tests/test_antigravity_usage.py`, `tests/test_gemini_usage.py`, `tests/test_kimi_usage.py`, `tests/test_minimax_usage.py`, `tests/test_zcode_usage.py`, `tests/test_independent_usage.py`, `tests/test_core.py`, `tests/test_usage_summary.mjs` | 부분 (독립 API 와 웹 연결; Gemini·Kimi·MiniMax·ZCode·OpenCode Go 및 기기별 실증 미완료) |
+| USAGE-4 | WHEN 사용량 화면에서 기기 행의 새로 로그인 버튼을 보면 THE SYSTEM SHALL 저장한 자격이 없다고 확인된 프로바이더에만 버튼을 표시하고, 자격이 있거나 유무를 확인하지 못했으면 표시하지 않는다. 자격 확인은 저장한 자격 파일과 CLI 자체의 답으로만 한다. | `tests/test_cli_login.py::FreshLoginTest`, `tests/test_independent_usage.py`, `tests/test_orca_usage.py::ReadTest`, `tests/test_usage_summary.mjs` | 부분 (판정 로직·화면 단위 검증; 실제 기기에서 로그인 없음→버튼 노출 실증 미완료) |
 
 ## 화면
 

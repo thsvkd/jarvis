@@ -13,6 +13,10 @@ class IndependentUsageTest(unittest.TestCase):
         patcher = mock.patch.object(independent_usage, "_orca", return_value=[])
         self.orca = patcher.start()
         self.addCleanup(patcher.stop)
+        # 자격 파일·CLI 상태는 실제 홈을 읽으므로 가짜로 고정한다(테스트가 실기기를 건드리지 않게)
+        p = mock.patch.object(independent_usage.cli_login, "fresh", return_value=[])
+        self.fresh = p.start()
+        self.addCleanup(p.stop)
 
     def tearDown(self):
         independent_usage._tasks.clear()
@@ -83,6 +87,40 @@ class IndependentUsageTest(unittest.TestCase):
         rpc.assert_not_called()
         self.assertEqual({p["id"] for p in data["providers"]}, {"claude", "codex", "grok", "cursor", "opencodeGo", "antigravity", "gemini", "kimi", "minimax", "zcode"})
         self.assertEqual(data["unavailable"], [])
+
+    def test_fresh_logins_identify_where_a_login_would_lose_nothing(self):
+        """covers: USAGE-4"""
+        self.fresh.return_value = ["codex"]  # 가짜: codex 자격만 없음
+        self.orca.return_value = [{"id": "codex", "accounts": [{"label": "a@example.com", "windows": [], "buckets": []}]}]
+        empty = {"status": "unavailable", "accounts": []}
+        with mock.patch.object(independent_usage, "_claude", return_value={"accounts": []}), \
+                mock.patch.object(independent_usage, "_codex", return_value=[]), \
+                mock.patch.object(independent_usage, "_caam", return_value=[]), \
+                mock.patch.object(independent_usage, "_opencode", return_value=empty), \
+                mock.patch.object(independent_usage.antigravity_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.gemini_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.kimi_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.minimax_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.zcode_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.cli_login, "available", return_value=["codex", "grok"]):
+            data = independent_usage.read(force=True)
+        self.assertEqual(data["logins"], ["codex", "grok"])
+        self.assertEqual(data["fresh_logins"], ["codex"])  # 화면은 이 목록으로만 기기 행 '로그인' 버튼을 낸다
+
+    def test_fresh_logins_are_omitted_when_nothing_is_confirmed(self):
+        """covers: USAGE-4"""
+        # 자격이 없음이 확인되지 않으면(빈 목록) 키 자체를 넣지 않는다: 화면은 버튼을 내지 않는다
+        with mock.patch.object(independent_usage, "_claude", return_value={"accounts": []}), \
+                mock.patch.object(independent_usage, "_codex", return_value=[]), \
+                mock.patch.object(independent_usage, "_caam", return_value=[]), \
+                mock.patch.object(independent_usage, "_opencode", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent_usage.antigravity_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent_usage.gemini_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent_usage.kimi_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent_usage.minimax_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent_usage.zcode_usage, "read", return_value={"status": "unavailable", "accounts": []}):
+            data = independent_usage.read(force=True)
+        self.assertNotIn("fresh_logins", data)  # 키가 없으면 화면도 버튼을 내지 않는다
 
     def test_collects_without_orca_and_keeps_unavailable_distinct(self):
         """covers: USAGE-3"""

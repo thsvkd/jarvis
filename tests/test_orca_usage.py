@@ -127,7 +127,8 @@ class ReadTest(unittest.TestCase):
             p = mock.patch.object(m, "read", return_value=None)
             p.start()
             self.addCleanup(p.stop)
-        for name, kw in (("available", {"return_value": []}), ("refresh_grok", {})):  # 이 기기의 grok·codex 를 부르지 않게
+        for name, kw in (("available", {"return_value": []}), ("refresh_grok", {}),
+                         ("fresh", {"return_value": []})):  # 이 기기의 grok·codex 를 부르지 않고 자격 파일도 읽지 않게
             p = mock.patch.object(orca_usage.cli_login, name, **kw)
             setattr(self, name, p.start())
             self.addCleanup(p.stop)
@@ -211,6 +212,13 @@ class ReadTest(unittest.TestCase):
                 mock.patch.object(orca_usage.orca_rpc, "call", side_effect=RuntimeError("Orca 로컬 소켓이 없습니다")):
             code, body = orca_usage.read()
         self.assertEqual((code, body["running"], body["error"]), (200, False, "Orca 로컬 소켓이 없습니다"))
+
+    def test_fresh_logins_are_reported_on_the_orca_path_too(self):
+        """covers: USAGE-4"""
+        self.fresh.return_value = ["grok"]  # 가짜: grok 자격만 없음
+        with mock.patch.object(orca_usage.orca, "find_dir", return_value=None):
+            body = orca_usage.read()[1]
+        self.assertEqual(body["fresh_logins"], ["grok"])  # 두 경로가 같은 신호를 준다
 
 
 if __name__ == "__main__":
