@@ -62,7 +62,7 @@ class FreshLoginTest(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.dir, ignore_errors=True)
 
-    def fresh(self, codex_auth=None, grok_auth=None, status=(1, "Not logged in\n", ""), clis=("codex", "grok")):
+    def fresh(self, codex_auth=None, grok_auth=None, status=(1, "Not logged in\n", ""), clis=("codex", "grok"), keyring=None, allowed=True):
         """임시 홈의 자격 파일과 가짜 CLI 답으로 fresh() 를 부른다. 실제 홈·실제 CLI 는 쓰지 않는다."""
         for path in (self.codex_auth, self.grok_auth):
             if os.path.exists(path):
@@ -75,13 +75,16 @@ class FreshLoginTest(unittest.TestCase):
         with mock.patch.object(cli_login, "CLIS", exes), \
                 mock.patch.object(cli_login, "_codex_auth", return_value=self.codex_auth), \
                 mock.patch.object(cli_login, "_grok_auth", return_value=self.grok_auth), \
-                mock.patch.object(cli_login, "run", return_value=status) as run:
+                mock.patch.object(cli_login, '_codex_keyring_allowed', return_value=allowed), \
+                mock.patch.object(cli_login, "run", side_effect=[status, keyring if keyring is not None else status]) as run:
             return cli_login.fresh(), run
 
     def test_offers_login_when_nothing_is_stored(self):
         got, run = self.fresh(status=(1, "Not logged in\n", ""))
         self.assertEqual(got, ["codex", "grok"])  # 자격 파일이 없고 codex 도 '아니오' 라고 답함
-        run.assert_called_once_with(["/fake/codex", "login", "status"], cli_login.STATUS_S)
+        self.assertEqual(run.call_args_list[0], mock.call(["/fake/codex", "login", "status"], cli_login.STATUS_S))
+        self.assertEqual(run.call_args_list[1].args[0], ["/fake/codex", "-c", 'cli_auth_credentials_store="keyring"', "login", "status"])
+        self.assertLessEqual(run.call_args_list[1].args[1], cli_login.STATUS_S)
 
     def test_never_offers_login_when_something_is_stored(self):
         got, run = self.fresh(codex_auth='{"tokens": {"access_token": "x"}}',
@@ -99,6 +102,98 @@ class FreshLoginTest(unittest.TestCase):
         for status in ((1, "", "Error checking login status: boom"), (-1, "", "timed out")):
             got, _ = self.fresh(status=status, grok_auth='{"k": {}}')
             self.assertEqual(got, [], status)
+
+    def test_codex_absence_requires_the_exact_status_and_exit_code(self):
+        """covers: USAGE-4 — 오류 설명에 'Not logged in'이 들어 있어도 자격 없음으로 단정하지 않는다."""
+        for status in ((-1, '', 'Not logged in'),
+                       (0, 'Not logged in', ''),
+                       (1, '', 'Error checking login status: Not logged in'),
+                       (1, 'Logged in using ChatGPT', 'Not logged in')):
+            with self.subTest(status=status):
+                got, _ = self.fresh(status=status, grok_auth='{"k": {}}')
+                self.assertEqual(got, [])
+
+    def test_codex_auto_fallback_is_not_proof_that_the_keyring_is_empty(self):
+        """covers: USAGE-4 — auto는 키링 읽기 오류를 삼키므로 명시적인 키링 확인 실패도 자격을 보존한다."""
+        for keyring in ((1, '', 'Error checking login status: keyring unavailable'),
+                        (0, '', 'Logged in using ChatGPT'), (-1, '', 'timed out')):
+            with self.subTest(keyring=keyring):
+                got, _ = self.fresh(grok_auth='{"k": {}}', keyring=keyring)
+                self.assertEqual(got, [])
+
+    def test_codex_storage_checks_share_one_timeout_budget(self):
+        """covers: USAGE-4 — 키링 확인을 더해도 기존 STATUS_S 전체 예산을 늘리지 않는다."""
+        with mock.patch.object(cli_login.time, 'monotonic', side_effect=[100, 102, 104]):
+            got, run = self.fresh(grok_auth='{"k": {}}')
+        self.assertEqual(got, ['codex'])
+        self.assertEqual(run.call_args_list[1].args[1], 2)
+
+    def test_codex_managed_override_or_unknown_requirements_keep_login_hidden(self):
+        """covers: USAGE-4 — 관리자 auto 설정이 -c keyring을 무시할 수 있으면 자격 부재를 단정하지 않는다."""
+        got, run = self.fresh(grok_auth='{"k": {}}', allowed=False)
+        self.assertEqual(got, [])
+        self.assertEqual(run.call_count, 1)
+
+    @unittest.skipIf(os.name == 'nt', '가짜 POSIX CLI 실행 파일')
+    def test_codex_requirements_are_read_from_its_own_stdio_protocol(self):
+        """covers: USAGE-4 — 관리 요건을 알 수 없거나 auto로 강제하면 keyring -c를 믿지 않는다."""
+        import sys
+        exe = os.path.join(self.dir, 'codex-protocol')
+        for result, expected in (({'requirements': None}, True),
+                                 ({'requirements': {'cliAuthCredentialsStore': 'keyring'}}, True),
+                                 ({'requirements': {'cliAuthCredentialsStore': 'auto'}}, False),
+                                 ({'requirements': {'cliAuthCredentialsStore': 'file'}}, False),
+                                 ({}, False)):
+            with self.subTest(result=result):
+                with open(exe, 'w') as f:
+                    f.write('#!' + sys.executable + '\nimport json,sys\ninitialized=False\n')
+                    f.write('for line in sys.stdin:\n')
+                    f.write(' req=json.loads(line)\n')
+                    f.write(' if req["method"]=="initialize":\n  initialized=True\n  print(json.dumps({"id":req["id"],"result":{}}),flush=True)\n')
+                    f.write(' elif req["method"]=="configRequirements/read" and initialized:\n')
+                    f.write('  print(json.dumps({"id":req["id"],"result":' + repr(result) + '}),flush=True)\n  break\n')
+                os.chmod(exe, stat.S_IRWXU)
+                with mock.patch.dict(os.environ, {'HOME': self.dir, 'USERPROFILE': self.dir}):
+                    self.assertEqual(cli_login._codex_keyring_allowed(exe, 1), expected)
+
+    @unittest.skipIf(os.name == 'nt', '가짜 POSIX CLI 실행 파일')
+    def test_codex_requirements_timeout_is_unknown(self):
+        """covers: USAGE-4 — CLI가 요건을 답하지 않으면 자격 부재를 추측하지 않는다."""
+        import sys
+        exe = os.path.join(self.dir, 'codex-protocol')
+        with open(exe, 'w') as f:
+            f.write('#!' + sys.executable + '\nimport time\ntime.sleep(10)\n')
+        os.chmod(exe, stat.S_IRWXU)
+        with mock.patch.dict(os.environ, {'HOME': self.dir, 'USERPROFILE': self.dir}):
+            self.assertFalse(cli_login._codex_keyring_allowed(exe, .1))
+
+    @unittest.skipIf(os.name == 'nt', '가짜 POSIX CLI 실행 파일')
+    def test_codex_requirements_cleanup_does_not_wait_for_launcher_children(self):
+        """covers: USAGE-4 — npm 런처의 자식이 stdout을 상속해도 조회 예산 밖에서 기다리지 않는다."""
+        import sys
+        import time
+        exe = os.path.join(self.dir, 'codex-protocol')
+        with open(exe, 'w') as f:
+            f.write('#!' + sys.executable + '\nimport subprocess,sys,time\n')
+            f.write('subprocess.Popen([sys.executable,"-c","import time; time.sleep(2)"])\ntime.sleep(10)\n')
+        os.chmod(exe, stat.S_IRWXU)
+        with mock.patch.dict(os.environ, {'HOME': self.dir, 'USERPROFILE': self.dir}):
+            started = time.monotonic()
+            self.assertFalse(cli_login._codex_keyring_allowed(exe, .1))
+            self.assertLess(time.monotonic() - started, 1.2)
+
+    @unittest.skipIf(os.name == 'nt', '가짜 POSIX CLI 실행 파일')
+    def test_codex_requirements_closed_stdin_is_unknown(self):
+        """covers: USAGE-4 — 초기화 뒤 CLI의 stdin이 닫혀도 정리 오류가 사용량 API로 새지 않는다."""
+        import sys
+        exe = os.path.join(self.dir, 'codex-protocol')
+        with open(exe, 'w') as f:
+            f.write('#!' + sys.executable + '\nimport json,os,sys,time\n')
+            f.write('req=json.loads(sys.stdin.readline())\nos.close(0)\n')
+            f.write('print(json.dumps({"id":req["id"],"result":{}}),flush=True)\ntime.sleep(10)\n')
+        os.chmod(exe, stat.S_IRWXU)
+        with mock.patch.dict(os.environ, {'HOME': self.dir, 'USERPROFILE': self.dir}):
+            self.assertFalse(cli_login._codex_keyring_allowed(exe, 1))
 
     def test_codex_without_status_command_is_treated_as_stored(self):
         # status 하위 명령이 없는 구버전: 알 수 없으므로 있는 쪽으로 본다.

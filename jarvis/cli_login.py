@@ -5,7 +5,9 @@ refresh token 마저 죽었으면 grok 은 자격을 지운다(그 뒤로는 로
 """
 import json
 import os
+import queue
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -59,22 +61,121 @@ def _grok_auth():
     return os.path.join(_grok_home(), "auth.json")
 
 
+def _codex_keyring_allowed(exe, timeout):
+    """CLI의 관리 요건을 읽어 -c keyring이 덮어써지지 않는지 확인한다. 불명이면 False.
+
+    공식 rust-v0.166.0 app-server-protocol의 configRequirements/read:
+    requirements.cliAuthCredentialsStore는 CLI -c보다 우선한다. 자체 stdio 프로세스만 띄워
+    설정을 읽고 끝내며, 기존 데몬·세션에는 연결하지 않는다. 응답 원문은 출력하지 않는다.
+    """
+    proc = None
+    reader = None
+    end = time.monotonic() + timeout
+    replies = queue.Queue()
+    try:
+        proc = subprocess.Popen([exe, 'app-server'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, text=True, encoding='utf-8', errors='replace',
+                                cwd=os.path.expanduser('~'), env=_ENV, creationflags=_NO_WINDOW,
+                                start_new_session=os.name != 'nt')
+
+        def read():
+            try:
+                while line := proc.stdout.readline((1 << 20) + 1):
+                    if len(line) > 1 << 20:
+                        break
+                    replies.put(line)
+            finally:
+                proc.stdout.close()
+                replies.put(None)
+
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+
+        def send(body):
+            proc.stdin.write(json.dumps(body) + '\n')
+            proc.stdin.flush()
+
+        def ask(number, method, params):
+            send({'id': number, 'method': method, 'params': params})
+            while True:
+                remaining = end - time.monotonic()
+                if remaining <= 0:
+                    return None
+                line = replies.get(timeout=remaining)
+                if line is None:
+                    return None
+                body = json.loads(line)
+                if isinstance(body, dict) and body.get('id') == number:
+                    return body.get('result')
+
+        if not isinstance(ask(1, 'initialize', {'clientInfo': {'name': 'jarvis_usage', 'version': '1'}}), dict):
+            return False
+        send({'method': 'initialized', 'params': {}})
+        result = ask(2, 'configRequirements/read', {})
+        if not isinstance(result, dict) or 'requirements' not in result:
+            return False
+        requirements = result['requirements']
+        return requirements is None or (isinstance(requirements, dict)
+                                        and requirements.get('cliAuthCredentialsStore') in (None, 'keyring'))
+    except (OSError, ValueError, queue.Empty):
+        return False
+    finally:
+        if proc:
+            if os.name != 'nt':
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)  # 이 조회의 런처와 stdout을 상속한 자식만
+                except ProcessLookupError:
+                    pass
+            elif proc.poll() is None:
+                try:
+                    subprocess.run(['taskkill', '/F', '/T', '/PID', str(proc.pid)],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                   timeout=.3, creationflags=_NO_WINDOW)
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+            if proc.poll() is None:
+                proc.kill()
+            try:
+                proc.wait(timeout=.3)
+            except subprocess.TimeoutExpired:
+                pass
+            try:
+                proc.stdin.close()
+            except OSError:
+                pass
+            if reader:
+                reader.join(timeout=.1)
+            else:
+                proc.stdout.close()
+
+
 def _codex_stored():
     """codex 에 저장한 자격가 있나.
 
-    파일 백엔드는 파일 유무로, keyring·환경변수 백엔드(`secret_auth_storage`)는 codex 자체의
-    답으로 확인한다: 파일만 보면 keyring 보관 자격을 놓친다. `codex login status` 가
-    'Not logged in' 을 답했을 때만 없는 쪽으로 본다. 없다고 오판하면 '로그인' 버튼이
-    멀쩡한 자격을 지운다(`_ENV` 는 LC_ALL=C 라 영문으로 답한다).
+    파일이 있으면 보존한다. 파일이 없을 때는 CLI와 명시적인 keyring 조회가 모두 정확히
+    'Not logged in'/exit 1을 답해야 없는 쪽으로 본다. auto 저장소는 키링 오류를 삼키고
+    파일로 대체하므로 기본 status만으로 키링 부재를 확정할 수 없다(공식 rust-v0.166.0
+    codex-rs/login/src/auth/storage.rs AutoAuthStorage::load). 관리 요건으로 keyring 옵션을
+    덮어쓰지 않는지도 CLI에서 확인한다. 키링 불가·오류는 불명으로 보존한다.
+    모든 조회는 STATUS_S 예산을 공유한다(`_ENV`의 LC_ALL=C로 영문 응답).
     """
     exe = CLIS["codex"]()
     if not exe:
         return True
     if os.path.isfile(_codex_auth()):
         return True  # 파일이 있으면 codex 도 'Logged in' 으로 답한다(빈 파일도). 매번 CLI 를 부르지 않는다
-    _, out, err = run([exe, "login", "status"], STATUS_S)
-    text = (out or "") + (err or "")
-    return "Not logged in" not in text  # 그 밖(로그인 중·오류·시간 초과·구버전)은 있는 쪽으로
+    end = time.monotonic() + STATUS_S
+    rc, out, err = run([exe, "login", "status"], STATUS_S)
+    if rc != 1 or ((out or "") + (err or "")).strip() != 'Not logged in':
+        return True
+    remaining = end - time.monotonic()
+    if remaining <= 0 or not _codex_keyring_allowed(exe, remaining):
+        return True
+    remaining = end - time.monotonic()
+    if remaining <= 0:
+        return True
+    rc, out, err = run([exe, '-c', 'cli_auth_credentials_store="keyring"', 'login', 'status'], remaining)
+    return rc != 1 or ((out or "") + (err or "")).strip() != 'Not logged in'
 
 
 def _grok_stored():
