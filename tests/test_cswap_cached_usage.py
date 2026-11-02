@@ -7,8 +7,15 @@ from unittest import mock
 
 from jarvis import cswap_cached_usage
 
+LIVE_IDENTITY = cswap_cached_usage._live_identity  # setUp 이 가짜로 바꾸기 전의 실제 함수
+
 
 class CswapCachedTest(unittest.TestCase):
+    def setUp(self):  # 실제 홈의 Claude Code 설정을 읽지 않는다
+        p = mock.patch.object(cswap_cached_usage, "_live_identity", return_value=None)
+        p.start()
+        self.addCleanup(p.stop)
+
     def test_cached_usage_is_identity_guarded_and_does_not_run_cswap(self):
         """covers: USAGE-3"""
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(cswap_cached_usage, "_root", return_value=tmp):
@@ -48,10 +55,12 @@ class CswapCachedTest(unittest.TestCase):
         self.assertEqual([r["org"] for r in rows], [None, "Team"])
 
     def test_rows_carry_the_slot_and_the_current_account(self):
-        """covers: USAGE-3. '이 계정 사용' 버튼에 필요한 슬롯 번호와 사용 중 계정을 cswap 상태 파일에서 읽는다"""
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(cswap_cached_usage, "_root", return_value=tmp):
+        """covers: USAGE-3. '이 계정 사용' 버튼에 필요한 슬롯 번호와, 실제 로그인과 같은 계정을 사용 중으로 준다.
+        activeAccountNumber 는 계정을 더할 때도 바뀌어 실제 로그인과 어긋날 수 있어 쓰지 않는다(엔진과 같은 규칙)."""
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(cswap_cached_usage, "_root", return_value=tmp), \
+                mock.patch.object(cswap_cached_usage, "_live_identity", return_value=("b@example.com", "")):
             os.mkdir(os.path.join(tmp, "cache"))
-            for name, body in (("sequence.json", {"sequence": [4, 6], "activeAccountNumber": 6, "accounts": {
+            for name, body in (("sequence.json", {"sequence": [4, 6], "activeAccountNumber": 4, "accounts": {
                     "4": {"email": "a@example.com"}, "6": {"email": "b@example.com"}}}),
                     ("cache/usage.json", {"schemaVersion": 2, "accounts": {}})):
                 p = os.path.join(tmp, name)
@@ -62,6 +71,36 @@ class CswapCachedTest(unittest.TestCase):
                 rows = cswap_cached_usage.read()["accounts"]
         self.assertEqual([(r["slot"], r["active"]) for r in rows], [("4", False), ("6", True)])
         self.assertTrue(all(r["note"] is None and "dedupe" not in r for r in rows))
+
+    def test_no_live_login_marks_no_account_in_use(self):
+        """covers: USAGE-3. 로그인이 없거나 저장소에 없는 계정이면 기록값을 짐작해 쓰지 않는다"""
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(cswap_cached_usage, "_root", return_value=tmp):
+            p = os.path.join(tmp, "sequence.json")
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump({"sequence": [1], "activeAccountNumber": 1, "accounts": {"1": {"email": "a@example.com", "organizationUuid": "o"}}}, f)
+            os.chmod(p, 0o600)
+            for live in (None, ("a@example.com", "other-org"), ("x@example.com", "o")):
+                with mock.patch.object(cswap_cached_usage, "_live_identity", return_value=live):
+                    self.assertFalse(cswap_cached_usage.read()["accounts"][0]["active"])
+
+    def test_live_identity_follows_claude_code_config_rules(self):
+        """covers: USAGE-3. CLAUDE_CONFIG_DIR 의 .claude.json, 비어 있지 않은 예전 .config.json 이 있으면 그것"""
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": tmp}):
+            live = LIVE_IDENTITY
+            self.assertIsNone(live())  # 설정 파일 없음
+            def write(name, body):
+                with open(os.path.join(tmp, name), "w", encoding="utf-8") as f:
+                    f.write(body if isinstance(body, str) else json.dumps(body))
+            write(".claude.json", {"projects": {}})
+            self.assertIsNone(live())  # 로그인 없음
+            write(".claude.json", {"oauthAccount": {"emailAddress": "a@example.com", "organizationUuid": None}})
+            self.assertEqual(live(), ("a@example.com", ""))
+            write(".config.json", "")
+            self.assertEqual(live(), ("a@example.com", ""))  # 빈 예전 파일은 쓰지 않는다
+            write(".config.json", {"oauthAccount": {"emailAddress": "b@example.com", "organizationUuid": "o"}})
+            self.assertEqual(live(), ("b@example.com", "o"))
+            write(".config.json", "{broken")
+            self.assertIsNone(live())
 
     def test_missing_cache_does_not_invent_usage(self):
         """covers: USAGE-3"""

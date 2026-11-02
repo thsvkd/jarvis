@@ -2,12 +2,17 @@
 
 https://github.com/realiti4/claude-swap/blob/v0.28.0/src/claude_swap/usage_store.py
 https://github.com/realiti4/claude-swap/blob/v0.28.0/src/claude_swap/switcher.py
+사용 중 계정: https://github.com/thsvkd/harness-swap/blob/9a1e5d1/src/claude_swap/switcher.py (current_account_number)·paths.py
 """
+import json
 import math
 import os
+import stat
 import sys
 
 from . import cswap_usage, opencode_usage, orca_usage, provider_usage
+
+CONFIG_MAX = 32 << 20  # Claude Code 전역 설정은 프로젝트 기록이 쌓여 수 MB 까지 큰다
 
 
 def _root():
@@ -17,6 +22,31 @@ def _root():
             data = os.path.expanduser("~/.local/share")
         return os.path.join(data, "claude-swap")
     return os.path.expanduser("~/.claude-swap-backup")
+
+
+def _live_identity():
+    """Claude Code 가 지금 쓰는 로그인의 (이메일, 조직 UUID). 로그인이 없거나 읽지 못하면 None.
+    엔진과 같은 규칙이다: sequence.json 의 activeAccountNumber 는 계정을 더할 때도 바뀌어 실제 로그인과 어긋날 수 있다.
+    파일은 CLAUDE_CONFIG_DIR(없으면 홈)의 .claude.json, 단 Claude Code 가 예전 <설정 홈>/.config.json 을 쓸 조건이면 그것.
+    이 파일에 토큰은 없다. 이메일·조직 UUID 는 계정을 맞추는 데만 쓰고 내보내지 않는다."""
+    env = os.environ.get("CLAUDE_CONFIG_DIR")
+    path = os.path.join(env or os.path.expanduser("~"), ".claude.json")
+    legacy = os.path.join(env or os.path.expanduser(os.path.join("~", ".claude")), ".config.json")
+    try:
+        st = os.stat(legacy)
+        if stat.S_ISREG(st.st_mode) and (st.st_size > 0 or (st.st_mode & 0o222 and not os.path.exists(path))):
+            path = legacy
+    except OSError:
+        pass
+    try:
+        if os.path.getsize(path) > CONFIG_MAX:
+            return None
+        with open(path, encoding="utf-8") as f:
+            acct = json.load(f).get("oauthAccount")
+    except (OSError, ValueError, AttributeError):
+        return None
+    email = acct.get("emailAddress") if isinstance(acct, dict) else None
+    return (email, acct.get("organizationUuid", "") or "") if isinstance(email, str) and email else None
 
 
 def read():
@@ -29,7 +59,7 @@ def read():
             cache = {}
         accounts = roster.get("accounts", {}) if isinstance(roster, dict) else {}
         sequence = roster.get("sequence", []) if isinstance(roster, dict) else []
-        current = roster.get("activeAccountNumber") if isinstance(roster, dict) else None  # cswap switch 가 고친다
+        live = _live_identity()
         cached = cache.get("accounts", {}) if isinstance(cache, dict) and cache.get("schemaVersion") == 2 else {}
         if not isinstance(accounts, dict) or not isinstance(sequence, list) or not isinstance(cached, dict):
             return None
@@ -72,7 +102,9 @@ def read():
             org = ident.get("organizationName")
             org = orca_usage.org(org[:80], email) if isinstance(org, str) and org else None
             # slot: '이 계정 사용' 버튼이 cswap switch 에 넘기는 슬롯 번호(기기마다 다르다)
-            result.append({"label": email, "org": org, "active": number == current, "slot": str(number),
+            # 사용 중: 실제 로그인과 이메일·조직 UUID 가 같은 슬롯(엔진의 _find_account_slot 과 같은 비교)
+            active = live is not None and (ident.get("email"), ident.get("organizationUuid", "")) == live
+            result.append({"label": email, "org": org, "active": active, "slot": str(number),
                            "status": "ok" if has_usage else "error",
                            "error": None if has_usage else "저장된 사용량이 없습니다.", "note": None, "attention": False,
                            "failure": None, "plan": None, "updated_at": fetched, "windows": windows, "buckets": buckets,
