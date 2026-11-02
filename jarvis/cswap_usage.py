@@ -33,7 +33,7 @@ _lock = threading.Lock()
 _cache = None  # (monotonic, 결과)
 # 자동 설치: 검증한 커밋으로 고정한다(서비스가 최신판을 저절로 받아 실행하지 않게). PyPI 에 없어 GitHub 소스 묶음을 받는다
 # (git 이 없는 기기도 된다). 올리기는 사람이 한다: 여기 커밋을 바꾸고, 이미 깔린 기기는 uv tool install --force 로 다시 깐다
-PACKAGE = "harness-swap @ https://github.com/thsvkd/harness-swap/archive/9a1e5d1a084cac59ebac8555afefab25bfabfb8f.zip"  # v0.1.0
+PACKAGE = "harness-swap @ https://github.com/thsvkd/harness-swap/archive/51c7a8a5f26586930405f52e628a7cc3867718d1.zip"  # v0.2.0
 INSTALL_TIMEOUT_S = 600  # 처음이면 uv 가 Python 3.12+ 까지 받는다
 
 
