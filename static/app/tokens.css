@@ -1,7 +1,7 @@
 /* Jarvis — 디자인 토큰(디자인 시스템의 유일한 값 출처).
  * 모든 페이지가 가장 먼저 불러온다(tokens.css → shell.css → 페이지 CSS). 토큰 이름은 안정적인 약속이다: 이름을 바꾸지 말고 값만 고친다.
  * 페이지 CSS 는 :root 에서 아래 이름을 다른 뜻으로 재정의하지 않는다(필요하면 페이지 컨테이너 안에서만).
- * 컴포넌트 CSS(shell·bento·focus·atlas)는 색·글자 크기·굵기·자간·모서리를 숫자로 쓰지 않고 여기 토큰만 쓴다.
+ * 컴포넌트 CSS(shell·bento·focus·atlas·setup)는 색·글자 크기·굵기·자간·모서리·간격·z-index 를 숫자로 쓰지 않고 여기 토큰만 쓴다.
  * tests/test_design_tokens.py 가 이 규칙과 '정의되지 않은 토큰 참조'를 검사한다.
  *
  * ── 테마 ───────────────────────────────────────────────────────────
@@ -41,7 +41,12 @@
  *   --shadow-thumb                                 세그먼트·탭에서 고른 칸
  *   --shadow-sheet-x · --shadow-sheet-y            옆(데스크톱)·아래(모바일)에서 나오는 시트
  *   --ib-edge                                      아이콘 배지(그라디언트) 테두리와 그림자
- *   --sp-1 4 · --sp-2 8 · --sp-3 12 · --sp-4 16 · --sp-5 20 · --sp-6 24 · --sp-8 32 · --sp-12 48 · --sp-16 64
+ *   간격(--sp-N = N×4px): 24px 까지는 2px 격자(반 칸은 _5), 그 위는 아래 목록의 4px 배수만 쓴다
+ *     --sp-0_5 2 · --sp-1 4 · --sp-1_5 6 · --sp-2 8 · --sp-2_5 10 · --sp-3 12 · --sp-3_5 14 · --sp-4 16 · --sp-4_5 18
+ *     · --sp-5 20 · --sp-5_5 22 · --sp-6 24 · --sp-7 28 · --sp-8 32 · --sp-9 36 · --sp-10 40 · --sp-11 44 · --sp-12 48
+ *     · --sp-14 56 · --sp-16 64      (2px 미만은 머리카락 보정·아이콘 내부 기하라 숫자로 쓴다)
+ *   쌓임(z-index): --z-header 40 · --z-scrim 60(시트 뒤 가림막) · --z-sheet 61 · --z-skip 100(본문 바로가기)
+ *     (0~10 은 컴포넌트 안 쌓임 순서라 숫자로 쓴다)
  *   --gap 20(모바일 14) · --pad 24(모바일 18) · --gutter 32(모바일 16) · --wrap-max 1640(2000px↑ 1960)
  *   글자 크기(px): --fs-2xs 10.5 · --fs-xs 11.5 · --fs-sm 12.5 · --fs-md 13.5 · --fs-base 14 · --fs-lg 16 · --fs-title 19
  *     · --fs-xl 22 · --fs-heading-sm 26 · --fs-2xl 30 · --fs-figure-sm 36 · --fs-3xl 40 · --fs-figure 46 · --fs-display 52 · --fs-metric 56
@@ -125,7 +130,10 @@
   --ib-edge: inset 0 0 0 0.5px rgba(255, 255, 255, 0.25), 0 1px 2px rgba(0, 0, 0, 0.12);
   --mark-edge: 0 1px 2px rgba(0, 0, 0, 0.2), inset 0 0 0 0.5px rgba(255, 255, 255, 0.12);
 
-  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-12: 48px; --sp-16: 64px;
+  --sp-0_5: 2px; --sp-1: 4px; --sp-1_5: 6px; --sp-2: 8px; --sp-2_5: 10px; --sp-3: 12px; --sp-3_5: 14px; --sp-4: 16px;
+  --sp-4_5: 18px; --sp-5: 20px; --sp-5_5: 22px; --sp-6: 24px; --sp-7: 28px; --sp-8: 32px; --sp-9: 36px; --sp-10: 40px;
+  --sp-11: 44px; --sp-12: 48px; --sp-14: 56px; --sp-16: 64px;
+  --z-header: 40; --z-scrim: 60; --z-sheet: 61; --z-skip: 100;
   --gap: 20px;
   --pad: 24px;
   --gutter: 32px;
