@@ -174,6 +174,7 @@
  const all=$("#ulAll");P.render(all,REFRESH);
  const allBusy=on=>["aria-busy","aria-disabled"].forEach(k=>all.setAttribute(k,String(on)));
  let timer=null;
+ const reveal=()=>{if(!sec.hidden)return;sec.hidden=false;showNav(true);if(location.hash==="#usage")sec.scrollIntoView();};
  async function load(force){
   clearTimeout(timer);
   const mine=force&&S.devs?S.devs.map(d=>d.id).filter(i=>!S.busy.has(i)):[];
@@ -183,9 +184,7 @@
    if(r.status===404){sec.hidden=true;showNav(false);return;} // core 가 아닌 jarvis(게이트웨이)
    if(!r.ok)throw new Error("HTTP "+r.status);
    const o=await r.json();
-   S.devs=o.devices;
-   const first=sec.hidden;sec.hidden=false;showNav(true);
-   if(first&&location.hash==="#usage")sec.scrollIntoView();
+   S.devs=o.devices;reveal();
    const n=S.devs.filter(failed).length;
    note(force?(n?n+"대는 읽지 못했습니다":"사용량을 다시 확인했습니다"):"",force&&n);
   }catch(e){note("불러오지 못했습니다: "+(e.message||e),true);}
@@ -253,4 +252,7 @@
  });
  document.addEventListener("visibilitychange",()=>{if(!document.hidden)load(false);});
  load(false);
+ // 탭·섹션은 core 인지만 알면 띄운다. 사용량 모으기는 기기마다 프로바이더를 불러 수십 초 걸릴 수 있다(그동안 '불러오는 중…').
+ // /api/devices 는 같은 core 전용 경로지만 모아 둔 상태를 바로 준다. 게이트웨이는 404 라 탭이 깜빡이지 않는다
+ fetch("/api/devices",{cache:"no-store"}).then(r=>{if(r.ok)reveal();}).catch(()=>{});
 })();

@@ -106,4 +106,19 @@ click({}, "ulHot");
 assert.doesNotMatch(rendered(), /data-lp="grok"/); // 주의 필터는 로그인 카드를 세지 않는다
 click({}, "ulHot");
 click({ prov: "all" });
+
+// 탭과 섹션은 사용량 모으기(기기마다 프로바이더를 불러 수십 초)를 기다리지 않고 core 확인(/api/devices)만으로 뜬다
+{
+  const els = new Map();
+  const el = id => els.get(id) || els.set(id, { id, hidden: id === "usage", dataset: {}, classList: { toggle() {} },
+    setAttribute() {}, toggleAttribute() {}, addEventListener() {} }).get(id);
+  const tab = { toggleAttribute(name, on) { this[name] = on; } };
+  const slow = { ...ctx, window: {}, document: { hidden: false, querySelector: s => el(s.slice(1)), querySelectorAll: () => [tab], addEventListener() {} },
+    fetch: async url => url === "/api/devices" ? { ok: true, status: 200 } : new Promise(() => {}) }; // 사용량 응답은 오지 않는다
+  vm.runInNewContext(readFileSync(new URL("../static/shared/jarvis.js", import.meta.url), "utf8"), slow);
+  vm.runInNewContext(readFileSync(new URL("../static/app/usage.js", import.meta.url), "utf8"), slow);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(el("usage").hidden, false);
+  assert.equal(tab["data-core"], true);
+}
 console.log("usage summary ok");
