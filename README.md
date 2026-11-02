@@ -80,10 +80,10 @@ static/
   shared/        jarvis.js(공용 클라이언트, 전역 JARVIS), API.md(스냅샷 스키마), favicon
                  화면 설정은 localStorage `jarvis.*` 에 두고, 이름을 바꾸기 전 `pit5.*` 값도 이어 읽는다
   gallery/, d/   시안 비교 단계의 보관본
-  lab/           Bento 콘텐츠 구성 랩 03: 요약·업무 탭·서비스 우선·경보 우선·분류 접기 5종 + Focus 개선판 실시간 데모
+  lab/           Bento 콘텐츠 구성 랩 03: 요약·서비스 우선·경보 우선 3종 실시간 데모
 tests/           파서·플랫폼 층·스냅샷 조립 단위 테스트, tests/data/ 는 명령 출력 fixture
 tools/shot.mjs   헤드리스 chromium 스크린샷·콘솔 오류·가로 넘침 검사 (CDP 직접, 의존성 없음)
-tools/check-lab.mjs  디자인 랩 갤러리·6개 시안의 모바일·데스크톱 탐색과 동일 스냅샷 비교 검증
+tools/check-lab.mjs  디자인 랩 갤러리·3개 시안의 모바일·데스크톱 탐색과 동일 스냅샷 비교 검증
 tools/snapcheck.py  시험 포트로 기동해 /api/snapshot 스키마를 기준선과 비교
 deploy/          systemd 사용자 유닛(Linux)·pm2 ecosystem, launchd plist(macOS), 기기별 설정(s2.toml·pit5.toml·gateway.toml·macstudio.toml)
 ```
@@ -109,13 +109,13 @@ deploy/          systemd 사용자 유닛(Linux)·pm2 ecosystem, launchd plist(m
 node tools/check-home.mjs http://100.64.0.2:9300 /tmp/jarvis-home-check
 ```
 
-같은 브라우저 프로필에서 데스크톱→모바일 재접속 시 설정 복원, 검색·필터·상세·경보 이동,
-폴링 후 고정 목록 유지, 실제 수집 오류 키·누락 값·연결 지연을 검사한다.
+같은 브라우저 프로필에서 데스크톱→모바일 재접속 시 설정 복원, 헤더 탭 이동(해시가 없으면 개요, 탭마다 섹션 하나),
+검색·필터·상세·경보 이동, 폴링 후 고정 목록 유지, 지도 접기 저장, 실제 수집 오류 키·연결 지연을 검사한다.
 
 ## 디자인 랩 — 가독성 시안 비교
 
-`/lab/`에서 기존 Bento 기반 5종과 Focus 개선판을 실시간 데이터로 비교한다. 개별 데모·후보 저장·나란히 비교를 제공하며
-기존 Bento의 디자인과 렌더러를 재사용하며 콘텐츠 순서·탭·접기만 달리한다. 운영 홈은 기존 주소 `/`에 있다.
+`/lab/`에서 기존 Bento 기반 3종을 실시간 데이터로 비교한다. 개별 데모·후보 저장·나란히 비교를 제공하며
+기존 Bento의 디자인과 렌더러를 재사용하며 콘텐츠 순서·접기만 달리한다. 운영 홈은 기존 주소 `/`에 있다.
 같은 Jarvis 서버에서 제공하므로 LAN·Tailnet 접근 제한도 동일하다. [시안별 설계·검증 방법](static/lab/README.md).
 `/lab/usage/` 는 랩 04(AI 구독 사용량 배치 A·B·C, 샘플 데이터·시뮬레이션 새로고침)다. 운영 화면은 C 를 골라 자세히 모드를 더했다.
 `/lab/setup/` 은 랩 05(AI 셋업: 모듈 상태 → 계획 → 승인 → 실행 → 결과, 배치 A·B·C, 샘플 데이터·시뮬레이션 실행)다. 운영 화면은 C(할 일 먼저 + 기기 서랍)를 고른다.

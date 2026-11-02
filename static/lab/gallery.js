@@ -24,7 +24,7 @@
     saved();
   });
   for(const id of ["left","right"])P.render($("#"+id),C.map(c=>html`<option value="${c.id}">${c.n} ${c.name}</option>`));
-  $("#right").value="focus-plus";
+  $("#right").value="library";
   function comparison(){
     P.render($("#compare-frames"),["left","right"].map(id=>{
       const c=C.find(c=>c.id===$("#"+id).value);

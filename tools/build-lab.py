@@ -21,13 +21,13 @@ sub('<script src="/app/focus.js"></script>\n', "")
 sub('<link rel="stylesheet" href="/app/focus.css">\n', "")
 sub("<title>개요 · Jarvis</title>", "<title>콘텐츠 구성 시안 · Jarvis</title>")
 sub('<link rel="stylesheet" href="/app/bento.css">',
-    '<link rel="stylesheet" href="/app/bento.css">\n<link rel="stylesheet" href="/lab/proposal/proposal.css">\n<link rel="stylesheet" href="/app/focus.css">')
+    '<link rel="stylesheet" href="/app/bento.css">\n<link rel="stylesheet" href="/lab/proposal/proposal.css">')
 sub('<script src="/shared/jarvis.js"></script>',
     '<script src="/shared/jarvis.js"></script>\n<script src="/lab/concepts.js"></script>\n<script src="/lab/session.js"></script>\n<script src="/lab/proposal/bridge.js"></script>')
 sub('<main id="main" class="wrap" data-tabbed>',
     '<main id="main" class="wrap">\n<div class="lab-note"><a href="/lab/">← 시안 갤러리</a><strong id="lab-name"></strong><span id="lab-intent"></span></div>')
 sub('<script src="/app/bento.js"></script>',
-    '<script src="/lab/proposal/proposal.js"></script>\n<script src="/app/focus.js"></script>\n<script src="/app/bento.js"></script>')
+    '<script src="/lab/proposal/proposal.js"></script>\n<script src="/app/bento.js"></script>')
 target = root / "static/lab/proposal/index.html"
 if "--check" in sys.argv:
     if target.read_text() != source:

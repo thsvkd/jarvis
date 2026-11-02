@@ -11,7 +11,7 @@ const out=resolve(process.argv[3]||"/tmp/jarvis-lab-check");
 mkdirSync(out,{recursive:true});
 const evaluation=readFileSync(resolve(root,"tools/check-lab-eval.js"),"utf8");
 const reports=[];
-const concepts=["gallery","focus","inbox","library","rooms","pulse","focus-plus"];
+const concepts=["gallery","focus","library","rooms"];
 const selected=process.argv[4]?process.argv[4].split(","):concepts;
 if(selected.some(c=>!concepts.includes(c)))throw Error("Unknown concept");
 for(const concept of selected){

@@ -1,7 +1,7 @@
 /* Focus의 기존 컴포넌트를 유지하며 요약·선택·모바일 공개 범위만 다듬는다. */
 (function(){
  "use strict";
- const L=window.JarvisLab||window.JarvisFocus;if(!L||(window.JarvisLab&&L.concept.id!=="focus-plus"))return;
+ const L=window.JarvisFocus;if(!L)return;
  document.body.dataset.focusLayout="refined";
  const P=window.JARVIS,{html,labels}=P,$=s=>document.querySelector(s);
  let ids=null,last=null,lastState={};
@@ -40,11 +40,11 @@
  const mobile=matchMedia("(max-width:699px)");
  const syncExtra=()=>{extra.open=!mobile.matches||L.getPref("mobileStatsOpen","false")==="true";};syncExtra();
  mobile.addEventListener("change",syncExtra);
- if(!window.JarvisLab)extra.addEventListener("toggle",()=>{if(mobile.matches)L.setPref("mobileStatsOpen",String(extra.open));});
+ extra.addEventListener("toggle",()=>{if(mobile.matches)L.setPref("mobileStatsOpen",String(extra.open));});
  const alertToggle=document.createElement("button");alertToggle.type="button";alertToggle.id="focus-alert-toggle";alertToggle.className="seg-action";alertToggle.setAttribute("aria-expanded","false");alertToggle.setAttribute("aria-controls","alertList");alertToggle.textContent="경보 상세 펼치기";$("#alertMore").after(alertToggle);
- if(!window.JarvisLab&&L.getPref("alertsOpen","false")==="true")$("#alerts").classList.add("focus-alerts-open");
+ if(L.getPref("alertsOpen","false")==="true")$("#alerts").classList.add("focus-alerts-open");
  function syncAlerts(){const on=$("#alerts").classList.contains("focus-alerts-open");alertToggle.setAttribute("aria-expanded",String(on));alertToggle.textContent=on?"경보 간단히 보기":"경보 상세 펼치기";}syncAlerts();
- alertToggle.addEventListener("click",()=>{const on=$("#alerts").classList.toggle("focus-alerts-open");alertToggle.setAttribute("aria-expanded",String(on));alertToggle.textContent=on?"경보 간단히 보기":"경보 상세 펼치기";if(!window.JarvisLab)L.setPref("alertsOpen",String(on));});
+ alertToggle.addEventListener("click",()=>{const on=$("#alerts").classList.toggle("focus-alerts-open");alertToggle.setAttribute("aria-expanded",String(on));alertToggle.textContent=on?"경보 간단히 보기":"경보 상세 펼치기";L.setPref("alertsOpen",String(on));});
  function defaults(s){
   const groups=[...new Set(s.services.map(x=>x.category))],pick=[];
   for(const cat of groups){const sv=s.services.find(x=>x.category===cat);if(sv)pick.push(sv.id);if(pick.length===6)break;}
