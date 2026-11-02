@@ -218,7 +218,7 @@ def _codex(body, ca):
     # 같은 이메일이라도 ChatGPT 개인·Team 워크스페이스는 한도가 따로다: 요금제가 둘 다 알려져 있고 다르면 다른 계정이다
     same = lambda o, a: o["label"].lower() == a["label"].lower() and (not plan(o) or not plan(a) or plan(o) == plan(a))
     orca_rows = list(cur["accounts"])
-    if any(a["active"] for a in ca["accounts"]):  # cswap 과 같은 규칙: 이메일 모르는 시스템 기본 계정은 caam 의 사용 중 계정이다
+    if any(a["active"] for a in ca["accounts"]):  # hswap 과 같은 규칙: 이메일 모르는 시스템 기본 계정은 caam 의 사용 중 계정이다
         orca_rows = [o for o in orca_rows if o["label"] != "시스템 기본 계정"]
     accounts, added = list(orca_rows), []
     for a in ca["accounts"]:
@@ -232,7 +232,7 @@ def _codex(body, ca):
 
 
 def read(force=False):
-    """(http 상태, 응답). Orca 값에 cswap(Claude)·caam(Codex)의 계정별 사용량을 합친다.
+    """(http 상태, 응답). Orca 값에 hswap(Claude)·caam(Codex)의 계정별 사용량을 합친다.
     셋은 동시에 읽는다(차례로 읽으면 강제 새로고침이 core 의 시간 제한을 넘을 수 있다)."""
     start = time.monotonic()
     box = {}
@@ -244,14 +244,14 @@ def read(force=False):
     end = start + 60  # 요청이 들어온 때부터 센다: core 는 기기당 70초를 기다린다
     for t in ts:
         t.join(max(0, end - time.monotonic()))
-    cs = box.get("cswap") if not ts[0].is_alive() else {"error": "cswap 이 늦게 답합니다"}
+    cs = box.get("cswap") if not ts[0].is_alive() else {"error": "hswap 이 늦게 답합니다"}
     ca = box.get("caam") if not ts[1].is_alive() else {"error": "caam 이 늦게 답합니다"}
     if cs and cs.get("accounts"):
-        mine = [{**a, "org": org(a["org"], a["label"])} for a in cs["accounts"]]  # cswap 결과는 캐시라 고치지 않는다
+        mine = [{**a, "org": org(a["org"], a["label"])} for a in cs["accounts"]]  # hswap 결과는 캐시라 고치지 않는다
         seen = {(a["label"].lower(), a["org"]) for a in mine}
         emails = {a["label"].lower() for a in mine}
         old = next((p for p in body["providers"] if p["id"] == "claude"), None)
-        # Orca 의 '시스템 기본 계정'은 cswap 의 사용 중 계정과 같은 로그인이다(cswap 에 사용 중 계정이 있을 때만 뺀다).
+        # Orca 의 '시스템 기본 계정'은 hswap 의 사용 중 계정과 같은 로그인이다(hswap 에 사용 중 계정이 있을 때만 뺀다).
         # Orca 에만 있는 관리 계정(같은 이메일의 다른 조직 포함)은 남긴다
         # 조직을 모르는 Orca 줄(시스템 기본 계정이 조직 이름을 못 빌린 경우)은 같은 이메일이면 같은 로그인으로 본다
         extra = [a for a in (old or {}).get("accounts", []) if (a["label"].lower(), a.get("org")) not in seen

@@ -1,4 +1,4 @@
-"""cswap 의 저장된 계정과 마지막 사용량만 읽는다. 명령 실행과 토큰 갱신은 하지 않는다.
+"""hswap(Claude 엔진 claude-swap)과 기존 cswap 이 함께 쓰는 저장소의 계정과 마지막 사용량만 읽는다. 명령 실행과 토큰 갱신은 하지 않는다.
 
 https://github.com/realiti4/claude-swap/blob/v0.28.0/src/claude_swap/usage_store.py
 https://github.com/realiti4/claude-swap/blob/v0.28.0/src/claude_swap/switcher.py

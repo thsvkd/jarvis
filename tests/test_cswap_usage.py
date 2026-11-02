@@ -1,4 +1,4 @@
-"""cswap(claude-swap) list --json → Claude 계정별 사용량, Orca 값과 합치기."""
+"""hswap claude list --json(claude-swap 엔진) → Claude 계정별 사용량, Orca 값과 합치기."""
 import json
 import subprocess
 import unittest
@@ -95,6 +95,7 @@ class RunTest(unittest.TestCase):
             cswap_usage.read(force=True)
         self.assertIs(a, b)
         self.assertEqual((run.call_count, len(a["accounts"])), (2, 5))  # 30초 안의 두 번째는 캐시, 강제는 다시
+        self.assertEqual(run.call_args[0][0][1:], ["claude", "list", "--json"])  # hswap 의 Claude 엔진을 부른다
         with mock.patch.object(cswap_usage.subprocess, "run", return_value=proc({"schemaVersion": 1, "accounts": []})):
             self.assertIsNone(cswap_usage.read(force=True))  # 계정이 없으면 cswap 이 없는 것과 같다
 
@@ -107,7 +108,7 @@ class RunTest(unittest.TestCase):
         with mock.patch.object(cswap_usage.subprocess, "run", return_value=proc({"schemaVersion": 1, "switched": True})) as run:
             cswap_usage._cache = (1e18, {"accounts": []})
             self.assertEqual(cswap_usage.switch("2"), (200, {"switched": True}))
-        self.assertEqual(run.call_args[0][0][1:], ["switch", "2", "--json"])
+        self.assertEqual(run.call_args[0][0][1:], ["claude", "switch", "2", "--json"])
         self.assertIsNone(cswap_usage._cache)  # 다음 읽기는 바뀐 사용 중 계정을 cswap 에 다시 묻는다
         err = {"schemaVersion": 1, "error": {"type": "AccountNotFoundError", "message": "No account /home/alice/x"}}
         with mock.patch.object(cswap_usage.subprocess, "run", return_value=proc(err, 1)):
@@ -166,7 +167,7 @@ class MergeTest(unittest.TestCase):
 class InstallTest(unittest.TestCase):
     def setUp(self):
         cswap_usage.installer.state, cswap_usage.installer.error, cswap_usage.installer.at = None, None, 0.0
-        self.which = {"claude": "/home/alice/.local/bin/claude", "uv": "/home/alice/.local/bin/uv", "pipx": None, "cswap": None}
+        self.which = {"claude": "/home/alice/.local/bin/claude", "uv": "/home/alice/.local/bin/uv", "pipx": None, "hswap": None}
         p = mock.patch.object(cswap_usage, "which_local", side_effect=lambda n: self.which[n])
         p.start()
         self.addCleanup(p.stop)
@@ -183,11 +184,13 @@ class InstallTest(unittest.TestCase):
 
     def test_installs_pinned_with_uv_once(self):
         def run(cmd, **k):
-            self.which["cswap"] = "/home/alice/.local/bin/cswap"
+            self.which["hswap"] = "/home/alice/.local/bin/hswap"
             return mock.Mock(returncode=0, stderr="")
         with mock.patch.object(cswap_usage.subprocess, "run", side_effect=run) as r:
             self.assertIsNone(cswap_usage.ensure())  # 그 자리에서 끝났다(실제로는 뒤에서 돌아 '설치 중'이 먼저 보인다)
-        self.assertEqual(r.call_args[0][0], ["/home/alice/.local/bin/uv", "tool", "install", "claude-swap==0.28.0"])
+        self.assertEqual(r.call_args[0][0], ["/home/alice/.local/bin/uv", "tool", "install", cswap_usage.PACKAGE])
+        # PyPI 에 없어 GitHub 소스 묶음을 커밋으로 고정한다(최신판을 저절로 받지 않게, git 없는 기기도)
+        self.assertRegex(cswap_usage.PACKAGE, r"^harness-swap @ https://github\.com/thsvkd/harness-swap/archive/[0-9a-f]{40}\.zip$")
         self.assertEqual(cswap_usage.installer.state, "done")
 
     def test_failure_is_reported_and_retried_later(self):
@@ -203,7 +206,7 @@ class InstallTest(unittest.TestCase):
             cswap_usage.installer.at -= cswap_usage.installer.RETRY_S + 1
             cswap_usage.ensure()
             self.assertEqual(r.call_count, 2)
-        self.assertEqual(cswap_usage.read()["error"].split("(")[0], "cswap 설치 실패")
+        self.assertEqual(cswap_usage.read()["error"].split("(")[0], "hswap 설치 실패")
 
     def test_running_message(self):
         class Later:  # 뒤에서 아직 도는 설치
@@ -213,8 +216,8 @@ class InstallTest(unittest.TestCase):
             def start(self):
                 pass
         with mock.patch("jarvis.util.threading.Thread", Later):
-            self.assertEqual(cswap_usage.ensure(), "cswap 을 설치하는 중입니다(Claude 계정별 사용량)")
-            self.assertEqual(cswap_usage.ensure(), "cswap 을 설치하는 중입니다(Claude 계정별 사용량)")
+            self.assertEqual(cswap_usage.ensure(), "hswap 을 설치하는 중입니다(Claude 계정별 사용량)")
+            self.assertEqual(cswap_usage.ensure(), "hswap 을 설치하는 중입니다(Claude 계정별 사용량)")
 
     def test_skipped(self):
         with mock.patch.object(cswap_usage.subprocess, "run") as r:

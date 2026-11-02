@@ -91,7 +91,7 @@ VIEWERS = env_list("VIEWERS")
 PROXIES = env_list("PROXIES")
 # 그 프록시가 X-Jarvis-Proxy-Key 로 붙이는 비밀(설정 파일은 0600). 비어 있으면 proxies 를 믿지 않는다.
 PROXY_KEY = str(env("PROXY_KEY", ""))
-# cswap(claude-swap)이 없고 Claude Code 가 있으면 uv/pipx 로 고정 버전을 설치한다(AI 사용량의 Claude 계정별 값). false 로 끈다
+# hswap(harness-swap)이 없고 Claude Code 가 있으면 uv/pipx 로 고정 커밋을 설치한다(AI 사용량의 Claude 계정별 값·계정 전환). false 로 끈다(키 이름은 호환을 위해 cswap_install 그대로)
 CSWAP_INSTALL = str(env("CSWAP_INSTALL", "true")).lower() not in ("0", "false", "no", "off")
 # caam 이 없고 Codex CLI 가 있으면 고정 버전 릴리스(SHA256 확인)를 ~/.local/bin 에 둔다(AI 사용량의 Codex 계정별 값). false 로 끈다
 CAAM_INSTALL = str(env("CAAM_INSTALL", "true")).lower() not in ("0", "false", "no", "off")

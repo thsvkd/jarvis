@@ -47,10 +47,10 @@
  const better=(x,y)=>{const [a,b]=[rank(x),rank(y)];return a[0]!==b[0]?a[0]>b[0]:a[1]>b[1];};
 
  function state(d){
-  const some=(d.providers||[]).length>0; // Orca 가 없거나 실패해도 cswap(Claude)·caam(Codex) 계정은 있을 수 있다
+  const some=(d.providers||[]).length>0; // Orca 가 없거나 실패해도 hswap(Claude)·caam(Codex) 계정은 있을 수 있다
   if(d.status===200&&d.mode==="independent")return some?["ok","독립 조회",""]:["warn","조회 결과 없음","확인 가능한 사용량이 없습니다."];
   if(d.status===200&&d.installed===false)return some?["ok","Orca 없음",""]:["muted","Orca 없음","이 기기에는 Orca 가 없습니다."];
-  if(d.status===200&&d.error&&some)return ["warn","Orca 응답 없음",d.error+" · 보이는 계정은 cswap·caam 값입니다."];
+  if(d.status===200&&d.error&&some)return ["warn","Orca 응답 없음",d.error+" · 보이는 계정은 hswap·caam 값입니다."];
   if(d.status===200&&d.error)return ["warn","Orca 응답 없음",d.error];
   if(d.status===200)return ["ok","Orca 실행 중",""];
   if(d.status===501)return ["muted","미지원",d.error];
@@ -92,13 +92,13 @@
   if(isErr(a)){const k=kind(a);return html`<p class="ul-err">${k[2]}</p>${a.error?html`<details class="ul-raw"><summary>원문 보기</summary><pre>${a.error}</pre></details>`:""}`;}
   const note=a.note?html`<p class="${a.attention?"ul-err":"ul-note"}">${a.note}</p>`:""; // 마지막으로 읽은 값에 붙는 이유
   if(!a.windows.length&&!a.buckets.length)return note||html`<p class="ul-muted">${a.status==="fetching"?"사용량을 읽는 중입니다.":"아직 사용량을 읽지 않았습니다."}</p>`;
-  // Claude(cswap) 는 2026-10-30 요금제 개편 뒤 계정에 따라 5시간 창이 없다(인증된 Ultra). 읽지 못한 것과 구분해 적는다
+  // Claude(hswap) 는 2026-10-30 요금제 개편 뒤 계정에 따라 5시간 창이 없다(인증된 Ultra). 읽지 못한 것과 구분해 적는다
   const no5h=/^cswap/.test(a.source||"")&&a.windows.some(w=>w.key==="weekly")&&!a.windows.some(w=>w.key==="session");
   return html`${note}<div class="ul-wins">${a.windows.map(win)}</div>${no5h?html`<p class="ul-extra">5시간 한도 없음 · 주간 한도만 적용</p>`:""}${a.buckets.length?html`<p class="ul-extra">세부 한도 · ${a.buckets.map((b,i)=>html`${i?" · ":""}${b.name} <b>${pct(b.used)}</b>`)}</p>`:""}${extra(a.extra)}${a.credits?html`<p class="ul-extra">한도 리셋 크레딧 ${a.credits}개</p>`:""}`;
  }
  const head=a=>html`<div class="ul-ah"><b class="ul-email">${a.label}</b>${a.plan?html`<span class="ul-plan">${a.plan}</span>`:""}${a.org?html`<span class="ul-plan">${a.org}</span>`:""}${a.active?html`<span class="badge" data-tone="info">사용 중</span>`:""}${isErr(a)||a.attention?html`<span class="badge" data-tone="crit">${isErr(a)?kind(a)[1]:"조치 필요"}</span>`:""}</div>`;
  const relog=(d,id,again=true)=>html`<button type="button" class="seg-action" data-login="${d.id}" data-lp="${id}">${LOGIN[id]} ${again?"다시 로그인":"로그인"}</button>`;
- // slot: 게이트웨이 cswap 의 슬롯 번호(Claude). 그 기기의 Claude Code 로그인을 이 계정으로 바꾼다
+ // slot: 게이트웨이 hswap 의 슬롯 번호(Claude). 그 기기의 Claude Code 로그인을 이 계정으로 바꾼다
  const useBtn=(a,d)=>a.slot&&!a.active?html`<button type="button" class="seg-action" data-use="${d.id}" data-slot="${a.slot}" data-label="${a.label}" aria-disabled="${String(S.busy.has(d.id))}">이 계정 사용</button>`:"";
  // 인증 실패·조치 필요 계정에는 그 기기에서 다시 로그인할 버튼을 함께 낸다(요약 카드도 상세와 같다)
  const relogIf=(a,d,p)=>(isErr(a)&&kind(a)[0]==="auth"||a.attention)&&(d.logins||[]).includes(p.id)?relog(d,p.id):"";
@@ -106,7 +106,7 @@
  const badge=d=>{const [t,l]=state(d);return html`<span class="badge" data-tone="${t}">${l}</span>`;};
  function devMeta(d){
   const busy=S.busy.has(d.id);
-  if((d.status===200&&d.installed===false&&!(d.providers||[]).length)||d.status===501)return ""; // Orca·cswap 모두 없거나 갱신 전 jarvis 는 다시 물어도 같다
+  if((d.status===200&&d.installed===false&&!(d.providers||[]).length)||d.status===501)return ""; // Orca·hswap 모두 없거나 갱신 전 jarvis 는 다시 물어도 같다
   // 로그인을 시작하면 CLI 가 그 기기의 기존 자격을 먼저 지운다. 행이 없는 프로바이더의 로그인 버튼은
   // 게이트웨이가 저장한 자격이 없다고 확인한( fresh_logins ) 곳에만 낸다: 행이 없다는 것만으로는 자격이 없는지 알 수 없다
   return html`<p class="ul-meta">${d.fetched_at?html`<span>${P.fmt.ago(d.fetched_at)} 수집</span>`:""}${refBtn(d.id,(d.host||d.id)+" 새로고침",busy)}${(d.fresh_logins||[]).filter(id=>!(d.providers||[]).some(p=>p.id===id)).map(id=>relog(d,id,false))}</p>${d.mode==="independent"&&(d.unavailable||[]).length?html`<span class="ul-muted">확인 불가: ${d.unavailable.map(id=>PROVIDER[id]||id).join(" · ")}</span>`:""}`;
@@ -199,7 +199,7 @@
    const r=await fetch("/api/devices/"+encodeURIComponent(id)+"/usage?independent=1&refresh=1",{cache:"no-store",headers:{"X-Jarvis-Action":"usage-refresh"}}),o=await r.json();
    const i=S.devs.findIndex(d=>d.id===id);
    S.devs[i]={...o,id,host:S.devs[i].host,status:r.status};
-   const good=r.ok&&(!o.error||(o.providers||[]).length>0); // Orca 가 실패해도 cswap 값은 읽혔을 수 있다
+   const good=r.ok&&(!o.error||(o.providers||[]).length>0); // Orca 가 실패해도 hswap 값은 읽혔을 수 있다
    note(good?"":(S.devs[i].host||id)+": "+(o.error||"HTTP "+r.status),!good);
   }catch(e){note((e.message||String(e)),true);}
   S.busy.delete(id);draw();

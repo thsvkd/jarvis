@@ -305,8 +305,8 @@ Mac 의 Homebrew cask 와 앱 업데이터를 함께 설치 주체로 사용하�
 
 core 홈의 **AI 구독 사용량** 화면은 Orca 설정·계정·실행 상태와 독립적으로 각 기기의 사용량을 읽는다. core `GET /api/devices/usage?independent=1` 은 설정된 게이트웨이의 `GET /api/usage/independent` 를 모은다. 이전 `/api/orca/usage` 와 독립 옵션이 없는 기존 API 는 호환성을 위해 남아 있다. 갱신 전 게이트웨이는 독립 조회 미지원으로 표시하며 Orca 값으로 대체하지 않는다.
 
-Claude 는 [cswap](https://github.com/realiti4/claude-swap)의 계정 목록과 마지막 사용량 캐시를 읽고, Codex·Grok·Cursor 는 [caam](https://github.com/Dicklesworthstone/coding_agent_account_manager)의 저장된 프로필과 사용량을 읽는다. Codex 는 현재 CLI 자격의 사용량도 읽는다. 자격의 `id_token` 이 같은 계정(`chatgpt_account_id`)의 검증된 이메일을 담고 있으면 그 이메일로, 아니면 기본 계정으로 표시한다(토큰 서명은 확인하지 않는 표시용 값이다). 동일 계정인지 확인할 수 없으면 금고 계정과 따로 보인다. 이 경로는 cswap 을 실행해 토큰을 갱신하지 않으며, cswap·caam 을 새로 설치하거나 계정을 전환하지 않는다. caam 은 조회 중 상태 메타데이터를 기록하고 `CAAM_HOME` 이 설정되어 있으면 기존 데이터를 복사할 수 있다. Claude 캐시는 cswap 이 별도로 수집한 시점의 값이다. 2026-10-30 요금제 개편 뒤 인증된 Ultra 계정은 Claude 사용량 API 가 5시간 창을 주지 않는다([Ultra 개편](https://www.datastudios.org/post/claude-max-20x-renamed-ultra-removes-5-hour-limit-verified-accounts)). 주간 창만 있는 Claude 계정은 "5시간 한도 없음"으로 적어 읽지 못한 경우와 구분한다. caam 결과는 2분, Claude 결과는 30초 묶는다.
-그 기기에서 Orca 가 응답하면 Orca 로컬 RPC 의 계정(`accounts.list`, cswap·caam 실행 없음)으로 독립 수집을 보충한다: 독립 수집이 못 읽은 프로바이더는 Orca 계정으로 채우고, 이메일 모르는 기본 계정만 있으면 Orca 의 이메일 계정으로 바꾸며, 이메일을 아는 계정은 독립 값을 쓰고 Orca 에만 있는 이메일 계정을 더한다. Orca 가 없거나 실패해도 독립 수집 결과는 그대로 나온다. 같은 Claude 계정은 이메일과 cswap 의 조직 이름으로 묶어 기기가 달라도 한 번 센다.
+Claude 는 [hswap](https://github.com/thsvkd/harness-swap)의 Claude 엔진(claude-swap, 기존 cswap 과 같은 저장소)이 저장한 계정 목록과 마지막 사용량 캐시를 읽고, Codex·Grok·Cursor 는 [caam](https://github.com/Dicklesworthstone/coding_agent_account_manager)의 저장된 프로필과 사용량을 읽는다. Codex 는 현재 CLI 자격의 사용량도 읽는다. 자격의 `id_token` 이 같은 계정(`chatgpt_account_id`)의 검증된 이메일을 담고 있으면 그 이메일로, 아니면 기본 계정으로 표시한다(토큰 서명은 확인하지 않는 표시용 값이다). 동일 계정인지 확인할 수 없으면 금고 계정과 따로 보인다. 이 경로는 hswap 을 실행해 토큰을 갱신하지 않으며, hswap·caam 을 새로 설치하거나 계정을 전환하지 않는다. caam 은 조회 중 상태 메타데이터를 기록하고 `CAAM_HOME` 이 설정되어 있으면 기존 데이터를 복사할 수 있다. Claude 캐시는 그 저장소를 쓰는 도구(사용자가 예약한 `hswap claude auto --once` 등)가 별도로 수집한 시점의 값이다. 2026-10-30 요금제 개편 뒤 인증된 Ultra 계정은 Claude 사용량 API 가 5시간 창을 주지 않는다([Ultra 개편](https://www.datastudios.org/post/claude-max-20x-renamed-ultra-removes-5-hour-limit-verified-accounts)). 주간 창만 있는 Claude 계정은 "5시간 한도 없음"으로 적어 읽지 못한 경우와 구분한다. caam 결과는 2분, Claude 결과는 30초 묶는다.
+그 기기에서 Orca 가 응답하면 Orca 로컬 RPC 의 계정(`accounts.list`, hswap·caam 실행 없음)으로 독립 수집을 보충한다: 독립 수집이 못 읽은 프로바이더는 Orca 계정으로 채우고, 이메일 모르는 기본 계정만 있으면 Orca 의 이메일 계정으로 바꾸며, 이메일을 아는 계정은 독립 값을 쓰고 Orca 에만 있는 이메일 계정을 더한다. Orca 가 없거나 실패해도 독립 수집 결과는 그대로 나온다. 같은 Claude 계정은 이메일과 hswap 의 조직 이름으로 묶어 기기가 달라도 한 번 센다.
 Antigravity 는 현재 CLI 로그인에 남은 유효한 접근 토큰으로 Google 사용량과 [UserInfo](https://developers.google.com/identity/openid-connect/reference)를 조회한다. 같은 토큰에 연결된 검증된 이메일만 표시하고 확인할 수 없으면 기본 계정으로 표시한다. 만료된 토큰을 갱신하거나 `agy` 를 실행하지 않는다. 현재 사용 중인 계정만 지원한다.
 OpenCode Go 는 OpenCode 의 현재 자격으로 사용량을 조회한다. v2 는 선택된 Console 계정의 만료되지 않은 자격을 사용하며 Console 계정이 없을 때 Go 키를 사용한다. v1 은 Go API 키를 사용한다. 서비스가 토큰을 갱신하도록 사용량 API 를 호출하지 않는다. Kimi 는 CLI 에 설정된 파일 자격의 유효한 접근 토큰을 읽으며, [0% 오류 사례](https://github.com/MoonshotAI/kimi-code/issues/3908)가 있는 5시간·주간 비율은 상세 카운터가 없을 때 0% 로 단정하지 않는다. ZCode 는 `ZAI_API_KEY` 또는 Z.ai 공식 주소가 지정된 `ANTHROPIC_AUTH_TOKEN` 으로, Gemini 는 유효한 CLI 자격과 `GOOGLE_CLOUD_PROJECT` 가 있으면 조회한다. MiniMax 는 CLI 의 Token Plan 자격을 읽고, 응답에 명시된 잔량 비율을 확인할 수 있을 때만 표시한다. 자격과 계정 ID 는 응답·로그에 넣지 않으며 자격이나 한도를 확인할 수 없는 경우는 화면에 확인 불가로 표시한다.
 
@@ -315,14 +315,14 @@ OpenCode Go 는 OpenCode 의 현재 자격으로 사용량을 조회한다. v2 �
 기존 Orca 기반 호환 API 는 기기마다 Orca 가 로그인한 구독 계정(Claude·Codex·Grok·Antigravity 등)의 한도를 제공한다.
 게이트웨이 `GET /api/orca/usage`(설정 core 만)는 Orca 로컬 RPC `accounts.list` 의 rateLimits 를 프로바이더 → 계정 → 한도 창(5시간·주간·Fable 주간·월간)으로 정리한다.
 같은 프로바이더의 다른 관리 계정은 `inactiveClaudeAccounts`·`inactiveCodexAccounts` 에서 읽는다. 계정은 이메일만 내보내고 홈 경로·조직 UUID·프로바이더 계정 ID 는 넣지 않는다.
-Claude 는 그 기기에 [cswap](https://github.com/realiti4/claude-swap)(claude-swap)이 있으면 `cswap list --json`(schemaVersion 1)의 계정 목록을 쓴다.
-cswap 으로 로그인을 바꿔 끼우면 Orca 는 그 로그인을 '시스템 기본 계정' 하나로만 보기 때문이다. 토큰 갱신·조회 간격은 cswap 이 맡고 jarvis 는 자격 증명 파일을 열지 않는다.
-cswap 은 사용량을 읽을 때 만료된 접근 토큰을 갱신 토큰으로 다시 받는다(쉬는 계정 포함). 로그인 자체(갱신 토큰)는 기한이 있어
+Claude 는 그 기기에 [hswap](https://github.com/thsvkd/harness-swap)(harness-swap)이 있으면 `hswap claude list --json`(claude-swap 엔진, cswap 과 같은 schemaVersion 1)의 계정 목록을 쓴다.
+hswap 으로 로그인을 바꿔 끼우면 Orca 는 그 로그인을 '시스템 기본 계정' 하나로만 보기 때문이다. 토큰 갱신·조회 간격은 hswap 이 맡고 jarvis 는 자격 증명 파일을 열지 않는다.
+hswap 은 사용량을 읽을 때 만료된 접근 토큰을 갱신 토큰으로 다시 받는다(쉬는 계정 포함). 로그인 자체(갱신 토큰)는 기한이 있어
 새 `/login` 만이 늘린다: `loginExpiresAt` 3일 전부터 그 계정에 남은 기간을 붙이고 '주의 필요'로 센다.
-cswap 은 PATH 다음에 `~/.local/bin/cswap(.exe)` 에서 찾는다. 결과는 30초 묶으며, cswap 이 없거나 실패하면 Orca 값을 쓴다.
-cswap 이 없고 Claude Code(`claude`)가 있으면 사용량을 처음 읽을 때 뒤에서 `uv tool install claude-swap==0.28.0`(uv 가 없으면 pipx)으로 설치한다.
-버전은 고정한다(서비스가 PyPI 최신판을 저절로 받아 실행하지 않게. 올리기는 그 기기에서 `cswap upgrade`). 실패하면 이유를 화면에 보이고 6시간 뒤 다시 시도한다.
-설치 뒤 계정은 그 기기에서 `cswap add` 로 직접 넣는다. 설정 `cswap_install = false`(또는 `JARVIS_CSWAP_INSTALL=0`)로 끈다.
+hswap 은 PATH 다음에 `~/.local/bin/hswap(.exe)` 에서 찾는다. 결과는 30초 묶으며, hswap 이 없거나 실패하면 Orca 값을 쓴다.
+hswap 이 없고 Claude Code(`claude`)가 있으면 이 호환 API 로 사용량을 처음 읽을 때 뒤에서 `uv tool install "harness-swap @ <GitHub 소스 묶음 URL>"`(uv 가 없으면 pipx)으로 설치한다.
+PyPI 에 없어 커밋을 고정한 GitHub 소스 묶음을 받는다(서비스가 최신판을 저절로 받아 실행하지 않게, git 이 없는 기기도). 올리기는 `jarvis/cswap_usage.py` 의 커밋을 바꾸고 이미 깐 기기에서 `uv tool install --force` 로 다시 깐다. 실패하면 이유를 화면에 보이고 6시간 뒤 다시 시도한다.
+설치 뒤 계정은 그 기기에서 `hswap claude add` 로 직접 넣는다. 이미 깔린 cswap 은 지우지 않는다(같은 저장소를 쓴다). 설정 `cswap_install = false`(또는 `JARVIS_CSWAP_INSTALL=0`, 호환을 위해 이름 유지)로 끈다.
 Codex 는 그 기기에 [caam](https://github.com/Dicklesworthstone/coding_agent_account_manager)(coding_agent_account_manager)이 있고 Codex 프로필을 저장해 두었으면,
 `caam ls codex --json`(프로필 → 이메일)과 `caam limits codex --format json`(한도)으로 계정별 사용량을 더한다. 결과는 2분 묶는다.
 limits 는 caam 금고의 접근 토큰으로 읽기만 한다. jarvis 는 caam refresh·daemon·activate 를 부르지 않는다(Codex 갱신 토큰은 쓸 때마다 바뀐다).
@@ -330,12 +330,12 @@ limits 는 caam 금고의 접근 토큰으로 읽기만 한다. jarvis 는 caam 
 caam 이 없고 Codex CLI(`codex`)가 있으면 v0.1.24 릴리스를 받아 코드에 고정한 SHA256 을 확인한 뒤 `~/.local/bin/caam(.exe)` 에 둔다.
 계정은 그 기기에서 caam 으로 직접 저장한다. 설정 `caam_install = false`(또는 `JARVIS_CAAM_INSTALL=0`)로 끈다.
 caam 의 라이선스는 MIT 에 OpenAI·Anthropic 관련 추가 조항이 붙어 있다(사용자가 확인하고 도입을 정했다).
-Orca 가 없거나 실패한 기기(관리자 권한 Orca 를 쓰는 Windows 등)도 cswap 의 Claude 계정은 보인다. Codex 는 Orca 관리 계정(Orca 설정의 계정)으로 계정별 사용량이 나온다.
+Orca 가 없거나 실패한 기기(관리자 권한 Orca 를 쓰는 Windows 등)도 hswap 의 Claude 계정은 보인다. Codex 는 Orca 관리 계정(Orca 설정의 계정)으로 계정별 사용량이 나온다.
 프로바이더 API 를 다시 부르는 `refreshUsage` 는 5분에 한 번(새로고침 버튼은 30초 간격)만 쓰고, 그 사이에는 Orca 가 가진 값을 읽는다.
 core `GET /api/devices/usage`(전체, `?refresh=1` 강제)·`/api/devices/<id>/usage` 는 모아 두지 않고 요청마다 게이트웨이에 묻는다.
 
 Claude 계정 행의 **이 계정 사용**(viewers 만)은 core `POST /api/devices/<id>/account?slot=<n>` → 게이트웨이 `POST /api/orca/account`(설정 core 만) →
-`cswap switch <n> --json` 으로 그 기기의 Claude Code 로그인을 바꾼다. 슬롯 번호는 기기마다 다르다. Codex 는 jarvis 가 caam activate 를 부르지 않으므로 전환하지 않는다.
+`hswap claude switch <n> --json` 으로 그 기기의 Claude Code 로그인을 바꾼다. 슬롯 번호는 기기마다 다르다. Codex 는 jarvis 가 caam activate 를 부르지 않으므로 전환하지 않는다.
 화면은 디자인 랩 04(`/lab/usage/`)의 C 안이다. 간략히(칸마다 최대 사용률, 누르면 계정 상세)와 자세히(칸 안에 계정별 한도 창 전부) 보기를 전환하며, 선택은 localStorage `jarvis.usage.mode` 에 둔다.
 기기별 표 위에는 프로바이더별 계정 요약을 표시한다. 같은 프로바이더·이메일·조직의 계정은 사용량이 있는 값 중 최근 값을 한 번 보여 주고, 이메일이 없으면 기기별로 구분한다. 한도 창별 사용률과 출처 기기·확인 시각을 표시하며 프로바이더·주의 필터가 함께 적용된다.
 공식 계약: [계정 RPC](https://github.com/stablyai/orca/blob/main/src/main/runtime/rpc/methods/accounts.ts), [사용량 형식](https://github.com/stablyai/orca/blob/main/src/shared/rate-limit-types.ts).
