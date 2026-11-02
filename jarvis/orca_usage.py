@@ -272,6 +272,9 @@ def read(force=False):
         cli_login.refresh_grok()
     if logins := cli_login.available():
         body["logins"] = logins
+    # 저장한 자격가 없어 새로 로그인해도 잃을 게 없는 프로바이더(기기 행의 '로그인' 버튼). 알 수 없으면 넣지 않는다
+    if fresh_logins := cli_login.fresh():
+        body["fresh_logins"] = fresh_logins
     return 200, body
 
 

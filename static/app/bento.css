@@ -1196,7 +1196,7 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
 .ul-login > * + * { margin-top: 10px; }
 .ul-login a { overflow-wrap: anywhere; }
 .ul-code { font: var(--fw-semibold) var(--fs-xl)/1.2 var(--mono); letter-spacing: var(--ls-wide); user-select: all; }
-.ul-acct > .seg-action { margin-top: 8px; }
+.ul-acct > .seg-action, .ul-summary-account > .seg-action { margin-top: 8px; }
 .ul-raw { margin-top: 6px; font-size: var(--fs-xs); color: var(--text-3); }
 .ul-raw summary { cursor: pointer; }
 .ul-raw pre { margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow: auto; font-family: var(--mono); }

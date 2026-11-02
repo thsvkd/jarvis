@@ -3,6 +3,7 @@
 Grok 은 Orca 가 토큰을 스스로 갱신하지 않는다(delegated-refresh-required): grok CLI 를 한 번 돌리면 refresh token 으로 갱신된다.
 refresh token 마저 죽었으면 grok 은 자격을 지운다(그 뒤로는 로그인 버튼으로 다시 받는다).
 """
+import json
 import os
 import re
 import subprocess
@@ -14,6 +15,7 @@ from . import caam_usage
 from .util import _ENV, _NO_WINDOW, run, which_local
 
 WAIT_S = 30  # URL·코드가 나올 때까지
+STATUS_S = 6  # codex login status 는 보통 0.1초 안에 답한다(늦으면 알 수 없음으로 본다)
 LIFE_S = 16 * 60  # 코드는 15분 유효하다. 그 뒤에도 남아 있으면 끝낸다
 REFRESH_S = 600  # grok 자동 갱신 간격
 URL_RE = re.compile(r"https://\S+")
@@ -25,8 +27,17 @@ _jobs = {}  # provider → {"proc", "out", "url", "code", "started_at"}
 _grok_at = 0.0
 
 
+def _grok_home():
+    """grok 홈 디렉터리(공식 `GROK_HOME`, 없으면 ~/.grok). 자격과 CLI 를 같은 곳에서 찾는다.
+
+    `GROK_HOME` 을 재정의한 기기에서 `~/.grok` 만 보면 자격을 없는 쪽으로 오판해
+    '로그인' 버튼이 멀쩡한 자격을 지운다(공식 Settings 문서: `$GROK_HOME` 가 홈 디렉터리).
+    """
+    return os.environ.get("GROK_HOME") or os.path.join(os.path.expanduser("~"), ".grok")
+
+
 def _grok():
-    p = os.path.join(os.path.expanduser("~"), ".grok", "bin", "grok" + (".exe" if sys.platform == "win32" else ""))
+    p = os.path.join(_grok_home(), "bin", "grok" + (".exe" if sys.platform == "win32" else ""))
     return which_local("grok") or (p if os.path.isfile(p) else None)
 
 
@@ -36,6 +47,54 @@ CLIS = {"codex": caam_usage._codex_cli, "grok": _grok}
 def available():
     """이 기기에서 로그인 버튼을 낼 프로바이더."""
     return [k for k, f in CLIS.items() if f()]
+
+
+def _codex_auth():
+    """codex 자격 파일(CODEX_HOME 기본 ~/.codex)."""
+    return os.path.join(os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"), "auth.json")
+
+
+def _grok_auth():
+    """grok 자격 파일(공식 `GROK_HOME` 우선). grok 은 OS 키링을 쓰지 않고 이 파일에만 자격을 둔다(공식 문서·실험 확인)."""
+    return os.path.join(_grok_home(), "auth.json")
+
+
+def _codex_stored():
+    """codex 에 저장한 자격가 있나.
+
+    파일 백엔드는 파일 유무로, keyring·환경변수 백엔드(`secret_auth_storage`)는 codex 자체의
+    답으로 확인한다: 파일만 보면 keyring 보관 자격을 놓친다. `codex login status` 가
+    'Not logged in' 을 답했을 때만 없는 쪽으로 본다. 없다고 오판하면 '로그인' 버튼이
+    멀쩡한 자격을 지운다(`_ENV` 는 LC_ALL=C 라 영문으로 답한다).
+    """
+    exe = CLIS["codex"]()
+    if not exe:
+        return True
+    if os.path.isfile(_codex_auth()):
+        return True  # 파일이 있으면 codex 도 'Logged in' 으로 답한다(빈 파일도). 매번 CLI 를 부르지 않는다
+    _, out, err = run([exe, "login", "status"], STATUS_S)
+    text = (out or "") + (err or "")
+    return "Not logged in" not in text  # 그 밖(로그인 중·오류·시간 초과·구버전)은 있는 쪽으로
+
+
+def _grok_stored():
+    """grok 에 저장한 자격가 있나. 파일이 없거나 비어 있으면 없다(못 읽으면 있는 쪽으로 본다)."""
+    try:
+        with open(_grok_auth(), encoding="utf-8") as f:
+            body = json.load(f)
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError, TypeError):
+        return True  # 잠겨·깨져 있으면 자격이 있는 쪽으로
+    return True if not isinstance(body, dict) else bool(body)
+
+
+STORED = {"codex": _codex_stored, "grok": _grok_stored}  # provider → 저장한 자격이 있나
+
+
+def fresh():
+    """저장한 자격이 없어 새로 로그인해도 잃을 게 없는 프로바이더(화면의 '로그인' 버튼). 알 수 없으면 넣지 않는다."""
+    return [k for k in available() if k in STORED and not STORED[k]()]
 
 
 def _read(job):

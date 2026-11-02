@@ -100,14 +100,16 @@
  const relog=(d,id,again=true)=>html`<button type="button" class="seg-action" data-login="${d.id}" data-lp="${id}">${LOGIN[id]} ${again?"다시 로그인":"로그인"}</button>`;
  // slot: 게이트웨이 cswap 의 슬롯 번호(Claude). 그 기기의 Claude Code 로그인을 이 계정으로 바꾼다
  const useBtn=(a,d)=>a.slot&&!a.active?html`<button type="button" class="seg-action" data-use="${d.id}" data-slot="${a.slot}" data-label="${a.label}" aria-disabled="${String(S.busy.has(d.id))}">이 계정 사용</button>`:"";
- const acct=(a,d,p)=>html`<div class="ul-acct">${head(a)}${body(a)}${useBtn(a,d)}${(isErr(a)&&kind(a)[0]==="auth"||a.attention)&&(d.logins||[]).includes(p.id)?relog(d,p.id):""}${a.updated_at?html`<p class="ul-age">${P.fmt.ago(a.updated_at)} 확인</p>`:""}</div>`;
+ // 인증 실패·조치 필요 계정에는 그 기기에서 다시 로그인할 버튼을 함께 낸다(요약 카드도 상세와 같다)
+ const relogIf=(a,d,p)=>(isErr(a)&&kind(a)[0]==="auth"||a.attention)&&(d.logins||[]).includes(p.id)?relog(d,p.id):"";
+ const acct=(a,d,p)=>html`<div class="ul-acct">${head(a)}${body(a)}${useBtn(a,d)}${relogIf(a,d,p)}${a.updated_at?html`<p class="ul-age">${P.fmt.ago(a.updated_at)} 확인</p>`:""}</div>`;
  const badge=d=>{const [t,l]=state(d);return html`<span class="badge" data-tone="${t}">${l}</span>`;};
  function devMeta(d){
   const busy=S.busy.has(d.id);
   if((d.status===200&&d.installed===false&&!(d.providers||[]).length)||d.status===501)return ""; // Orca·cswap 모두 없거나 갱신 전 jarvis 는 다시 물어도 같다
   // 로그인을 시작하면 CLI 가 그 기기의 기존 자격을 먼저 지운다. 행이 없는 프로바이더의 로그인 버튼은
-  // Orca 를 읽어 그 로그인이 정말 없다고 안 기기에만 낸다(Orca 를 못 읽은 기기의 멀쩡한 로그인을 지우지 않게)
-  return html`<p class="ul-meta">${d.fetched_at?html`<span>${P.fmt.ago(d.fetched_at)} 수집</span>`:""}${refBtn(d.id,(d.host||d.id)+" 새로고침",busy)}${d.running&&!d.error?(d.logins||[]).filter(id=>!(d.providers||[]).some(p=>p.id===id)).map(id=>relog(d,id,false)):""}</p>${d.mode==="independent"&&(d.unavailable||[]).length?html`<span class="ul-muted">확인 불가: ${d.unavailable.map(id=>PROVIDER[id]||id).join(" · ")}</span>`:""}`;
+  // 게이트웨이가 저장한 자격이 없다고 확인한( fresh_logins ) 곳에만 낸다: 행이 없다는 것만으로는 자격이 없는지 알 수 없다
+  return html`<p class="ul-meta">${d.fetched_at?html`<span>${P.fmt.ago(d.fetched_at)} 수집</span>`:""}${refBtn(d.id,(d.host||d.id)+" 새로고침",busy)}${(d.fresh_logins||[]).filter(id=>!(d.providers||[]).some(p=>p.id===id)).map(id=>relog(d,id,false))}</p>${d.mode==="independent"&&(d.unavailable||[]).length?html`<span class="ul-muted">확인 불가: ${d.unavailable.map(id=>PROVIDER[id]||id).join(" · ")}</span>`:""}`;
  }
 
  // ---------------------------------------------------------------- 화면
@@ -120,7 +122,7 @@
   const soon=wins.length?html`<div class="tile ul-soon"><h3 class="sub-h">곧 풀리는 한도 (50% 이상)</h3><ol>${wins.slice(0,6).map(({a,p,w})=>html`<li><span class="ul-when" title="${at(w.resets_at)}">${left(w.resets_at)}</span>${dot(p.id)}<span class="ul-email">${a.label}</span><span class="ul-wl">${p.name} ${WIN[w.key]||w.key}</span>${meter(w.used)}<b class="ul-wp" data-tone="${tone(w.used)}">${pct(w.used)}</b></li>`)}</ol></div>`:"";
   const summaryAccounts=uniq(false).filter(({a})=>!S.hot||isHot(a)); // 최신 값을 고른 뒤 주의 필터를 적용한다
   const groups=columns(false).map(p=>({p,accounts:summaryAccounts.filter(x=>x.p.id===p.id)})).filter(g=>g.accounts.length);
-  const summary=groups.length?html`<div class="ul-summary"><h3 class="sub-h">프로바이더별 계정 사용량</h3><p class="ul-muted">같은 계정은 사용량이 있는 최근 값으로 한 번 표시합니다.</p>${groups.map(({p,accounts})=>html`<section class="tile ul-group"><h4>${dot(p.id)} ${p.name} <span class="ul-muted">${accounts.length}개 계정</span></h4><div class="ul-summary-grid">${accounts.map(({a,d})=>html`<div class="ul-summary-account">${head(a)}${body(a)}<p class="ul-age">${d.host||d.id} · ${a.updated_at?P.fmt.ago(a.updated_at)+" 확인":"확인 시각 모름"}</p></div>`)}</div></section>`)}</div>`:"";
+  const summary=groups.length?html`<div class="ul-summary"><h3 class="sub-h">프로바이더별 계정 사용량</h3><p class="ul-muted">같은 계정은 사용량이 있는 최근 값으로 한 번 표시합니다.</p>${groups.map(({p,accounts})=>html`<section class="tile ul-group"><h4>${dot(p.id)} ${p.name} <span class="ul-muted">${accounts.length}개 계정</span></h4><div class="ul-summary-grid">${accounts.map(({a,p,d})=>html`<div class="ul-summary-account">${head(a)}${body(a)}${relogIf(a,d,p)}<p class="ul-age">${d.host||d.id} · ${a.updated_at?P.fmt.ago(a.updated_at)+" 확인":"확인 시각 모름"}</p></div>`)}</div></section>`)}</div>`:"";
   const rows=S.devs.filter(visible),cols=columns(S.hot).filter(c=>S.prov==="all"||c.id===S.prov);
   if(!rows.length)return html`${kpi}${soon}<div class="tile ul-none"><p>${filtering()?"조건에 맞는 계정이 없습니다.":"사용량을 보여 줄 기기가 없습니다."}</p>${filtering()?html`<button type="button" class="seg-action" data-clear>필터 해제</button>`:""}</div>`;
   const cell=(d,c)=>{

@@ -152,7 +152,8 @@ class MergeTest(unittest.TestCase):
     def merged(self, orca_body, ca):
         with mock.patch.object(orca_usage, "_orca", return_value=orca_body), \
                 mock.patch.object(orca_usage.cswap_usage, "read", return_value=None), \
-                mock.patch.object(orca_usage.caam_usage, "read", return_value=ca):
+                mock.patch.object(orca_usage.caam_usage, "read", return_value=ca), \
+                mock.patch.object(orca_usage.cli_login, "fresh", return_value=[]):  # 자격 확인은 실제 홈을 읽는다
             return orca_usage.read()[1]
 
     def test_orca_live_wins_caam_adds(self):
