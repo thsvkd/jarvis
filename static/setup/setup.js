@@ -194,6 +194,15 @@
       head = html`<div class="su-ver"><span class="su-k">하네스</span><b>${(x.harnesses || []).join(", ") || "없음"}</b></div>`;
       const rec = x.recorded || {};
       facts.push(html`<span>설치 기록 <b>${Object.keys(rec).length}</b>종</span>`);
+      const retention = x.session_retention || {}, claude = retention.claude;
+      if (claude) {
+        const value = typeof claude.value === "number" ? claude.value + "일" : "값 확인 필요";
+        const desc = { missing: "설정 없음 · 적용 계획", managed: value + " · jarvis 설정",
+          user_configured: value + " · 기존 설정 보존", modified: value + " · 사용자 변경 보존", error: "확인 필요" };
+        facts.push(html`<span>Claude 보존 <b>${desc[claude.state] || "확인 불가"}</b></span>`);
+        if (claude.error) notes.push("보존 설정 확인 필요: " + claude.error);
+      }
+      if (retention.codex) facts.push(html`<span>Codex 보존 <b>확인 불가</b></span>`);
       if ((x.pending || []).length) extra = html`<ul class="su-files" aria-label="할 일">${x.pending.map((t) => html`<li data-tone="info"><i class="shape" aria-hidden="true"></i><span>${t}</span></li>`)}</ul>`;
     } else if (m === "harness" && s.details) {
       head = html`<div class="su-ver"><span class="su-k">도구</span><b>${(x.tools || []).length}</b></div>`;

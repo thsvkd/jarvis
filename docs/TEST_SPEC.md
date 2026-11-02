@@ -85,7 +85,7 @@ ai-setup 의 단계형 설치(`res/stages.py` 와 워커)를 `jarvis/modules/set
 
 | ID | 케이스 | 테스트 | 상태 |
 | --- | --- | --- | --- |
-| SETUP-3 | WHEN setup 모듈의 status·plan 을 실행하면 THE SYSTEM SHALL 홈 아래 아무것도 쓰지 않고, ai-setup 의 `--stages all`(agentsmd 제외)과 같은 쓰기 액션을 계획한다. 하네스는 claude·codex 와 영수증의 하네스, 줄바꿈 키는 기록된 값을 쓴다 | `tests/test_setup_module.py` | GREEN (단위; s2 읽기 전용 실행 0.4초) |
+| SETUP-3 | WHEN setup 모듈의 status·plan 을 실행하면 THE SYSTEM SHALL 홈 아래 아무것도 쓰지 않고, ai-setup 의 `--stages all`(agentsmd 제외)과 세션 보존(SETUP-36)의 쓰기 액션을 계획한다. 하네스는 claude·codex 와 영수증의 하네스, 줄바꿈 키는 기록된 값을 쓴다 | `tests/test_setup_module.py`, `tests/test_session_retention.py` | 단위 검증 |
 | SETUP-4 | WHEN 영수증에 기록된 설정(줄바꿈 키·번들 스킬·출력 스타일·mod·OMC HUD)의 배포본이 마지막으로 적용한 판과 다르면 THE SYSTEM SHALL 그 워커를 다시 적용하는 단계를 계획하고(사용자가 고친 파일은 워커가 그대로 둔다, 플러그인을 설치할 수 있는 워커는 install 위험), 다시 적용이나 그 설정의 설치가 성공하면 그 판을 기록해 다시 계획하지 않는다 | `tests/test_setup_module.py::test_recorded_settings_are_refreshed_once_per_bundle`, `test_a_setting_installed_by_the_plan_is_not_refreshed_right_after` | GREEN (단위. v1.6.0 s2 실측: core API 로 plan → 같은 plan_id 로 apply, 다시 적용 5단계 done, 설정 파일 그대로(이미 최신), 다시 plan 하면 단계 없음) |
 | SETUP-5 | WHEN setup 계획을 apply 하면 THE SYSTEM SHALL 계획이 바뀌었으면 아무것도 하지 않고 stale, 아니면 액션을 하나씩 실행하되 한 단계(stage)에서 실패하면 그 단계의 나머지와 그 단계에 기대는 뒤 단계만 건너뛰고 독립인 단계와 다시 적용은 계속하며 결과를 단계마다 낸다 | `tests/test_setup_module.py::test_apply_continues_past_a_failed_stage_and_rejects_a_changed_plan`, `test_a_failed_stage_skips_the_stages_that_need_it_but_not_the_independent_ones` | GREEN (단위) |
 | SETUP-6 | WHEN setup 을 uninstall 하면 THE SYSTEM SHALL dry-run 의 plan_id 가 맞을 때만 엔진의 제거 계획(영수증에 기록한 것만)을 실행하고, jarvis 게이트웨이 유닛과 Tailscale 은 지우지 않는다 | `tests/test_setup_module.py::test_uninstall_needs_the_dry_run_plan_id_and_keeps_jarvis_and_tailscale` | GREEN (단위) |
@@ -118,6 +118,9 @@ ai-setup 의 단계형 설치(`res/stages.py` 와 워커)를 `jarvis/modules/set
 | SETUP-33 | WHEN 전체 단계 선택을 계획하면 THE SYSTEM SHALL CodeGraph npm 패키지 액션을 MCP 등록보다 앞에 두고 graft 또는 Trail 설치 명령을 내지 않는다 | `test_full_selection_orders_codegraph_package_before_mcp` | GREEN · 원래 AI-41 |
 | SETUP-34 | WHEN 같은 단계 선택을 첫 계획이 만든 상태에 다시 계획하면 THE SYSTEM SHALL 추가 쓰기 액션을 내지 않는다 | `test_second_plan_against_post_state_does_not_write` | GREEN · 원래 AI-43 |
 | SETUP-35 | WHEN Jarvis 역할을 고르지 않으면 THE SYSTEM SHALL Jarvis 설치를 계획하지 않고, Tailscale 제거는 logout 을 포함하지 않으며, 기록하지 않은 Jarvis 유닛은 지우지 않는다 | `test_jarvis_herdr_and_setcap_follow_explicit_choice`, `test_uninstall_removes_only_recorded_units_and_packages` | GREEN · 원래 AI-44 |
+| SETUP-36 | WHEN Claude 사용자 설정에 보존 기간이 없고 승인한 setup 계획을 적용하면 THE SYSTEM SHALL 다른 설정과 영수증을 보존하며 `cleanupPeriodDays` 를 36,500으로 추가하고 소유권을 기록한다. status·plan 은 읽기만 하고 화면에 Claude 상태와 Codex 미확인을 표시한다 | `tests/test_session_retention.py`, `tests/test_setup_retention.mjs` | 단위 검증 |
+| SETUP-37 | WHEN 기존 보존 값이 있거나 계획 뒤 설정이 바뀌거나 JSON이 잘못됐거나 파일이 링크이면 THE SYSTEM SHALL 사용자 설정을 덮어쓰지 않고 상태 또는 오류를 보고한다. 쓰기 중단 영수증이 있으면 자동 재시도하지 않는다 | `tests/test_session_retention.py` | 단위 검증 |
+| SETUP-38 | WHEN setup을 제거하면 THE SYSTEM SHALL dry-run은 읽기만 하고 영수증에 기록한 보존 값이 그대로일 때만 제거하며 수정된 값은 영수증과 함께 보존하고 deferred 를 보고한다 | `tests/test_session_retention.py` | 단위 검증 |
 
 ## 하네스 갱신
 

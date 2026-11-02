@@ -107,6 +107,7 @@ core 홈의 AI 셋업 화면(디자인 랩 05 의 C 안)은 기기마다 모듈 
 - 하네스 설치 단계는 카탈로그의 설치 명령(`cmd`)을, 설정 워커의 설치 단계는 그 워커 배포본의 다이제스트(`digest`)를 단계에 넣어 plan_id 에 묶는다(승인한 계획과 다른 본문이 돌면 stale).
 - AGENTS.md 틀은 `res/templates/*.md.tmpl` 이다(이름이 AGENTS.md·CLAUDE.md 면 그 폴더를 만지는 에이전트가 지시로 읽는다).
 - AGENTS.md 는 프로젝트 폴더 단위라 이 모듈에 넣지 않았다. `python -m jarvis agentsmd [--harness L] [--force] [--dry-run]` 이 지금 폴더에 옮긴 `setup_agentsmd` 워커를 부른다.
+- 세션 보존: setup 계약 층은 Claude 사용자 설정에 `cleanupPeriodDays` 가 없을 때만 36,500일을 `config` 단계로 계획한다. 기존 키는 값에 관계없이 보존하고 status 와 AI 셋업 화면에 표시한다. 설정·영수증의 해시와 워커 다이제스트를 계획에 묶고 다른 setup 단계보다 먼저 실행하며, 계획 뒤 바뀌거나 JSON 객체가 아니거나 심볼릭 링크면 쓰지 않는다. 기존 설정을 백업하고 임시 파일로 교체하며 교체 직전 해시를 다시 확인한다. 외부 프로세스가 같은 잠금을 따르지 않으면 마지막 확인과 교체 사이 경쟁을 원자적으로 막을 수는 없다. 영수증의 `session_retention` 은 중단 시 `pending`, 성공 시 `applied` 이다. pending 은 확인 전 자동 재시도하지 않는다. 제거는 기록된 값이 그대로일 때만 하고 사용자가 바꾼 값과 영수증을 남기면 deferred 다. Codex 전체 세션 보존 설정은 확인 불가로 표시하며 쓰지 않는다. 로컬 파일 기록은 유효 설정·서버 보존의 증명이 아니다.
 
 ## harness 모듈
 

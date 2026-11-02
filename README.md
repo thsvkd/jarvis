@@ -276,6 +276,8 @@ ai-setup 이 하던 설치·갱신도 같은 모듈 계약으로 한다(core 홈
 | `setup` | 하네스(claude·codex 와 영수증의 하네스)·Claude 플러그인·번들 스킬·CodeGraph·MCP 등록·줄바꿈 키·출력 스타일·mod·OMC HUD·Tailscale 을 없는 것만 설치하고, 이미 설치한 설정은 배포본이 바뀌면 다시 적용한다. 엔진은 ai-setup 에서 옮긴 `jarvis/modules/setup/` 이다 |
 | `harness` | 설치된 하네스·도구를 최신으로 올린다(update-ai). codex 관리형 데몬이 CLI 와 어긋나면 데몬 재시작을 승인 단계로 보인다 |
 
+`setup` 계획은 Claude Code의 `~/.claude/settings.json`에 `cleanupPeriodDays`가 없으면 로컬 세션 보존 기간을 36,500일로 늘리는 설정을 포함한다. 이미 지정된 값은 그대로 두고 상태에 표시한다. 설정 적용 전에 계획을 승인해야 하며, 기존 설정은 백업하고 영수증에 기록한 값만 제거한다. 교체 직전에 파일 변경을 다시 확인하지만, 그 확인과 교체 사이 다른 프로그램의 쓰기까지 원자적으로 막을 수는 없다. 작업이 중단돼 영수증에 `session_retention.state: pending`이 남으면 설정·백업·영수증을 직접 확인하기 전에는 다시 쓰지 않는다. 상위 설정이 사용자 설정보다 우선할 수 있고 클라우드 보존 정책은 바뀌지 않는다. Codex 전체 세션에는 확인된 동일 설정이 없어 미확인으로 표시한다. 장기 보존은 디스크 사용량을 늘릴 수 있다. [Claude Code 설정](https://code.claude.com/docs/en/settings-reference)
+
 개별 설정만 다시 적용하려면 옮긴 워커 진입점을 그대로 쓴다: `bash jarvis/modules/setup/scripts/setup.sh --keybinds`(Windows 는 `setup.ps1 -Keybinds`). 프로젝트 폴더의 AGENTS.md·CLAUDE.md 는 그 폴더에서 `python -m jarvis agentsmd [--harness claude,codex] [--force] [--dry-run]` 로 쓴다.
 
 | OS | 설치본 하나 | 업데이트 주체 |

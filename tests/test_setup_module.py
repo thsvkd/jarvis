@@ -17,6 +17,8 @@ class SetupModuleTest(unittest.TestCase):
         self.home = Path(tmp.name) / "home"
         self.claude = self.home / ".claude"
         self.claude.mkdir(parents=True)
+        # 이 파일은 기존 단계 계약 테스트다. 보존 설정의 별도 동작은 test_session_retention.py에서 검증한다.
+        (self.claude / "settings.json").write_text('{"cleanupPeriodDays": 36500}', encoding="utf-8")
         bin_dir = Path(tmp.name) / "bin"
         bin_dir.mkdir()
         for name in ("claude", "codex", "codegraph"):  # 이미 깔린 하네스·도구처럼 보이게 한다

@@ -17,7 +17,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import module
+from . import module, session_retention
 from .config import STATE_DIR
 from .harness_module import user_path
 
@@ -175,21 +175,38 @@ def _plan(world, uninstall=False, check_sudo=True):
             if present(world) and done.get(rid) != digest:
                 steps.append({"id": f"refresh-{rid}", "summary": f"{label}: 이 배포본으로 다시 적용(사용자가 고친 파일은 그대로 둠)",
                               "risk": risk, "argv": _worker_argv(script), "digest": digest})
+    retention = session_retention.inspect(Path.home())
+    blocked = []
+    if retention["state"] == "error":
+        blocked.append({"step": "session-retention", "reason": retention["error"]})
+    if retention["state"] == "error" or retention["state"] in (("managed", "modified") if uninstall else ("missing",)):
+        desc = ("확인 필요" if retention["state"] == "error" else
+                "사용자 변경을 보존 (직접 확인 필요)" if uninstall and retention["state"] == "modified" else
+                "제거" if uninstall else "36,500일 적용")
+        action = s.Action("session_retention", "Claude 세션 보존 설정 " + desc,
+                          True, ("session-retention",), ())
+        digest = hashlib.sha256(Path(session_retention.__file__).read_bytes()).hexdigest()
+        steps.insert(0, {"id": "session-retention", "summary": action.detail,
+                         "risk": "remove" if uninstall else "config", "argv": list(action.argv),
+                         "stage": action.stage, "retention": retention, "digest": digest})
+        actions.insert(0, action)
     return module.seal({"module": "setup", "device": socket.gethostname(), "action": "uninstall" if uninstall else "update",
-                        "steps": steps, "blocked": []}), actions, chosen
+                        "steps": steps, "blocked": blocked, "retention": retention}), actions, chosen
 
 
 def status():
     world = _snapshot()
     p, _, _ = _plan(world, check_sudo=False)
     receipt = _read_json(Path.home() / ".claude" / ".claude-code-setup.json")
-    keys = ("harness_installs", "plugins", "skills", "mcp", "marketplaces", "tool_installs", "keybinds", "output_style", "mods", "omc_hud")
+    keys = ("harness_installs", "plugins", "skills", "mcp", "marketplaces", "tool_installs", "keybinds", "output_style", "mods", "omc_hud", "session_retention")
     recorded = {k: (sorted(receipt[k]) if isinstance(receipt.get(k), dict) else bool(receipt.get(k))) for k in keys if receipt.get(k)}
     return {"module": "setup", "installed": bool(recorded), "owned": bool(recorded), "version": None, "latest": None,
-            "health": "degraded" if p["steps"] else "ok",
+            "health": "degraded" if p["steps"] or p["blocked"] else "ok",
             "details": {"harnesses": [h for h in stages().HARNESS_LABELS if h in world["bins"]], "recorded": recorded,
                         "pending": [st["summary"] for st in p["steps"]],
-                        "sudo_steps": sum(1 for st in p["steps"] if "sudo" in st)}}
+                        "sudo_steps": sum(1 for st in p["steps"] if "sudo" in st),
+                        "session_retention": {"claude": p["retention"], "codex": {"state": "unknown",
+                            "reason": "전체 세션 보존 기간 설정을 확인하지 못했습니다"}}}}
 
 
 def plan():
@@ -229,6 +246,12 @@ def _run_steps(steps, actions, chosen):
                 elif step.get("sudo") == "password":
                     result, message = "skipped", "비밀번호 없는 sudo 가 없어 실행하지 않음. 터미널에서 실행: " + \
                         " ".join(step["argv"]).replace("sudo -n", "sudo")
+                elif step["id"] == "session-retention":
+                    if chosen["uninstall"] and step["retention"]["state"] == "modified":
+                        result, message = "deferred", "사용자가 바꾼 설정과 영수증을 보존했습니다. 직접 확인하세요."
+                    else:
+                        session_retention.change(Path.home(), step["retention"], chosen["uninstall"])
+                        result, message = "ok", ""
                 elif step["id"].startswith("refresh-"):
                     rid = step["id"][len("refresh-"):]
                     head = next(r[4] for r in REFRESH if r[0] == rid)
@@ -248,7 +271,8 @@ def _run_steps(steps, actions, chosen):
             elif result == "skipped":
                 unmet_stages.add(stage)
             results.append({"id": step["id"], "result": result, "message": message})
-    return ("failed" if any(r["result"] == "failed" for r in results) else "done"), results
+    return ("failed" if any(r["result"] == "failed" for r in results) else
+            "deferred" if any(r["result"] == "deferred" for r in results) else "done"), results
 
 
 def apply(plan_id):
@@ -256,6 +280,8 @@ def apply(plan_id):
     current, actions, chosen = _plan(world)
     if current["plan_id"] != plan_id:
         return {"status": "stale", "plan_id": current["plan_id"], "steps": []}
+    if current["blocked"]:
+        return {"status": "failed", "steps": [], "blocked": current["blocked"]}
     if not current["steps"]:
         return {"status": "current", "steps": []}
     status, results = _run_steps(current["steps"], actions, chosen)
@@ -267,8 +293,11 @@ def uninstall(dry_run=False, plan_id=None):
     current, actions, chosen = _plan(world, uninstall=True)
     if dry_run:
         return {"status": "done", "plan_id": current["plan_id"], "steps": [
-            {"id": st["id"], "result": "skipped", "message": st["summary"]} for st in current["steps"]]}
+            {"id": st["id"], "result": "skipped", "message": st["summary"]} for st in current["steps"]],
+                "blocked": current["blocked"]}
     if plan_id != current["plan_id"]:
         return {"status": "stale", "plan_id": current["plan_id"], "steps": []}
+    if current["blocked"]:
+        return {"status": "failed", "plan_id": current["plan_id"], "steps": [], "blocked": current["blocked"]}
     status, results = _run_steps(current["steps"], actions, chosen)
     return {"status": status, "plan_id": current["plan_id"], "steps": results}
