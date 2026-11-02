@@ -61,9 +61,12 @@
  const failed=d=>!ok(d)&&!(d.status===200&&d.installed===false)&&d.status!==501; // Orca 없음·갱신 전 jarvis 는 실패가 아니다
  const provs=d=>(ok(d)?d.providers||[]:[]).filter(p=>S.prov==="all"||p.id===S.prov);
  const shown=(d,p)=>p.accounts.filter(a=>!S.hot||isHot(a));
+ // 게이트웨이가 저장한 자격이 없다고 확인한( fresh_logins ) 프로바이더 중 계정 행이 없는 것: 그 칸에 로그인 카드를 낸다.
+ // 로그인을 시작하면 CLI 가 그 기기의 기존 자격을 먼저 지운다: 행이 없다는 것만으로는 자격이 없는지 알 수 없어 확인된 곳에만 낸다
+ const fresh=d=>d.status===200?(d.fresh_logins||[]).filter(id=>!(d.providers||[]).some(p=>p.id===id)):[];
  const filtering=()=>S.prov!=="all"||S.hot;
  // 필터 중에는 사용량을 못 읽은 기기도 '전체'일 때만 보인다(어느 프로바이더인지 모른다)
- const visible=d=>ok(d)?(!filtering()||provs(d).some(p=>shown(d,p).length)):S.prov==="all";
+ const visible=d=>!S.hot&&fresh(d).includes(S.prov)||(ok(d)?(!filtering()||provs(d).some(p=>shown(d,p).length)):S.prov==="all");
  function uniq(filterHot=true){
   const m=new Map();
   for(const d of S.devs)for(const p of provs(d))for(const [i,a] of p.accounts.entries()){
@@ -75,6 +78,7 @@
   const seen=new Map();
   for(const d of S.devs)for(const p of d.status===200?d.providers||[]:[])
    if(!seen.has(p.id)&&(!hotOnly||p.accounts.some(isHot)))seen.set(p.id,p.name); // 표는 주의 필터 중 빈 열을 뺀다
+  if(!hotOnly)for(const d of S.devs)for(const id of fresh(d))if(!seen.has(id))seen.set(id,PROVIDER[id]||id);
   return [...seen].map(([id,name])=>({id,name}));
  }
 
@@ -105,11 +109,9 @@
  const acct=(a,d,p)=>html`<div class="ul-acct">${head(a)}${body(a)}${useBtn(a,d)}${relogIf(a,d,p)}${a.updated_at?html`<p class="ul-age">${P.fmt.ago(a.updated_at)} 확인</p>`:""}</div>`;
  const badge=d=>{const [t,l]=state(d);return html`<span class="badge" data-tone="${t}">${l}</span>`;};
  function devMeta(d){
-  const busy=S.busy.has(d.id);
+  const busy=S.busy.has(d.id),unknown=(d.unavailable||[]).filter(id=>!fresh(d).includes(id));
   if((d.status===200&&d.installed===false&&!(d.providers||[]).length)||d.status===501)return ""; // Orca·hswap 모두 없거나 갱신 전 jarvis 는 다시 물어도 같다
-  // 로그인을 시작하면 CLI 가 그 기기의 기존 자격을 먼저 지운다. 행이 없는 프로바이더의 로그인 버튼은
-  // 게이트웨이가 저장한 자격이 없다고 확인한( fresh_logins ) 곳에만 낸다: 행이 없다는 것만으로는 자격이 없는지 알 수 없다
-  return html`<p class="ul-meta">${d.fetched_at?html`<span>${P.fmt.ago(d.fetched_at)} 수집</span>`:""}${refBtn(d.id,(d.host||d.id)+" 새로고침",busy)}${(d.fresh_logins||[]).filter(id=>!(d.providers||[]).some(p=>p.id===id)).map(id=>relog(d,id,false))}</p>${d.mode==="independent"&&(d.unavailable||[]).length?html`<span class="ul-muted">확인 불가: ${d.unavailable.map(id=>PROVIDER[id]||id).join(" · ")}</span>`:""}`;
+  return html`<p class="ul-meta">${d.fetched_at?html`<span>${P.fmt.ago(d.fetched_at)} 수집</span>`:""}${refBtn(d.id,(d.host||d.id)+" 새로고침",busy)}</p>${d.mode==="independent"&&unknown.length?html`<span class="ul-muted">확인 불가: ${unknown.map(id=>PROVIDER[id]||id).join(" · ")}</span>`:""}`;
  }
 
  // ---------------------------------------------------------------- 화면
@@ -127,6 +129,7 @@
   if(!rows.length)return html`${kpi}${soon}<div class="tile ul-none"><p>${filtering()?"조건에 맞는 계정이 없습니다.":"사용량을 보여 줄 기기가 없습니다."}</p>${filtering()?html`<button type="button" class="seg-action" data-clear>필터 해제</button>`:""}</div>`;
   const cell=(d,c)=>{
    const p=provs(d).find(p=>p.id===c.id),list=p?shown(d,p):[];
+   if(!list.length&&fresh(d).includes(c.id))return html`<td data-label="${c.name}" class="ul-full"><div class="ul-acct"><p class="ul-muted">로그인하지 않았습니다.</p>${relog(d,c.id,false)}</div></td>`;
    if(!list.length)return html`<td data-label="${c.name}" class="ul-nil">–</td>`;
    if(S.mode==="full")return html`<td data-label="${c.name}" class="ul-full">${list.map(a=>acct(a,d,p))}</td>`;
    // 칸 값은 계정마다 가장 찬 한도의 평균이다(읽지 못한 계정은 빼고 센다)

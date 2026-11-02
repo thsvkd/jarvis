@@ -91,4 +91,19 @@ assert.doesNotMatch(rendered(), /data-login="first"/);
 devices[0].fresh_logins = [];
 click({ prov: "all" });
 assert.doesNotMatch(rendered(), /data-login="first"/); // 자격 없음이 확인되지 않으면 버튼을 내지 않는다
+
+// 자격 없음이 확인됐고 행이 없는 프로바이더는 기기 머리가 아니라 그 프로바이더 칸에 로그인 카드를 낸다(확인 불가에서는 뺀다)
+if (element("ulHot").textContent !== "주의 필요만") click({}, "ulHot");
+devices[2].fresh_logins = ["grok"];
+click({ prov: "all" });
+assert.match(rendered(), /data-p="grok" aria-hidden="true"><\/i>Grok<\/th>/); // 계정이 없어도 Grok 열이 생긴다
+assert.match(rendered(), /<td data-label="Grok" class="ul-full"><div class="ul-acct"><p class="ul-muted">로그인하지 않았습니다\.<\/p><button type="button" class="seg-action" data-login="empty" data-lp="grok">Grok 로그인<\/button>/);
+assert.doesNotMatch(rendered(), /확인 불가: Grok/);
+assert.equal((rendered().match(/data-lp="grok"/g) || []).length, 1); // 기기 머리에는 더 이상 내지 않는다
+click({ prov: "grok" });
+assert.match(rendered(), /data-login="empty" data-lp="grok"/); // Grok 필터에서도 로그인할 기기가 보인다
+click({}, "ulHot");
+assert.doesNotMatch(rendered(), /data-lp="grok"/); // 주의 필터는 로그인 카드를 세지 않는다
+click({}, "ulHot");
+click({ prov: "all" });
 console.log("usage summary ok");
