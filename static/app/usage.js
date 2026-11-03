@@ -87,7 +87,8 @@
  // ---------------------------------------------------------------- 조각
  const dot=id=>html`<i class="ul-dot" data-p="${id}" aria-hidden="true"></i>`;
  const meter=u=>html`<div class="meter" data-tone="${tone(u)}"><i style="${"--v:"+u/100}"></i></div>`;
- const win=w=>html`<div class="ul-win"><span class="ul-wl">${WIN[w.key]||w.key}</span>${meter(w.used)}<b class="ul-wp" data-tone="${tone(w.used)}">${pct(w.used)}</b><span class="ul-wr" title="${at(w.resets_at)}">${left(w.resets_at)}</span></div>`;
+ // Claude(hswap) 는 창이 아직 시작되지 않았을 때(그 기간에 쓰지 않음) 리셋 시각을 비워 둔다. 다른 프로바이더는 정말 모르는 것이다
+ const win=(w,a)=>html`<div class="ul-win"><span class="ul-wl">${WIN[w.key]||w.key}</span>${meter(w.used)}<b class="ul-wp" data-tone="${tone(w.used)}">${pct(w.used)}</b><span class="ul-wr" title="${at(w.resets_at)}">${!w.resets_at&&/^cswap/.test(a.source||"")?"사용 전":left(w.resets_at)}</span></div>`;
  function extra(e){
   if(!e)return "";
   if(e.unit==="currency")return html`<p class="ul-extra">추가 사용량 ${e.currency==="USD"?"$":""}${e.spent??"–"}${e.limit!=null?" / "+(e.currency==="USD"?"$":"")+e.limit:""}${e.currency&&e.currency!=="USD"?" "+e.currency:""} · ${e.enabled?"켜짐":"꺼짐"+(e.reason?"("+(REASON[e.reason]||e.reason)+")":"")}</p>`;
@@ -100,7 +101,7 @@
   if(!a.windows.length&&!a.buckets.length)return note||html`<p class="ul-muted">${a.status==="fetching"?"사용량을 읽는 중입니다.":"아직 사용량을 읽지 않았습니다."}</p>`;
   // Claude(hswap) 는 2026-10-30 요금제 개편 뒤 계정에 따라 5시간 창이 없다(인증된 Ultra). 읽지 못한 것과 구분해 적는다
   const no5h=/^cswap/.test(a.source||"")&&a.windows.some(w=>w.key==="weekly")&&!a.windows.some(w=>w.key==="session");
-  return html`${note}<div class="ul-wins">${a.windows.map(win)}</div>${no5h?html`<p class="ul-extra">5시간 한도 없음 · 주간 한도만 적용</p>`:""}${a.buckets.length?html`<p class="ul-extra">세부 한도 · ${a.buckets.map((b,i)=>html`${i?" · ":""}${b.name} <b>${pct(b.used)}</b>`)}</p>`:""}${extra(a.extra)}${a.credits?html`<p class="ul-extra">한도 리셋 크레딧 ${a.credits}개</p>`:""}`;
+  return html`${note}<div class="ul-wins">${a.windows.map(w=>win(w,a))}</div>${no5h?html`<p class="ul-extra">5시간 한도 없음 · 주간 한도만 적용</p>`:""}${a.buckets.length?html`<p class="ul-extra">세부 한도 · ${a.buckets.map((b,i)=>html`${i?" · ":""}${b.name} <b>${pct(b.used)}</b>`)}</p>`:""}${extra(a.extra)}${a.credits?html`<p class="ul-extra">한도 리셋 크레딧 ${a.credits}개</p>`:""}`;
  }
  const head=a=>html`<div class="ul-ah"><b class="ul-email">${a.label}</b>${a.plan?html`<span class="ul-plan">${a.plan}</span>`:""}${a.org?html`<span class="ul-plan">${a.org}</span>`:""}${a.active?html`<span class="badge" data-tone="info">사용 중</span>`:""}${isErr(a)||a.attention?html`<span class="badge" data-tone="crit">${isErr(a)?kind(a)[1]:"조치 필요"}</span>`:""}</div>`;
  const relog=(d,id,again=true)=>html`<button type="button" class="seg-action" data-login="${d.id}" data-lp="${id}">${LOGIN[id]} ${again?"다시 로그인":"로그인"}</button>`;
