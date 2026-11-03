@@ -39,21 +39,23 @@ Bash 툴(POSIX 셸·Git Bash)과 PowerShell 툴 양쪽을 대상으로 한다. �
      되돌려 주는 rebase·branch -D·commit --amend·filter-branch·gc 와, gc 유예기간 안에서
      `git fsck --unreachable` 로 살릴 수 있는 stash drop/clear 는 다루지 않는다.
      오탐의 대가가 '쓸데없는 백업 ref 한 개'뿐이라 패턴을 느슨하게 잡아도 안전하다.
-  3) deny 는 '명령 문자열의 꼴만으로 확실히 실행되면 안 되는 것' 둘뿐이다. 파싱하지 않는다.
-       - 루트/홈 전체 삭제 (rm -rf 로 / · /* · ~ · $HOME ; Remove-Item 으로 드라이브 루트·홈)
-       - 디스크 파괴 (mkfs*/fdisk/parted/wipefs, dd of=/dev/*, diskutil erase*, > /dev/sdX,
-         format <드라이브>:, diskpart, Clear-Disk/Initialize-Disk/Remove-Partition)
-     되돌릴 수단이 아예 없는 두 부류라 오탐 비용을 감수한다. 로그상 발동 0회.
-  4) git push 는 판정하지 않는다. 명령 문자열만 보고 push 가 원격 커밋을 되돌릴 수 없게 지우는지
-     가리는 판정기를 두 차례 만들었고, 두 번 다 적대적 리뷰에서 무너졌다(2026-10-11). 셸은 임의의
-     코드를 실행할 수 있어서 같은 명령 줄의 앞선 checkout·config, 확장, 래퍼, 별칭이 판정을 비껴간다.
-     push 는 auto mode 분류기의 Git Destructive 규칙(공유 브랜치 force push·원격 브랜치 삭제 차단)이
-     맡고, 원격 히스토리를 확실히 지키려면 원격의 브랜치 보호를 쓴다.
+  3) deny 는 없다. 위험이 자명한 셋만 ask 로 사람에게 묻고 나머지는 판정하지 않는다.
+       - 루트/홈 전체 삭제 (rm 으로 / · /* · ~ · $HOME ; Remove-Item 류로 드라이브 루트·홈)
+       - 디스크 파괴 (mkfs*·newfs*·wipefs -a, dd of=<디스크>, > <디스크>, /dev/ 대상 파티션 편집기
+         (-l·-p 같은 목록 보기는 뺀다), diskutil erase*, format <드라이브>:, diskpart, Clear-Disk 류)
+       - main/master 의 force push(+refspec, --force-with-lease 포함)·삭제, --mirror
+     명령 문자열을 정규식으로 훑지 않고 셸처럼 따옴표를 묶어 낱말로 나눈 뒤 명령 자리의 낱말만
+     본다(heredoc 본문은 버린다). 종전 정규식 deny 는 python -c·printf·heredoc·grep 검색어 안의 글자까지
+     막아 2026-10 s2 로그 26건이 전부 오탐이었다.
+  4) push 판정은 완전하지 않다. 같은 명령 줄의 앞선 checkout·config, 확장, `bash -c`, 별칭이 비껴간다
+     (완전한 판정기는 2026-10-11 적대적 리뷰에서 두 차례 무너졌다). 그래서 자명한 꼴만 묻고, 나머지는
+     auto mode 분류기의 Git Destructive 규칙과 원격의 브랜치 보호가 맡는다.
 
   종전에 있었으나 실측 근거로 제거한 것: 포크밤 패턴, curl|sh 패턴, find/xargs 대량 삭제
   ask, 체이닝 삭제 ask, 글로브 미일치 deny, `.`/`..` deny, 대상 100개 초과 ask,
-  chmod 777 ask, shred ask, shutdown/reboot ask, 훅 내부 오류 ask, push 확인, 그리고 시크릿 파일
-  접근 ask (secrets_guard — 파괴가 아니라 유출 위험이고, 그쪽은 auto mode 분류기가 맡는다).
+  chmod 777 ask, shred ask, shutdown/reboot ask, 훅 내부 오류 ask, 기본 브랜치 push 확인,
+  정규식 루트 삭제·디스크 파괴 deny, 그리고 시크릿 파일 접근 ask (secrets_guard — 파괴가 아니라
+  유출 위험이고, 그쪽은 auto mode 분류기가 맡는다).
 
 이 훅은 macOS 기본 인터프리터(/usr/bin/python3, 3.9.x)에서도 실행되어야 한다. 3.10+ 전용
 문법(PEP 604 `X | None` 애노테이션 등)을 쓰지 않고, 애노테이션은 `from __future__ import
@@ -67,6 +69,7 @@ import shlex
 import re
 import os
 import datetime
+import fnmatch
 import subprocess
 import tempfile
 
@@ -75,41 +78,51 @@ LOG_PATH = os.path.join(HOOKS_DIR, "guard.log")
 SHIM_DIR = os.path.join(HOOKS_DIR, "shims")
 PS_SHIM = os.path.join(SHIM_DIR, "RmShim.psm1")
 
-# --- deny: 명령 문자열을 그대로 본다. 토큰화도 확장도 하지 않는다. -----------------
-
-# `rm … /`, `rm … /*`, `rm … ~`, `rm … $HOME` 류. 따옴표는 있어도 없어도 잡는다.
-# `rm -rf ~/foo` 나 `rm -rf /tmp/x` 는 뒤에 경로가 더 붙어 끝 경계에 걸리지 않는다.
+# --- ask: 위험이 자명한 명령만 사용자에게 묻는다 ---------------------------------------
 #
-# rm 이 '명령 자리'에 있을 때만 본다. 그래야 `grep -rn "rm -rf /" docs/` 처럼 위험한 문자열을
-# 데이터로 다루는 명령이 막히지 않는다 — 종전 가드의 오탐이 대부분 이 부류였다. 그 대가로
-# `bash -c "rm -rf /"` 는 이 규칙을 비껴가지만, 그때는 셰임이 argv 수준에서 같은 거부를 한다.
-_RM_POS = (r"(?:^|[\n;&|(]\s*"
-           r"|\b(?:sudo|doas|env|command|exec|builtin|nohup|time|busybox|xargs|then|else|do)\s+"
-           r"|\b(?:timeout|nice|ionice|stdbuf|setsid|taskset|chrt)\s+\S+\s+)")
-_RM_ARGS = _RM_POS + r"""(?:\S*/)?rm\b(?:\s+-{1,2}[^\s]+)*\s+['"]?"""
-# 닫는 따옴표 뒤에도 `/`·`/*` 까지만 허용한다 — `"$HOME"/.cache` 는 홈 '아래'다.
-_TARGET_END = r"""['"]?[\\/]?\*?['"]?(?=\s|;|&|\||\)|$)"""
-# Git Bash 에서는 Windows 홈($USERPROFILE, C:/Users/<이름>)과 드라이브 루트도 같다.
-ROOT_DELETE_RE = re.compile(
-    _RM_ARGS + r"""(?:/|~|\$HOME|\$\{HOME\}|\$USERPROFILE|\$\{USERPROFILE\}|%USERPROFILE%"""
-    r"""|[A-Za-z]:[\\/]+(?:(?i:Users)[\\/]+[^\\/\s'";&|)]+)?)""" + _TARGET_END
-)
+# 종전에는 루트/홈 삭제·디스크 파괴를 명령 문자열 전체에 정규식을 대어 deny 했다. 그래서 python -c·
+# printf·heredoc·grep 검색어 '안'의 `rm -rf ~`·`mkfs` 글자까지 막았다(2026-10 s2 로그 26건이 전부
+# 오탐, 진짜 위험한 명령은 0건). 이제는 셸처럼 따옴표를 묶어 낱말로 나누고(heredoc 본문은 버린다)
+# 명령 자리에 온 실제 낱말만 본다. 따옴표 안은 데이터다. 막지 않고 묻는다.
+# 루트/홈 삭제는 셰임(shims/rm, RmShim.psm1)이 argv 수준에서도 거부한다. 여기서 묻는 것은 셰임을
+# 타지 않는 sudo rm 과 실행 전에 사람에게 알리기 위해서다. `bash -c "rm -rf /"` 처럼 따옴표 안에
+# 숨은 명령은 묻지 않는다(셰임이 거부한다).
+RM_WORDS = {"rm", "remove-item", "ri", "rd", "rmdir", "del", "erase"}
+HOME_WORDS = {"~", "$home", "${home}", "$userprofile", "${userprofile}", "%userprofile%", "$env:userprofile",
+              "${env:userprofile}"}
+DRIVE_RE = re.compile(r"^[A-Za-z]:(?:[\\/]+Users[\\/]+[^\\/]+)?$", re.IGNORECASE)  # C: · C:\Users\<이름>
 # Git Bash 의 드라이브 루트 `/c` 와 홈 `/c/Users/<이름>`. Linux·macOS 에서는 평범한 경로라
 # 문자열만으로는 가를 수 없으므로 훅이 도는 플랫폼으로 정한다.
 IS_WINDOWS = os.name == "nt" or sys.platform.startswith(("cygwin", "msys"))
-DRIVE_ROOT_RE = re.compile(
-    _RM_ARGS + r"""/[A-Za-z](?:/(?i:Users)/+[^/\s'";&|)]+)?""" + _TARGET_END)
+GITBASH_DRIVE_RE = re.compile(r"^/[A-Za-z](?:/+Users/+[^/]+)?$", re.IGNORECASE)
+DISK_DEV_RE = re.compile(r"^/dev/(?:sd|nvme|hd|r?disk|mmcblk|vd|xvd)[a-z0-9]*$")
+WIPE_TOOLS_RE = re.compile(r"^(?:mkfs(?:\.\w+)?|newfs(?:_\w+)?)$")
+PARTITION_TOOLS = {"fdisk", "gdisk", "sgdisk", "sfdisk", "cfdisk", "parted"}
+LIST_FLAGS = {"-l", "--list", "-p", "--print", "print", "-d", "--dump"}  # 목록·백업만 하는 호출
+DISKUTIL_ERASE = {"erasedisk", "erasevolume", "secureerase", "partitiondisk", "reformat", "zerodisk",
+                  "deletecontainer"}
+PROTECTED_BRANCHES = {"main", "master"}
+# 명령 앞에 붙어 실제 명령을 뒤로 미루는 낱말. 뒤따르는 옵션·숫자(timeout 5, nice -n 5)도 건너뛴다.
+WRAPPERS = {"sudo", "doas", "env", "command", "exec", "builtin", "nohup", "time", "nice", "ionice", "timeout",
+            "stdbuf", "setsid", "taskset", "chrt", "if", "then", "else", "elif", "while", "until", "do", "{", "!"}
+OPERATOR_CHARS = set("();<>|&")
+HEREDOC_RE = re.compile(r"<<-?(?!<)\s*\\?['\"]?([^\s'\"<>;&|()]+)['\"]?")  # `<<<` here-string 은 아니다
+# 래퍼마다 값을 받는 옵션(sudo -u root, timeout -s KILL 5, nice -n 5). 값을 명령으로 읽지 않게 함께 건너뛴다.
+# 래퍼마다 따로 둔다 — sudo 의 -n·-S·-k·-s 는 값이 없다.
+WRAPPER_VALUE_OPTS = {
+    "sudo": {"-u", "-g", "-C", "-D", "-p", "-r", "-t", "-T", "-U", "--user", "--group", "--chdir", "--prompt"},
+    "doas": {"-u", "-C"},
+    "timeout": {"-s", "-k", "--signal", "--kill-after"},
+    "nice": {"-n", "--adjustment"},
+    "ionice": {"-c", "-n", "-p", "--class", "--classdata", "--pid"},
+    "env": {"-u", "-C", "-S", "--unset", "--chdir", "--split-string"},
+}
+HOME_DIR = os.path.expanduser("~").rstrip("/\\")
 
-# PowerShell 은 매개변수 순서가 자유로워(`Remove-Item -Recurse -Force C:\`) 인접 규칙을
-# 쓸 수 없다. 그래서 '삭제 동사'와 '루트 대상'이 같은 구간에 함께 있으면 거부한다.
-# 구간 맨 앞(= 명령 자리)에 있을 때만 삭제 동사로 본다. `grep -rn "del ~"` 같은 데이터
-# 취급 명령을 잡지 않기 위해서다.
+# PowerShell 삭제 동사가 구간 맨 앞(= 명령 자리)에 있는지. 셰임 모듈을 불러올지 정할 때 쓴다.
 PS_DELETE_RE = re.compile(
     r"""^\s*(?:\$[\w:]+\s*=\s*)?(?:&\s*)?['"]?(?:[\w:\\/.-]*[\\/])?"""
     r"""(?:Remove-Item|ri|rd|rmdir|del|erase|rm)\b""", re.IGNORECASE)
-PS_ROOT_TARGET_RE = re.compile(
-    r"""(?:^|[\s'"=,])(?:[A-Za-z]:[\\/]?\*?|\$HOME|\$env:USERPROFILE|%USERPROFILE%|~)"""
-    r"""(?=['"]?(?:\s|[;&|)},]|$))""", re.IGNORECASE)
 # 구간 나누기용. 따옴표를 보지 않는 거친 분할이라 잘못 쪼개도 검사가 좁아질 뿐 넓어지지 않는다.
 SEGMENT_SPLIT_RE = re.compile(r"[\n;|&]+")
 # 따옴표 밖의 괄호·중괄호도 나눈다 — `if (…) { Remove-Item … }`, `$(Remove-Item …)` 의 삭제 동사도
@@ -120,22 +133,6 @@ QUOTED_OR_BRACKET_RE = re.compile(r"""("[^"]*"|'[^']*')|[(){}]""")
 def _segments(command):
     return SEGMENT_SPLIT_RE.split(
         QUOTED_OR_BRACKET_RE.sub(lambda m: m.group(1) or "\n", command))
-
-# 디스크 자체를 파괴하는 명령. 산문 속 언급을 피하려고 '명령 자리'(줄 처음, 구분자 뒤,
-# sudo 뒤)에서 시작할 때만 잡는다.
-_CMD_POS = r"(?:^|[\n;&|(]\s*|\bsudo\s+|\bdoas\s+)"
-DISK_DESTROY_RE = re.compile(
-    _CMD_POS + r"""(?:mkfs(?:\.\w+)?|newfs(?:_\w+)?|fdisk|gdisk|sgdisk|parted|wipefs)\b"""
-    r"""|""" + _CMD_POS + r"""dd\b[^\n]*?\bof=['"]?/dev/"""
-    r"""|""" + _CMD_POS + r"""diskutil\b[^\n]*?\b(?:eraseDisk|eraseVolume|secureErase|"""
-    r"""partitionDisk|reformat|zeroDisk|deleteContainer)\b"""
-    r"""|>\s*/dev/(?:sd|nvme|hd|disk|mmcblk|vd)[a-z0-9]*\b"""
-    # Windows. `format` 은 흔한 낱말이라 드라이브 문자를 함께 요구해 오탐을 없앤다.
-    r"""|""" + _CMD_POS + r"""format(?:\.com)?\s+['"]?[A-Za-z]:"""
-    r"""|""" + _CMD_POS + r"""diskpart\b"""
-    r"""|""" + _CMD_POS + r"""(?:Clear-Disk|Initialize-Disk|Remove-Partition|Clear-Volume)\b""",
-    re.IGNORECASE,
-)
 
 # --- 셰임 선행 ------------------------------------------------------------------
 
@@ -227,15 +224,204 @@ def _git(args, cwd, env=None, timeout=60):
     return p
 
 
-# --- deny 판정 -------------------------------------------------------------------
+# --- ask 판정 --------------------------------------------------------------------
 
 
-def root_delete_reason(command):
-    if ROOT_DELETE_RE.search(command) or (IS_WINDOWS and DRIVE_ROOT_RE.search(command)):
-        return "Blocked: attempt to delete the entire root/home directory."
-    for segment in _segments(command):
-        if PS_DELETE_RE.search(segment) and PS_ROOT_TARGET_RE.search(segment):
-            return "Blocked: attempt to delete the entire drive root/home directory."
+def _clean(command, powershell):
+    """따옴표 밖의 주석과 heredoc 본문을 버리고 줄 이음을 잇는다. 따옴표 안은 그대로 둔다.
+
+    셸처럼 `#` 은 낱말 첫머리에서만 주석이다(`$#`, `${#a[@]}`, `x/#frag` 는 아니다).
+    """
+    esc = "`" if powershell else "\\"
+    command = command.replace("\r\n", "\n")
+    out, quote, ends, i, n = [], None, [], 0, len(command)
+    while i < n:
+        c, nxt = command[i], command[i + 1:i + 2]
+        if c == esc and nxt == "\n" and quote != "'":  # 줄 이음
+            i += 2
+        elif quote:
+            if c == esc and quote == '"' and nxt:
+                out.append(c + nxt)
+                i += 2
+                continue
+            quote = None if c == quote else quote
+            out.append(c)
+            i += 1
+        elif c == esc and nxt:
+            out.append(c + nxt)
+            i += 2
+        elif c in "'\"":
+            quote = c
+            out.append(c)
+            i += 1
+        elif c == "#" and (not out or out[-1][-1] in " \t\n;&|()"):
+            while i < n and command[i] != "\n":
+                i += 1
+        elif c == "\n" and ends:  # heredoc 본문을 끝 표지 줄까지 건너뛴다(<<- 는 앞 탭을 허용)
+            out.append(c)
+            i += 1
+            for end in ends:
+                while i < n:
+                    j = command.find("\n", i)
+                    line, i = command[i:n if j < 0 else j], n if j < 0 else j + 1
+                    if line.strip() == end:
+                        break
+            ends = []
+        else:
+            m = HEREDOC_RE.match(command, i) if c == "<" and not (out and out[-1][-1] == "<") else None
+            recent = "".join(out[-60:])
+            if m and recent.rfind("((") > recent.rfind("))"):  # 산술 $((a<<b)) 의 시프트다
+                m = None
+            if m:
+                ends.append(m.group(1))
+                out.append(m.group(0))
+                i = m.end()
+            else:
+                out.append(c)
+                i += 1
+    return "".join(out)
+
+
+def _tokens(command, powershell):
+    """따옴표를 벗긴 낱말과 연산자. 주석·heredoc 본문은 데이터라 버린다. 토큰화하지 못하면 [] (묻지 않는다)."""
+    try:
+        lex = shlex.shlex(_clean(command, powershell).replace("\n", " ; "), posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        lex.commenters = ""  # 주석은 _clean 이 낱말 첫머리에서만 걷었다
+        if powershell:
+            lex.escape = ""  # 백슬래시는 경로 구분자다(`C:\temp`). 이어 붙은 따옴표 조각은 한 낱말이다
+        tokens = list(lex)
+    except ValueError:
+        return []
+    # PowerShell 배열은 쉼표로 잇는다(`"$HOME","x"`)
+    return [p for t in tokens for p in t.split(",") if p] if powershell else tokens
+
+
+def _is_op(token):
+    return bool(token) and set(token) <= OPERATOR_CHARS
+
+
+def _base(word):
+    name = re.split(r"[\\/]", word)[-1].lower()
+    return name[:-4] if name.endswith(".exe") else name
+
+
+def _argv(words):
+    """앞의 대입(FOO=1, PowerShell `$x =`)과 래퍼(sudo·timeout 5·nice -n 5 …)를 떼어 낸 실제 argv."""
+    i = 0
+    while i < len(words):
+        if re.match(r"^[A-Za-z_]\w*=", words[i]):
+            i += 1
+        elif words[i].startswith("$") and words[i + 1:i + 2] == ["="]:
+            i += 2
+        elif _base(words[i]) in WRAPPERS:
+            takes_value = WRAPPER_VALUE_OPTS.get(_base(words[i]), ())
+            i += 1
+            while i < len(words) and (words[i].startswith("-") or re.match(r"^\d[\d.]*[smhd]?$", words[i])):
+                i += 2 if words[i] in takes_value else 1
+        else:
+            break
+    return words[i:]
+
+
+def _root_or_home(word):
+    w = re.sub(r"[\\/]*\*?$", "", word)  # 끝의 `/`·`/*` 를 뗀다: `/*`·`~/`·`"$HOME"/*` 도 전체다
+    return ((w == "" and word[:1] in ("/", "\\")) or w.lower() in HOME_WORDS or (bool(w) and w == HOME_DIR)
+            or bool(DRIVE_RE.match(w)) or (IS_WINDOWS and bool(GITBASH_DRIVE_RE.match(w))))
+
+
+def _destroys_disk(name, args):
+    on_dev = any(a.startswith("/dev/") for a in args)  # 이미지 파일·--help 는 디스크를 건드리지 않는다
+    if name in ("diskpart", "clear-disk", "initialize-disk", "remove-partition", "clear-volume", "format-volume"):
+        return True
+    if WIPE_TOOLS_RE.match(name):
+        return on_dev
+    if name == "wipefs":  # -a 가 없으면 서명 목록만 보고, -n 은 시험 실행이다
+        return on_dev and any(a == "--all" or re.match(r"^-[a-z]*a", a) for a in args) \
+            and not any(a == "--no-act" or re.match(r"^-[a-z]*n", a) for a in args)
+    if name == "dd":
+        return any(a.startswith("of=") and DISK_DEV_RE.match(a[3:]) for a in args)
+    if name in PARTITION_TOOLS:
+        return any(DISK_DEV_RE.match(a) for a in args) and not LIST_FLAGS & set(args)
+    if name == "diskutil":
+        return any(a.lower() in DISKUTIL_ERASE for a in args)
+    if name in ("format", "format.com"):  # `format` 은 흔한 낱말이라 드라이브 문자를 함께 요구한다
+        return any(re.match(r"^[A-Za-z]:[\\/]?$", a) for a in args)
+    return False
+
+
+def _current_branch(command, cwd):
+    dirs = _target_dirs(command, cwd)
+    if not dirs:
+        return None
+    try:
+        p = _git(["symbolic-ref", "--short", "-q", "HEAD"], dirs[0], timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return p.stdout.strip() if p.returncode == 0 else None
+
+
+def _pushes_over_protected(args, command, cwd):
+    """main/master 를 force push·삭제하거나 --mirror 인 push 인가. args 는 `push` 뒤의 낱말."""
+    opts = [a for a in args if a.startswith("-")]
+    refs = [a for a in args if not a.startswith("-")][1:]  # 첫 위치 인자는 원격이다
+    if "--dry-run" in opts or any(re.match(r"^-[a-zA-Z]*n", o) for o in opts):  # 시험 실행은 바꾸지 않는다
+        return False
+    if "--mirror" in opts:
+        return True
+    # --force-if-includes 는 --force-with-lease 없이는 아무 일도 하지 않는다
+    force = any(o.startswith("--force") and o != "--force-if-includes" or re.match(r"^-[a-zA-Z]*f", o) for o in opts)
+    delete = any(o == "--delete" or re.match(r"^-[a-zA-Z]*d", o) for o in opts)
+    if "--all" in opts or "--branches" in opts:
+        return force
+    if "--tags" in opts and not refs:  # 태그만 민다
+        return False
+    current = []  # 지금 브랜치는 필요할 때 한 번만 묻는다(git 하위 프로세스)
+
+    def dest(ref):
+        d = ref.lstrip("+").rsplit(":", 1)[-1]
+        d = d[len("refs/heads/"):] if d.startswith("refs/heads/") else d
+        if d in ("HEAD", "@"):
+            if not current:
+                current.append(_current_branch(command, cwd))
+            return current[0]
+        return d
+
+    def protected(d):  # 글로브 refspec(`refs/heads/*`)은 main/master 와 맞는지로 본다
+        return d is not None and any(fnmatch.fnmatchcase(b, d) for b in PROTECTED_BRANCHES)
+
+    if not refs:
+        return force and protected(dest("HEAD"))
+    return any(protected(dest(r)) and (force or delete or r.startswith(("+", ":"))) for r in refs)
+
+
+def ask_reason(tool_name, command, cwd):
+    """(로그 판정 이름, 사용자에게 보일 이유) 또는 None. 위험이 자명한 것만 묻고 나머지는 판정하지 않는다."""
+    tokens = _tokens(command, powershell=tool_name == "PowerShell")
+    for i, t in enumerate(tokens[:-1]):
+        if _is_op(t) and ">" in t and DISK_DEV_RE.match(tokens[i + 1]):
+            return "ask-disk-destroy", "Confirm: this writes over a whole disk or partition."
+    words = []
+    for t in tokens + [";"]:
+        if not _is_op(t):
+            words.append(t)
+            continue
+        argv, words = _argv(words), []
+        if not argv:
+            continue
+        name, args = _base(argv[0]), argv[1:]
+        # PowerShell 은 `-Path:$HOME` 처럼 매개변수에 값을 붙여 쓸 수 있다
+        targets = [a.split(":", 1)[1] if a.startswith("-") else a for a in args if not a.startswith("-") or ":" in a]
+        if name in RM_WORDS and any(_root_or_home(a) for a in targets):
+            return "ask-root-delete", "Confirm: this deletes an entire root/home directory."
+        if _destroys_disk(name, args):
+            return "ask-disk-destroy", "Confirm: this destroys a disk or partition."
+        if name == "git":
+            j = 0
+            while j < len(args) and args[j].startswith("-"):  # git 전역 옵션(-C 경로, -c 키=값, --no-pager)
+                j += 2 if args[j] in ("-C", "-c") else 1
+            if args[j:j + 1] == ["push"] and _pushes_over_protected(args[j + 1:], command, cwd):
+                return "ask-protected-push", "Confirm: this force-pushes, deletes or mirrors main/master."
     return None
 
 
@@ -472,28 +658,27 @@ def main():
     if not command.strip():
         sys.exit(0)
 
-    reason = root_delete_reason(command)
-    if reason:
-        log({"tool": tool_name, "command": command, "decision": "deny-root-delete"})
-        emit("deny", reason)
-
-    if DISK_DESTROY_RE.search(command):
-        log({"tool": tool_name, "command": command, "decision": "deny-disk-destroy"})
-        emit("deny", "Blocked: disk-level destructive commands are irreversible.")
-
     cwd = data.get("cwd") or os.getcwd()
 
     notes = git_snapshot(command, cwd)
+    context = "\n".join(notes) if notes else None
 
     prefix = shim_prefix(tool_name, command)
+    updated = dict(data.get("tool_input", {}), command=prefix + command) if prefix else None
+
+    asked = ask_reason(tool_name, command, cwd)
+    if asked:
+        # 승인되면 셰임 선행 줄이 붙은 명령이 돈다(PowerShell 삭제도 휴지통·루트 거부를 탄다)
+        log({"tool": tool_name, "command": command, "decision": asked[0]})
+        emit("ask", asked[1], updated_input=updated, context=context)
+
     if prefix:
         log({"tool": tool_name, "command": command, "decision": "prepend-shim"})
-        emit(None, "", updated_input=dict(data.get("tool_input", {}), command=prefix + command),
-             context="\n".join(notes) if notes else None)
+        emit(None, "", updated_input=updated, context=context)
 
     if notes:
         log({"tool": tool_name, "command": command, "decision": "git-snapshot", "notes": notes})
-        emit(None, "", context="\n".join(notes))
+        emit(None, "", context=context)
 
     sys.exit(0)
 
@@ -501,7 +686,7 @@ def main():
 if __name__ == "__main__":
     # 훅이 예외로 죽으면 Claude Code 는 판정 없이 명령을 그대로 실행한다(fail-open).
     # 종전에는 이때 ask 로 승격했지만, 실측상 훅 내부 오류로 인한 ask 는 전부 마찰이기만
-    # 했다. 이제 남은 판정은 되돌릴 수 없는 두 부류뿐이고 나머지는 복구 보조라, 오류는
+    # 했다. 이제 남은 판정은 위험이 자명한 ask 뿐이고 나머지는 복구 보조라, 오류는
     # 로그에 남기고 조용히 통과시킨다.
     try:
         main()

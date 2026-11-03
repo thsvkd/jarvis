@@ -27,7 +27,7 @@ FILES = ("danger_guard.py", "shims/rm") + (("send_to_trash.py", "shims/RmShim.ps
 LEGACY = ("secrets_guard.py",)  # 예전 설치가 심은 훅. 영수증에 있으면 지운다
 # 영수증에 hook_files 가 없는 옛 설치를 지울 때의 목록(ai-setup 의 uninstall_hooks 와 같다)
 OLD_FILES = ("danger_guard.py", "secrets_guard.py", "send_to_trash.py", "shims/rm", "shims/RmShim.psm1")
-# (이름, 이벤트, 판정이 있어야 하는가). 판정 없이 통과해야 하는 경우와 deny·입력 변경이 있어야 하는 경우를 함께 본다
+# (이름, 이벤트, 판정이 있어야 하는가). 판정 없이 통과해야 하는 경우와 ask·입력 변경이 있어야 하는 경우를 함께 본다
 SELF_TESTS = [
     ("rm -rf temp/", {"tool_name": "Bash", "tool_input": {"command": "rm -rf temp/"}}, False),
     ("rm -rf ~", {"tool_name": "Bash", "tool_input": {"command": "rm -rf ~"}}, True),

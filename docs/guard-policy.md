@@ -23,7 +23,7 @@ deny/ask 53건 중 진짜 위험한 명령은 **0건**이었다. 반대로 복�
 
 1. **명령 문자열을 재작성하지 않는다.** 삭제를 휴지통으로 돌리는 일은 shim이 한다. Bash 는 세션 시작 때 `PATH` 에 shim을 한 번 끼워 두고 명령은 건드리지 않는다. PowerShell 만 모듈을 불러오는 **선행 한 줄**을 붙인다. 인자 해석은 전적으로 셸/PowerShell 몫이다.
 2. **git 백업도 명령을 건드리지 않는다.** 훅 프로세스가 직접 스냅샷 커밋을 만들고 원본 명령은 그대로 흘려보낸다.
-3. **deny 는 되돌릴 수단이 아예 없는 두 부류뿐이다.** 루트/홈 전체 삭제와 디스크 파괴. 파싱하지 않고 명령 문자열의 꼴만 본다.
+3. **deny 는 없다. 위험이 자명한 셋만 묻는다(ask).** 루트/홈 전체 삭제, 디스크 파괴, main/master 의 force push·삭제다. 셸처럼 따옴표를 묶어 낱말로 나누고(heredoc 본문은 버린다) 명령 자리의 실제 낱말만 본다. 2026-11 까지 쓰던 정규식 deny 는 명령 문자열 전체를 훑어 `python -c`·printf·heredoc·grep 검색어 안의 `rm -rf ~`·`mkfs` 글자까지 막았다. s2 의 2026-10 로그에서 26건이 전부 오탐이었다. s2 `guard.log` 13,582건을 새 판정에 다시 넣으면 묻는 명령은 226건에서 26건(설치 셀프테스트 입력 23건, 실제 main force push 3건)으로 준다.
 
 ## 삭제 → 휴지통: PATH·모듈 shim
 
@@ -80,28 +80,29 @@ Claude Code 의 체크포인팅(`/rewind`)은 [공식 문서상](https://code.cl
 - **조회**: `git for-each-ref refs/claude-backups/`
 - **복구**: `git checkout <ref> -- .`
 
-## 차단·확인 목록
+## 확인 목록
 
 | 명령 | 조치 |
 | --- | --- |
-| `rm -rf /`, `/*`, `~`, `$HOME` (따옴표 유무 무관, `sudo`/`timeout` 접두어 포함) | ⛔ **차단** |
-| `Remove-Item`/`del`/`rd` + 드라이브 루트(`C:\`)·`$env:USERPROFILE`·`$HOME` | ⛔ **차단** |
-| `mkfs*`/`newfs_*`/`fdisk`/`gdisk`/`sgdisk`/`parted`/`wipefs`, `dd of=/dev/*`, `diskutil erase*`, `/dev/sd*` 리다이렉트 | ⛔ **차단** |
-| `format <드라이브>:`, `diskpart`, `Clear-Disk`/`Initialize-Disk`/`Remove-Partition`/`Clear-Volume` | ⛔ **차단** |
-| `git push` — force push·원격 브랜치 삭제·`--mirror` 포함 | ✅ **판정하지 않음** — auto mode 분류기의 `Git Destructive` 규칙이 공유 브랜치(`main`, 기본 브랜치, `release/*` 등)의 맨 force push 와 원격 브랜치·태그 삭제를 막는다. 자기 커밋만 있는 개인 브랜치의 force push 는 허용하고, `--force-with-lease` 는 파괴로 간주하지 않되 남의 작업을 지우는 것이 분명하면 막는다. 사용자가 대상을 명시하면 풀리는 soft-deny 다. 원격 히스토리를 확실히 지키려면 원격의 브랜치 보호(GitHub rulesets 의 force push·삭제 차단)를 쓴다 |
+| `rm`(`sudo`·`timeout 5`·`env X=1` 같은 접두어 포함)의 인자가 `/`, `/*`, `~`, `$HOME`, 드라이브 루트, Windows 홈 | ❓ **확인**. 승인해도 셰임이 argv 수준에서 거부한다(`sudo rm` 은 셰임을 타지 않는다) |
+| `Remove-Item`/`del`/`rd` 류의 인자가 드라이브 루트(`C:\`)·`$env:USERPROFILE`·`$HOME` | ❓ **확인**. 셰임 모듈 선행 줄도 함께 붙는다 |
+| `mkfs*`/`newfs_*`/`wipefs -a`, `dd of=<디스크>`, `> <디스크>`, `/dev/` 를 대상으로 한 `fdisk`·`gdisk`·`sgdisk`·`sfdisk`·`cfdisk`·`parted`(`-l`·`-p`·`print`·`-d` 같은 목록·백업은 뺀다), `diskutil erase*` | ❓ **확인** |
+| `format <드라이브>:`, `diskpart`, `Clear-Disk`/`Initialize-Disk`/`Remove-Partition`/`Clear-Volume`/`Format-Volume` | ❓ **확인** |
+| `git push` 로 main/master 를 force push(`-f`, `--force*`, `+refspec`)·삭제(`--delete`, `:main`)하거나 `--mirror`. refspec 이 없으면 지금 브랜치를 본다. `--dry-run` 은 뺀다 | ❓ **확인** |
+| 그 밖의 `git push` | ✅ **판정하지 않음** — auto mode 분류기의 `Git Destructive` 규칙과 원격의 브랜치 보호(GitHub rulesets 의 force push·삭제 차단)가 맡는다 |
 | 그 외 전부 | ✅ 통과 (판단 안 함) |
 
-차단 규칙은 **명령 자리**에서 시작할 때만 잡는다. `grep -rn "rm -rf /" docs/` 처럼 위험한 문자열을 데이터로 다루는 명령은 막지 않는다 — 종전 오탐이 대부분 이 부류였다.
+**명령 자리**의 실제 낱말만 본다. 따옴표 안(`grep -rn "rm -rf /" docs/`, `python3 -c '…'`)과 heredoc 본문은 데이터라 묻지 않는다. 대가로 `bash -c "rm -rf /"` 처럼 따옴표 안에 숨은 명령도 묻지 않는다. 그 삭제는 셰임이 거부한다.
 
-**종전에 있었으나 실측 근거로 제거한 것**: 포크밤 패턴, `curl … | bash` 패턴, `find`/`xargs` 대량 삭제 확인, 체이닝 삭제 확인, 글로브 미일치 차단, `.`/`..` 차단, 대상 100개 초과 확인, `chmod 777` 확인, `shred` 확인, `shutdown`/`reboot` 확인, 훅 내부 오류 확인, 그리고 시크릿 파일 접근 확인(`secrets_guard`) — 파괴가 아니라 유출 위험이고, 그쪽은 auto mode 분류기가 맡는다. 기존 설치본에 남아 있으면 설치 중에 훅 파일과 `settings.json` 등록을 함께 걷어낸다.
+**종전에 있었으나 실측 근거로 제거한 것**: 포크밤 패턴, `curl … | bash` 패턴, `find`/`xargs` 대량 삭제 확인, 체이닝 삭제 확인, 글로브 미일치 차단, `.`/`..` 차단, 대상 100개 초과 확인, `chmod 777` 확인, `shred` 확인, `shutdown`/`reboot` 확인, 훅 내부 오류 확인, 기본 브랜치 push 확인, 정규식 루트 삭제·디스크 파괴 차단, 그리고 시크릿 파일 접근 확인(`secrets_guard`) — 파괴가 아니라 유출 위험이고, 그쪽은 auto mode 분류기가 맡는다. 기존 설치본에 남아 있으면 설치 중에 훅 파일과 `settings.json` 등록을 함께 걷어낸다.
 
 **이 목록은 완전하지 않고, 완전할 수도 없다.** 셸은 임의의 프로그램을 실행할 수 있어서 `python3 -c "shutil.rmtree('.')"` 같은 경로를 명령 문자열만 보고 판정하는 건 불가능하다. 그래서 이 훅은 차단을 목표로 하지 않는다 — 되돌릴 수 있게 만드는 것이 목표다. 배경은 [docs/2026-07-31-delete-guard-architecture.md](docs/2026-07-31-delete-guard-architecture.md) 참고.
 
 ## push 를 훅이 판정하지 않는 이유
 
-예전 버전은 명령 문자열을 읽어 "이 push 가 로컬에 없는 원격 커밋을 지우는가"를 가리고, 되돌릴 수 있는 force push 는 원격 커밋을 `refs/claude-backups/` 에 고정한 뒤 통과시켰다. 그 판정을 두 차례 다시 만들었지만 두 번 다 적대적 리뷰에서 무너졌다(2026-10-11). 셸은 임의의 코드를 실행할 수 있어서, 같은 명령 줄의 앞선 `git checkout`·`git config`, 셸 확장, `bash -c`·heredoc, git·셸 별칭 같은 형태가 판정을 비껴가 원격 커밋을 조용히 지웠다. 실행 전에 문자열만 보는 판정기는 이 계층에서 완성될 수 없다.
+예전 버전은 명령 문자열을 읽어 "이 push 가 로컬에 없는 원격 커밋을 지우는가"를 가리고, 되돌릴 수 있는 force push 는 원격 커밋을 `refs/claude-backups/` 에 고정한 뒤 통과시켰다. 그 판정을 두 차례 다시 만들었지만 두 번 다 적대적 리뷰에서 무너졌다(2026-10-11). 셸은 임의의 코드를 실행할 수 있어서, 같은 명령 줄의 앞선 `git checkout`·`git config`, 셸 확장, `bash -c`·heredoc, git·셸 별칭 같은 형태가 판정을 비껴가 원격 커밋을 조용히 지웠다. 실행 전에 문자열만 보는 판정기는 이 계층에서 완성될 수 없다. 그래서 2026-11 부터는 완전한 판정을 포기하고, main/master 를 force push·삭제하거나 `--mirror` 로 미는 자명한 꼴만 묻는다(위 확인 목록). 비껴가는 형태는 그대로 비껴간다.
 
-그래서 push 는 auto mode 분류기에 맡긴다. 기본 규칙 `Git Destructive` 가 의미 수준에서 공유 브랜치 force push 와 원격 브랜치 삭제를 막는다(`claude auto-mode defaults` 로 규칙 원문을 확인할 수 있다). 다른 권한 모드에서는 push 를 확인하는 것이 없으므로, 중요한 저장소는 원격의 브랜치 보호로 지킨다. 훅이 남기는 것은 되돌리는 수단(휴지통, git 스냅샷)과 되돌릴 수 없는 두 부류의 차단뿐이다.
+그래서 push 는 auto mode 분류기에 맡긴다. 기본 규칙 `Git Destructive` 가 의미 수준에서 공유 브랜치 force push 와 원격 브랜치 삭제를 막는다(`claude auto-mode defaults` 로 규칙 원문을 확인할 수 있다). 다른 권한 모드에서는 훅의 자명한 꼴 확인 말고는 push 를 확인하는 것이 없으므로, 중요한 저장소는 원격의 브랜치 보호로 지킨다. 훅이 남기는 것은 되돌리는 수단(휴지통, git 스냅샷)과 위험이 자명한 명령의 확인뿐이다.
 
 **업그레이드 시 자동 마이그레이션**: 예전 버전은 `Bash(git push *)`·`Bash(git push --force*)`·`Bash(git push -f*)`·`Bash(git reset --hard *)`(및 PowerShell 짝)을 `deny`로, `Bash(git push *)`(및 PowerShell 짝)을 `ask`로 배포했다. 병합 엔진은 원래 '추가만' 하므로 그 규칙들이 기존 설치본에 그대로 남고, deny/ask가 훅보다 우선하니 **새로 설치한 사람에게는 동작하고 업그레이드한 사람에게는 조용히 죽는** 상태가 된다. 그래서 설치 중에 설치 기록이 *이 설치가 넣었다*고 적은 규칙만 제거하고, 무엇을 지웠는지 설치 리포트에 출력한다. 같은 문자열이라도 설치 기록에 없으면 사용자가 직접 넣은 규칙일 수 있으므로 지우지 않는다(설치 기록이 없던 2026-07-04 이전 설치본이 여기에 해당한다). 그중 스냅샷 백업을 막는 `reset --hard` deny 규칙만 경고를 출력한다 — push 규칙은 이제 훅과 충돌하지 않는다. 예전 버전이 `autoMode.allow` 에 넣은 'danger_guard 가 확인한 push 는 허용' 예외도 같은 방식으로 걷어낸다 — 훅이 push 를 판정하지 않게 된 지금 그 예외는 거짓 전제로 `Git Destructive` 규칙을 약하게 만든다. 예전 설치기가 설치 기록 근거 없이 지운 규칙은 설치 기록의 `removed_legacy` 에 남아 있어 `--uninstall` 시 복원된다.
 

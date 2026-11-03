@@ -122,10 +122,10 @@ BOM = "\ufeff"
 @pytest.mark.parametrize("hook,event,expected", [
     ("danger_guard.py",
      {"tool_name": "PowerShell", "tool_input": {"command": "Remove-Item -Recurse -Force C:\\"}},
-     "deny"),
+     "ask"),
     ("danger_guard.py",
      {"tool_name": "Bash", "tool_input": {"command": "rm -rf /"}},
-     "deny"),
+     "ask"),
 ])
 def test_hooks_tolerate_leading_bom(hook, event, expected):
     proc = subprocess.run(

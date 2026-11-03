@@ -1,8 +1,8 @@
 """danger_guard.py 정책 테스트 (Bash + PowerShell 툴 공용).
 
 이 훅의 계약은 둘뿐이다.
-  1) 되돌릴 수 없는 두 부류만 deny — 루트/홈 전체 삭제, 디스크 파괴. push 는 판정하지 않는다
-     (auto mode 의 Git Destructive 규칙이 맡는다. tests/test_git_snapshot.py 참고).
+  1) deny 는 없다. 위험이 자명한 셋만 ask — 루트/홈 전체 삭제, 디스크 파괴, main/master force push·삭제
+     (push 는 tests/test_git_snapshot.py). 명령 자리의 실제 낱말만 보고 따옴표·heredoc 안은 데이터다.
   2) 그 외에는 명령을 '한 글자도 바꾸지 않고' 통과시킨다. Bash 셰임 PATH 는 SessionStart 가
      CLAUDE_ENV_FILE 로 설정하고, PowerShell 삭제에만 모듈 Import 선행 한 줄을 붙인다.
 
@@ -48,7 +48,7 @@ def decision_of(event, cwd=None):
     return p["hookSpecificOutput"].get("permissionDecision") if p else None
 
 
-# --- deny: 루트/홈 전체 삭제 ------------------------------------------------------
+# --- ask: 루트/홈 전체 삭제 -------------------------------------------------------
 
 ROOT_DELETE = [
     "rm -rf /",
@@ -74,12 +74,28 @@ ROOT_DELETE = [
     # 닫는 따옴표 뒤에 `/`·`/*` 만 붙은 것은 여전히 홈 전체다
     'rm -rf "$HOME"/',
     'rm -rf "$HOME"/*',
+    # 주석·줄 이음·값 있는 래퍼 옵션이 명령을 가리지 않는다(2026-11 리뷰)
+    "# clean up\nsudo rm -rf --no-preserve-root /",
+    "cd /tmp # go\nsudo rm -rf /",
+    "echo $#; sudo rm -rf /",
+    "sudo rm -rf \\\n  --no-preserve-root /",
+    "sudo -u root rm -rf /",
+    "timeout -s KILL 5 rm -rf ~",
+    "grep '<<EOF' x\nrm -rf ~",
+    "sudo rm -rf " + str(Path.home()),
+    # 값이 없는 래퍼 플래그 뒤의 명령 이름을 값으로 먹지 않는다
+    "sudo -n rm -rf /",
+    "echo pw | sudo -S rm -rf /",
+    "sudo -k rm -rf /",
+    "time -p rm -rf ~",
+    "sudo rm -rf \\\r\n  --no-preserve-root /",
+    "echo $((a<<b))\nsudo rm -rf /",
 ]
 
 
 @pytest.mark.parametrize("cmd", ROOT_DELETE)
-def test_root_delete_denied(cmd):
-    assert decision_of(bash(cmd)) == "deny", cmd
+def test_root_delete_asks(cmd):
+    assert decision_of(bash(cmd)) == "ask", cmd
 
 
 PS_ROOT_DELETE = [
@@ -93,15 +109,26 @@ PS_ROOT_DELETE = [
     'Remove-Item "$HOME" -Recurse',
     'Remove-Item "$HOME", "x" -Recurse',
     'Remove-Item "$env:USERPROFILE","x" -Recurse',
+    "# wipe\nRemove-Item -Recurse -Force C:\\",
+    "Remove-Item -Recurse -Force `\n C:\\",
+    "Remove-Item -Path:$HOME -Recurse",
+    "Remove-Item ${env:USERPROFILE} -Recurse",
 ]
 
 
 @pytest.mark.parametrize("cmd", PS_ROOT_DELETE)
-def test_ps_root_delete_denied(cmd):
-    assert decision_of(ps(cmd)) == "deny", cmd
+def test_ps_root_delete_asks(cmd):
+    assert decision_of(ps(cmd)) == "ask", cmd
 
 
-# --- deny: 디스크 파괴 ------------------------------------------------------------
+def test_ps_root_delete_ask_still_loads_the_shim():
+    """승인되면 셰임 모듈을 불러온 명령이 돈다 — 휴지통 치환과 루트 거부가 함께 걸린다."""
+    h = payload_of(ps("Remove-Item -Recurse -Force C:\\"))["hookSpecificOutput"]
+    assert h["permissionDecision"] == "ask"
+    assert h["updatedInput"]["command"].startswith("if (-not (Get-Module RmShim))")
+
+
+# --- ask: 디스크 파괴 -------------------------------------------------------------
 
 DISK_DESTROY = [
     "mkfs.ext4 /dev/sda1",
@@ -114,12 +141,13 @@ DISK_DESTROY = [
     "diskutil eraseDisk JHFS+ Blank /dev/disk2",
     "echo x > /dev/sda",
     "cat img > /dev/nvme0n1",
+    "# fmt\nmkfs.ext4 /dev/sda1",
 ]
 
 
 @pytest.mark.parametrize("cmd", DISK_DESTROY)
-def test_disk_destroy_denied(cmd):
-    assert decision_of(bash(cmd)) == "deny", cmd
+def test_disk_destroy_asks(cmd):
+    assert decision_of(bash(cmd)) == "ask", cmd
 
 
 PS_DISK_DESTROY = [
@@ -132,8 +160,8 @@ PS_DISK_DESTROY = [
 
 
 @pytest.mark.parametrize("cmd", PS_DISK_DESTROY)
-def test_ps_disk_destroy_denied(cmd):
-    assert decision_of(ps(cmd)) == "deny", cmd
+def test_ps_disk_destroy_asks(cmd):
+    assert decision_of(ps(cmd)) == "ask", cmd
 
 
 # --- 회귀: 종전 가드가 실제로 오탐을 낸 명령들 ------------------------------------
@@ -183,6 +211,29 @@ NOT_BLOCKED = [
     'rm -f "$HOME"/.bashrc.bak',
     'rm -rf "$USERPROFILE"/tmp',
     "rm -rf '~'/x",
+    # 2026-10 정규식 deny 의 오탐(s2 guard.log): 위험한 글자가 데이터(따옴표·heredoc·검색어) 안에 있다
+    "python3 -c 'import danger_guard as g\nfor c in [\"rm -rf ~\", \"rm -rf /\"]: print(c)'",
+    "printf '%s\\n' 'Get-ChildItem $env:USERPROFILE | % { Remove-Item -Recurse -Force $_ }' > t.ps1",
+    "python3 - <<'EOF'\ncases = [\n rm -rf ~\n mkfs.ext4 /dev/sda1\n]\nEOF\necho done",
+    "cat <<EOF > notes.md\nrm -rf /\ndd if=/dev/zero of=/dev/sda\nEOF",
+    'grep -E "mkfs|dd |diskpart|format " guard.log',
+    "export HOME=/tmp/h; rm -rf /tmp/h/x",
+    # 목록 보기·벤치마크는 디스크를 건드리지 않는다
+    "dd if=/dev/zero of=/dev/null bs=1M count=100",
+    "sudo fdisk -l /dev/sda",
+    "parted /dev/sda print",
+    "wipefs /dev/sdb",
+    "sfdisk -d /dev/sda > table.bak",
+    "diskutil list /dev/disk2",
+    "mkfs.ext4 -F disk.img",
+    "mkfs.ext4 --help",
+    "sudo wipefs -n -a /dev/sda",
+    # `#` 은 낱말 첫머리에서만 주석이고, here-string·산술의 `<<` 는 heredoc 이 아니다
+    "echo $# ${#arr[@]} http://x/#frag",
+    "cat <<< 'rm -rf ~'",
+    "echo $((1<<2))",
+    "cat <<'EOF-1' > t.sh\nrm -rf /\nEOF-1",
+    "cat <<\\EOF\nrm -rf ~\nEOF",
 ]
 
 
@@ -215,11 +266,11 @@ def _guard_module():
 
 @pytest.mark.parametrize("cmd", ["rm -rf /c", "rm -rf /c/", "rm -rf '/d/'", "rm -rf /c/*",
                                  "rm -rf /c/Users/me", "rm -rf /d/users/bob/"])
-def test_git_bash_drive_root_denied_on_windows(monkeypatch, cmd):
+def test_git_bash_drive_root_asks_on_windows(monkeypatch, cmd):
     """Git Bash 의 `/c` 는 C: 드라이브 루트, `/c/Users/<이름>` 은 Windows 홈이다."""
     guard = _guard_module()
     monkeypatch.setattr(guard, "IS_WINDOWS", True)
-    assert guard.root_delete_reason(cmd), cmd
+    assert guard.ask_reason("Bash", cmd, ".")[0] == "ask-root-delete", cmd
 
 
 @pytest.mark.parametrize("cmd", ["rm -rf /c", "rm -rf /c/", "rm -rf /c/*", "rm -rf /d/users/bob"])
@@ -227,13 +278,13 @@ def test_one_letter_top_level_dir_is_not_root_on_posix(monkeypatch, cmd):
     """Linux·macOS 의 `/c`·`/d/users/bob` 은 평범한 디렉터리일 뿐이다."""
     guard = _guard_module()
     monkeypatch.setattr(guard, "IS_WINDOWS", False)
-    assert guard.root_delete_reason(cmd) is None, cmd
+    assert guard.ask_reason("Bash", cmd, ".") is None, cmd
 
 
 def test_git_bash_drive_subdir_is_not_root_on_windows(monkeypatch):
     guard = _guard_module()
     monkeypatch.setattr(guard, "IS_WINDOWS", True)
-    assert guard.root_delete_reason("rm -rf /c/tmp/x") is None
+    assert guard.ask_reason("Bash", "rm -rf /c/tmp/x", ".") is None
 
 
 def test_prose_mentioning_disk_command_is_not_blocked():
@@ -245,7 +296,7 @@ def test_grep_for_dangerous_string_is_not_blocked():
 
     셰임 선행 줄은 붙을 수 있다 — PATH 한 줄일 뿐이고 grep 동작을 바꾸지 않는다.
     """
-    assert decision_of(bash('grep -rn "rm -rf /" docs/')) != "deny"
+    assert decision_of(bash('grep -rn "rm -rf /" docs/')) not in ("deny", "ask")
 
 
 # --- 셰임 선행 줄 ----------------------------------------------------------------

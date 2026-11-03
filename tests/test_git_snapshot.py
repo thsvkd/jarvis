@@ -368,23 +368,65 @@ def test_old_backups_are_pruned(repo):
     assert stale not in refs
 
 
-# --- push 는 판정하지 않는다 -----------------------------------------------------
-# 명령 문자열만 보고 push 가 원격 커밋을 되돌릴 수 없게 지우는지 가리는 판정은 두 차례 적대적 리뷰에서
-# 무너졌다(2026-10-11). push 는 auto mode 의 Git Destructive 규칙이 맡는다. 훅은 push 에 대해 아무것도
-# 하지 않는다 — 묻지 않고, 원격을 조회하지 않고, ref 를 만들지 않는다.
+# --- push: main/master 를 덮어쓰거나 지우는 자명한 꼴만 묻는다 ------------------------
+# 명령 문자열만 보고 push 가 원격 커밋을 되돌릴 수 없게 지우는지 '완전히' 가리는 판정은 두 차례 적대적
+# 리뷰에서 무너졌다(2026-10-11). 그래서 자명한 꼴(main/master force push·삭제, --mirror)만 묻고 나머지는
+# auto mode 의 Git Destructive 규칙과 원격 브랜치 보호에 맡긴다. 원격은 조회하지 않고 ref 도 만들지 않는다.
 
 
 @pytest.mark.parametrize("cmd", [
     "git push -f origin main",
+    "git push --force-with-lease origin HEAD:refs/heads/master",
+    "git push origin +main",
     "git push --mirror origin",
     "git push origin :main",
-    "git push origin main",
+    "git push origin --delete main",
+    "git -C . push -fu origin main",
+    "git push -f",  # 지금 브랜치(픽스처는 main)
+    "git push --force --all",
+    "git push --force origin @",
+    "git push -f origin 'refs/heads/*:refs/heads/*'",
+    "# publish\ngit push -f origin main",
+    "git push --force \\\n  origin main",
 ])
-def test_hook_does_not_judge_pushes(repo, tmp_path, cmd):
-    # 원격이 없는 경로를 가리키게 둔다. 훅이 원격을 조회하거나 판정하면 실패가 ask 로 드러난다.
+def test_hook_asks_before_overwriting_main(repo, tmp_path, cmd):
     git(repo, "remote", "add", "origin", str(tmp_path / "missing.git"))
+    git(repo, "branch", "-M", "main")
     p = run_hook(cmd, repo)
-    assert p is None, p
+    assert p and p["hookSpecificOutput"]["permissionDecision"] == "ask", (cmd, p)
+    assert backup_count(repo) == 0
+
+
+@pytest.mark.parametrize("cmd", [
+    "git push origin main",
+    "git push -u origin main",
+    "git push -f origin feature",
+    "git push --force-with-lease origin feat:feat",
+    "git push origin --delete old-branch",
+    "git push --dry-run --mirror origin",
+    "git push -f origin 'feature/*'",
+    "git push -n -f origin main",
+    "git push -f",  # 지금 브랜치가 feature 다
+    'git commit -m "git push -f origin main 은 하지 않는다"',
+])
+def test_hook_does_not_judge_ordinary_pushes(repo, tmp_path, cmd):
+    _ordinary_push_is_not_judged(repo, tmp_path, cmd, branch="feature")
+
+
+@pytest.mark.parametrize("cmd", [
+    "git push --tags -f origin",
+    "git push --force-if-includes origin main",
+])
+def test_tag_push_and_noop_force_on_main_are_not_judged(repo, tmp_path, cmd):
+    _ordinary_push_is_not_judged(repo, tmp_path, cmd, branch="main")
+
+
+def _ordinary_push_is_not_judged(repo, tmp_path, cmd, branch):
+    # 원격이 없는 경로를 가리키게 둔다. 훅이 원격을 조회하면 실패가 드러난다.
+    git(repo, "remote", "add", "origin", str(tmp_path / "missing.git"))
+    git(repo, "checkout", "-q", "-B", branch)
+    p = run_hook(cmd, repo)
+    assert p is None, (cmd, p)
     assert backup_count(repo) == 0
 
 
