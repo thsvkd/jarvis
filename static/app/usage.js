@@ -7,6 +7,8 @@
  const P=window.JARVIS,{html}=P,$=s=>document.querySelector(s);
  const sec=$("#usage");if(!sec||P.device)return; // 다른 기기를 보는 중이면 숨긴 채로 둔다
  const showNav=on=>document.querySelectorAll('[data-sh-sec="usage"]').forEach(a=>a.toggleAttribute("data-core",on));
+ // 셸이 기억한 core 값이 있으면 확인 전에도 섹션을 연다('불러오는 중…'). 게이트웨이면 load 가 404 로 다시 숨긴다
+ if(document.querySelector('[data-sh-sec="usage"][data-core]'))sec.hidden=false;
  const MODE_KEY="jarvis.usage.mode";
  const S={devs:null,prov:"all",hot:false,busy:new Set(),dlg:null,login:null,
   mode:(()=>{try{return localStorage.getItem(MODE_KEY)==="full"?"full":"brief";}catch(e){return "brief";}})()};

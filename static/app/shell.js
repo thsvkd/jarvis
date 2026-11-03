@@ -386,21 +386,20 @@
     if (doc.readyState === "loading") doc.addEventListener("DOMContentLoaded", () => route(false)); else route(false);
   } else markNav(PAGE);
 
-  // 기기 · AI 사용량 탭은 core 에서만 보인다(shell.css 가 data-core 없는 탭을 숨긴다). 개요 화면에서는 devices.js · usage.js 가 붙이고,
-  // 그 스크립트가 없는 화면(지도 · 셋업)은 개요에서 마지막으로 본 값을 쓴다 — 어느 화면에서든 같은 탭 바가 보이게.
+  // 기기 · AI 사용량 탭은 core 에서만 보인다(shell.css 가 data-core 없는 탭을 숨긴다). 어느 화면이든 개요에서 마지막으로 본 값으로 먼저 그리고,
+  // 개요 화면에서는 devices.js · usage.js 가 /api/devices 로 확인해 고친다 — 지도에서 넘어올 때 탭이 사라졌다 나타나지 않게.
   const CORE_KEY = "jarvis.shellCore";
   const secTabs = navLinks.filter((a) => a.hasAttribute("data-sh-sec"));
-  if (PAGE === "home") {
-    // 디자인 랩(window.JarvisLab)은 운영 마크업을 빌려 쓸 뿐이라 운영 설정에 쓰지 않는다
-    if (window.MutationObserver && !window.JarvisLab) new MutationObserver(() => {
-      try { localStorage.setItem(CORE_KEY, JSON.stringify(secTabs.filter((a) => a.hasAttribute("data-core")).map((a) => a.getAttribute("data-sh-sec")))); } catch (e) { /* 저장 불가 */ }
-    }).observe(nav, { subtree: true, attributeFilter: ["data-core"] });
-  } else if (!P.device) {
+  if (!P.device) {
     try {
       const on = JSON.parse(localStorage.getItem(CORE_KEY));
       if (Array.isArray(on)) secTabs.forEach((a) => a.toggleAttribute("data-core", on.includes(a.getAttribute("data-sh-sec"))));
     } catch (e) { /* 값 없음 · 깨짐: core 전용 탭은 숨긴 채 */ }
   }
+  // 디자인 랩(window.JarvisLab)은 운영 마크업을 빌려 쓸 뿐이라 운영 설정에 쓰지 않는다
+  if (PAGE === "home" && window.MutationObserver && !window.JarvisLab) new MutationObserver(() => {
+    try { localStorage.setItem(CORE_KEY, JSON.stringify(secTabs.filter((a) => a.hasAttribute("data-core")).map((a) => a.getAttribute("data-sh-sec")))); } catch (e) { /* 저장 불가 */ }
+  }).observe(nav, { subtree: true, attributeFilter: ["data-core"] });
   // 지금 페이지의 탭을 다시 누르면 새로 읽지 않고 맨 위로
   nav.addEventListener("click", (e) => {
     const a = e.target.closest("a[aria-current='page']");

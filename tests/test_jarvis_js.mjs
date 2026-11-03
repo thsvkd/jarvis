@@ -68,7 +68,7 @@ assert.equal(h`<style>a::after{content:"'"}</style>${"<"}`, `<style>a::after{con
 }
 
 // covers: UI-1. 탭 바 하나: 개요 화면은 주소 해시로 섹션 하나만 보인다(shell.js 가 data-tab-on, bento.css 가 나머지를 숨긴다).
-// 기기·AI 사용량 탭은 core 에서만(shell.css 가 data-core 없는 탭을 숨긴다. 지도·셋업은 개요에서 기억한 값).
+// 기기·AI 사용량 탭은 core 에서만(shell.css 가 data-core 없는 탭을 숨긴다. 어느 화면이든 개요에서 기억한 값으로 먼저 그린다).
 {
   const node = (own = {}) => new Proxy(function () {}, {
     get: (t, k) => (k in own ? own[k] : k === "length" ? 0 : k === Symbol.toPrimitive ? () => "" : node()),
@@ -180,6 +180,11 @@ assert.doesNotMatch(bentoCss, /(^|\n)#main > \.sec/); // 셋업 페이지(data-t
   const setup = mount({ page: "setup", sections: SECS });
   assert.deepEqual(setup.current(), ["setup"]);
   assert.equal(setup.tab("usage").hasAttribute("data-core"), false); // 기억한 값이 없으면(게이트웨이 · 첫 방문) 숨긴 채
+  // 개요도 기억한 값으로 먼저 그린다(지도에서 넘어올 때 탭이 사라졌다 나타나지 않게). 확인은 devices.js · usage.js 가 /api/devices 로 한다
+  const back = mount({ page: "home", hash: "#devices", store: { "jarvis.shellCore": '["devices","usage"]' }, sections: SECS });
+  assert.equal(back.tab("devices").hasAttribute("data-core"), true);
+  assert.equal(back.tab("usage").hasAttribute("data-core"), true);
+  assert.deepEqual(back.current(), ["devices"]);
 }
 
 console.log("ok");

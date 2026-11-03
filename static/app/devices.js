@@ -18,6 +18,8 @@
   poll();
   return;
  }
+ // 셸이 기억한 core 값이 있으면 확인 전에도 섹션을 연다(목록은 응답이 오면 채운다). 게이트웨이면 아래 load 가 404 로 다시 숨긴다
+ if(document.querySelector('[data-sh-sec="devices"][data-core]'))sec.hidden=false;
  const list=$("#devList"),tiles=new Map();
  const NAME={desktop:"데스크톱",mobile:"모바일"};
  function qr(rows,label){

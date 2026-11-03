@@ -107,14 +107,15 @@ assert.doesNotMatch(rendered(), /data-lp="grok"/); // 주의 필터는 로그인
 click({}, "ulHot");
 click({ prov: "all" });
 
-// 탭과 섹션은 사용량 모으기(기기마다 프로바이더를 불러 수십 초)를 기다리지 않고 core 확인(/api/devices)만으로 뜬다
-{
+// 탭과 섹션은 사용량 모으기(기기마다 프로바이더를 불러 수십 초)를 기다리지 않고 core 확인(/api/devices)만으로 뜬다.
+// 셸이 core 로 기억한 탭이면(지도에서 넘어올 때) 어떤 응답보다 먼저 섹션을 연다
+for (const cached of [false, true]) {
   const els = new Map();
   const el = id => els.get(id) || els.set(id, { id, hidden: id === "usage", dataset: {}, classList: { toggle() {} },
     setAttribute() {}, toggleAttribute() {}, addEventListener() {} }).get(id);
-  const tab = { toggleAttribute(name, on) { this[name] = on; } };
-  const slow = { ...ctx, window: {}, document: { hidden: false, querySelector: s => el(s.slice(1)), querySelectorAll: () => [tab], addEventListener() {} },
-    fetch: async url => url === "/api/devices" ? { ok: true, status: 200 } : new Promise(() => {}) }; // 사용량 응답은 오지 않는다
+  const tab = { "data-core": cached || undefined, toggleAttribute(name, on) { this[name] = on; } };
+  const slow = { ...ctx, window: {}, document: { hidden: false, querySelector: s => s[0] === "#" ? el(s.slice(1)) : cached ? tab : null, querySelectorAll: () => [tab], addEventListener() {} },
+    fetch: async url => url === "/api/devices" && !cached ? { ok: true, status: 200 } : new Promise(() => {}) }; // 사용량 응답은 오지 않는다(기억한 값이면 아무 응답도)
   vm.runInNewContext(readFileSync(new URL("../static/shared/jarvis.js", import.meta.url), "utf8"), slow);
   vm.runInNewContext(readFileSync(new URL("../static/app/usage.js", import.meta.url), "utf8"), slow);
   await new Promise(resolve => setImmediate(resolve));
