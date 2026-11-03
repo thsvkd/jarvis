@@ -163,7 +163,8 @@
   const ids=columns(false).map(c=>c.id);
   if(S.prov!=="all"&&!ids.includes(S.prov))S.prov="all";
   P.render($("#ulProv"),html`${[{id:"all",name:"전체"},...columns(false)].map(p=>html`<button type="button" data-prov="${p.id}" aria-pressed="${String(S.prov===p.id)}">${p.name}</button>`)}`);
-  const hb=$("#ulHot");hb.setAttribute("aria-pressed",String(S.hot));hb.textContent=S.hot?"✓ 주의 필요만":"주의 필요만";
+  const hb=$("#ulHot"),hn=uniq(false).filter(x=>isHot(x.a)).length; // 필터 버튼의 개수: 누른 뒤에도 전체 주의 계정 수를 보인다
+  hb.setAttribute("aria-pressed",String(S.hot));hb.setAttribute("aria-label","주의 필요 계정 "+hn+"개만 보기");$("#ulHotN").textContent=hn;
   document.querySelectorAll("#ulMode [data-mode]").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.mode===S.mode)));
   P.render($("#ulBody"),view());
   dlgDraw();
@@ -194,11 +195,11 @@
    timer=setTimeout(()=>{if(!document.hidden)load(false);},60000); // 숨은 탭은 멈춘다. 보이면 visibilitychange 가 다시 시작한다
   }
  }
- async function refreshOne(id){
+ async function refreshOne(id,soft){ // soft: 프로바이더를 다시 조회하지 않고 게이트웨이의 값만 받는다(Claude 는 늘 새로 읽는다)
   if(S.busy.has(id))return;
   S.busy.add(id);draw();
   try{
-   const r=await fetch("/api/devices/"+encodeURIComponent(id)+"/usage?independent=1&refresh=1",{cache:"no-store",headers:{"X-Jarvis-Action":"usage-refresh"}}),o=await r.json();
+   const r=await fetch("/api/devices/"+encodeURIComponent(id)+"/usage?independent=1"+(soft?"":"&refresh=1"),{cache:"no-store",headers:soft?{}:{"X-Jarvis-Action":"usage-refresh"}}),o=await r.json();
    const i=S.devs.findIndex(d=>d.id===id);
    S.devs[i]={...o,id,host:S.devs[i].host,status:r.status};
    const good=r.ok&&(!o.error||(o.providers||[]).length>0); // Orca 가 실패해도 hswap 값은 읽혔을 수 있다
@@ -232,10 +233,15 @@
   let good=false;
   try{
    const r=await fetch("/api/devices/"+encodeURIComponent(dev)+"/account?slot="+encodeURIComponent(slot),{method:"POST",cache:"no-store",headers:{"X-Jarvis-Action":"usage-account"}}),o=await r.json();
-   good=r.ok;note(good?name+": Claude 를 "+label+" 로 바꿨습니다":name+": "+(o.error||"HTTP "+r.status),!good);
+   good=r.ok&&o.switched===true; // hswap 이 정상 종료해도 바꾸지 않았으면 switched:false 다
+   note(good?name+": Claude 를 "+label+" 로 바꿨습니다":name+": "+(o.error||(r.ok?"hswap 이 계정을 바꾸지 않았습니다":"HTTP "+r.status)),!good);
   }catch(e){note(e.message||String(e),true);}
   S.busy.delete(dev);
-  if(good)refreshOne(dev);else draw();
+  if(!good){draw();return;}
+  // 바뀐 계정을 바로 '사용 중'으로 보이고, 전체 재조회 대신 Claude 만 새로 읽힌 값으로 확인한다
+  const cur=S.devs.find(x=>x.id===dev);
+  (cur&&cur.providers||[]).filter(p=>p.id==="claude").forEach(p=>p.accounts.forEach(a=>{a.active=a.slot===slot;}));
+  refreshOne(dev,true);
  }
  sec.addEventListener("click",e=>{
   const t=e.target.closest("button");if(!t||t.getAttribute("aria-disabled")==="true")return;

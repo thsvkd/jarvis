@@ -58,7 +58,12 @@ def _merge(mine, orca):
     extra = [o for o in orca if "@" in o["label"] and o["label"].lower() not in emails]
     if not mine:
         return list(orca)
-    return extra if extra and not emails else mine + extra
+    if extra and not emails:
+        # 내 쪽 활성 기본 계정 하나와 Orca 이메일 계정 하나는 같은 로그인이다. 사용 중 표시를 넘긴다(Orca 사본은 바꾸지 않는다)
+        if len(extra) == 1 and sum(1 for a in mine if a.get("active")) == 1:
+            extra = [{**extra[0], "active": True}]
+        return extra
+    return mine + extra
 
 
 def read(force=False):
@@ -72,7 +77,8 @@ def read(force=False):
     with _lock:
         for name, job in jobs.items():
             previous = _tasks.get(name)
-            ttl = 30 if name == "claude" else 120
+            # Claude 는 로컬 파일만 읽어(수 ms) 묶지 않는다. 묶으면 계정 전환 직후에도 이전 '사용 중'을 30초 동안 보인다
+            ttl = 0 if name == "claude" else 120
             if previous is None or (previous[1].done() and (force or now - previous[0] >= ttl)):
                 previous = _tasks[name] = (now, _pool.submit(job))
             selected[name] = previous[1]

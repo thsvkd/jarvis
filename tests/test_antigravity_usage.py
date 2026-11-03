@@ -27,6 +27,22 @@ class ParseTest(unittest.TestCase):
             self.assertNotIn("synthetic", json.dumps(result))
             self.assertNotIn("private-id", json.dumps(result))
 
+    def test_local_id_token_email_needs_no_userinfo_and_fallback_order(self):
+        """covers: USAGE-2, USAGE-3"""
+        quota = {"groups": [{"displayName": "Gemini", "buckets": [{"window": "weekly", "remainingFraction": .4}]}]}
+        with mock.patch.object(antigravity_usage, "_token", return_value=("synthetic", "local@example.com")), \
+                mock.patch.object(antigravity_usage, "_http", side_effect=[quota]) as http:
+            self.assertEqual(antigravity_usage.read()["accounts"][0]["label"], "local@example.com")
+        self.assertEqual(http.call_count, 1)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"GEMINI_HOME": tmp}):
+            os.mkdir(os.path.join(tmp, "antigravity-cli"))
+            path = os.path.join(tmp, "antigravity-cli", "antigravity-oauth-token")
+            for field, want in (("a@example.com", "a@example.com"), ("not-an-email", "이름 없는 계정"), (7, "이름 없는 계정")):
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump({"token": {"access_token": "t", "expiry": "2099-01-01T00:00:00Z"}, "id_token_email": field}, f)
+                os.chmod(path, 0o600)
+                self.assertEqual(antigravity_usage._token()[1], want)
+
     def test_expired_token_is_not_refreshed_or_sent(self):
         """covers: USAGE-3"""
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"GEMINI_HOME": tmp}):
@@ -43,7 +59,7 @@ class ParseTest(unittest.TestCase):
         """covers: USAGE-2, USAGE-3"""
         quota = {"groups": [{"displayName": "Gemini", "buckets": [{"window": "weekly", "remainingFraction": .4}]}]}
         for identity in ({"email": "person@example.com", "email_verified": False}, OSError("identity unavailable")):
-            with self.subTest(identity=identity), mock.patch.object(antigravity_usage, "_token", return_value="synthetic"), \
+            with self.subTest(identity=identity), mock.patch.object(antigravity_usage, "_token", return_value=("synthetic", "이름 없는 계정")), \
                     mock.patch.object(antigravity_usage, "_http", side_effect=[quota, identity]):
                 self.assertEqual(antigravity_usage.read()["accounts"][0]["label"], "기본 계정")
 

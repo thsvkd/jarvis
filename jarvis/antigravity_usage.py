@@ -52,7 +52,8 @@ def _token():
     expiry = parse_iso(entry.get("expiry")) if isinstance(entry, dict) and isinstance(entry.get("expiry"), str) else None
     if not isinstance(token, str) or not token or len(token) > 8192 or any(c in token for c in "\r\n") or not expiry or expiry <= time.time():
         raise ValueError("expired or invalid credential")
-    return token
+    # CLI 가 자격 파일에 남긴 로그인 이메일. 있으면 userinfo 호출 없이 계정을 식별한다
+    return token, _email({"email": body.get("id_token_email")})
 
 
 def _quota(body):
@@ -85,15 +86,16 @@ def read():
     """활성 CLI 자격의 사용량만 조회한다. 만료 시 갱신하지 않는다."""
     unavailable = {"status": "unavailable", "accounts": []}
     try:
-        token = _token()
+        token, label = _token()
         quota = _quota(_http("https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary", token, True))
         if not quota:
             return unavailable
-        try:
-            identity = _http("https://openidconnect.googleapis.com/v1/userinfo", token)
-            label = _email(identity) if isinstance(identity, dict) and identity.get("email_verified") is True else "이름 없는 계정"
-        except (OSError, ValueError, TypeError):
-            label = "이름 없는 계정"
+        if label == "이름 없는 계정":
+            try:
+                identity = _http("https://openidconnect.googleapis.com/v1/userinfo", token)
+                label = _email(identity) if isinstance(identity, dict) and identity.get("email_verified") is True else "이름 없는 계정"
+            except (OSError, ValueError, TypeError):
+                pass
         account = {"label": "기본 계정" if label == "이름 없는 계정" else label, "org": None, "active": True,
                    "status": "ok", "error": None, "note": None, "attention": False, "failure": None, "plan": None,
                    "updated_at": time.time(), **quota, "extra": None, "credits": None, "source": "antigravity"}

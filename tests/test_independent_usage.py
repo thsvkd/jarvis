@@ -21,6 +21,16 @@ class IndependentUsageTest(unittest.TestCase):
     def tearDown(self):
         independent_usage._tasks.clear()
 
+    def test_merge_carries_active_from_single_default_account_to_orca_email(self):
+        """covers: USAGE-3"""
+        mine = [{"label": "기본 계정", "active": True}]
+        orca = [{"label": "me@example.com", "active": False}]
+        merged = independent_usage._merge(mine, orca)
+        self.assertEqual([(a["label"], a["active"]) for a in merged], [("me@example.com", True)])
+        self.assertFalse(orca[0]["active"])
+        two = [{"label": "a@example.com", "active": False}, {"label": "b@example.com", "active": False}]
+        self.assertFalse(any(a["active"] for a in independent_usage._merge(mine, two)))
+
     def test_orca_fills_what_independent_readers_cannot_see(self):
         """covers: USAGE-3"""
         row = lambda label, used=10: {"label": label, "org": None, "active": True, "status": "ok", "windows": [{"key": "weekly", "used": used, "resets_at": None}], "buckets": []}
@@ -106,6 +116,27 @@ class IndependentUsageTest(unittest.TestCase):
             data = independent_usage.read(force=True)
         self.assertEqual(data["logins"], ["codex", "grok"])
         self.assertEqual(data["fresh_logins"], ["codex"])  # 화면은 이 목록으로만 기기 행 '로그인' 버튼을 낸다
+
+    def test_claude_is_reread_on_every_read_so_a_switch_shows_at_once(self):
+        """covers: USAGE-3"""
+        # 계정 전환 뒤 강제 아닌 조회도 새 '사용 중'을 보여야 한다. 다른 프로바이더는 묶은 값을 다시 쓴다
+        empty = {"status": "unavailable", "accounts": []}
+        claude = mock.Mock(side_effect=[{"accounts": [{"label": "a@example.com", "active": True}]},
+                                        {"accounts": [{"label": "a@example.com", "active": False}]}])
+        with mock.patch.object(independent_usage, "_claude", claude), \
+                mock.patch.object(independent_usage, "_codex", return_value=[]) as codex, \
+                mock.patch.object(independent_usage, "_caam", return_value=[]), \
+                mock.patch.object(independent_usage, "_opencode", return_value=empty), \
+                mock.patch.object(independent_usage.antigravity_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.gemini_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.kimi_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.minimax_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.zcode_usage, "read", return_value=empty):
+            independent_usage.read()
+            data = independent_usage.read()
+        self.assertEqual(claude.call_count, 2)
+        self.assertEqual(codex.call_count, 1)
+        self.assertFalse(data["providers"][0]["accounts"][0]["active"])
 
     def test_fresh_logins_are_omitted_when_nothing_is_confirmed(self):
         """covers: USAGE-4"""

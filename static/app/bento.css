@@ -1131,6 +1131,15 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
 /* ------------------------------------------------------------------ AI 구독 사용량(core, usage.js) — 디자인 랩 04 의 C + 자세히 모드 */
 .ul-bar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2_5); margin-bottom: var(--gap); }
 .ul-bar .seg { flex-wrap: wrap; }
+/* 주의 필요 필터: 눌림 상태가 점·색·테두리로 드러나는 토글 칩(atlas .chip 의 aria-pressed 규칙을 경고색으로 옮김) */
+.ul-filter { display: inline-flex; align-items: center; gap: var(--sp-1_5); height: 36px; padding: 0 var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--tile); color: var(--text-2); font: inherit; font-size: var(--fs-md); font-weight: var(--fw-semibold); cursor: pointer; white-space: nowrap; }
+.ul-filter::before { content: ""; width: 8px; height: 8px; border-radius: var(--r-2xs); background: var(--warn); flex: none; }
+.ul-filter:hover { background: var(--tile-2); color: var(--text); }
+.ul-filter .cnt { margin: 0; padding: 0 var(--sp-1_5); border-radius: var(--r-2xs); background: var(--tile-3); color: var(--text-2); }
+.ul-filter[aria-pressed="true"] { background: var(--warn-soft); border-color: var(--warn); color: var(--warn-ink); }
+.ul-filter[aria-pressed="true"] .cnt { background: var(--warn); color: var(--on-warn); }
+.ul-filter:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
+@media (max-width: 760px), (pointer: coarse) { .ul-filter { height: 44px; } }
 .ul-dot { display: inline-block; width: 9px; height: 9px; border-radius: var(--r-2xs); flex: none; background: var(--muted); }
 .ul-dot[data-p="claude"] { background: var(--s4); } .ul-dot[data-p="codex"] { background: var(--s1); }
 .ul-dot[data-p="grok"] { background: var(--s3); } .ul-dot[data-p="antigravity"] { background: var(--s2); }
