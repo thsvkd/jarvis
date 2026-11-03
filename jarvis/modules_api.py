@@ -33,6 +33,7 @@ PUBLIC_KEYS = ("module", "installed", "owned", "version", "latest", "health", "c
 _cache = {}  # 이름 -> (시각, 종료 코드, 응답)
 _plans = {}  # 이름 -> (시각, http 상태, 계획)
 _status_lock = threading.Lock()
+_refresh_lock = threading.Lock()  # 뒤에서 도는 다시 점검은 하나만
 _plan_lock = threading.Lock()
 _job_lock = threading.Lock()
 job = {}  # 마지막 apply: {module, plan_id, state: running/finished/interrupted, started_at, finished_at, code, result}
@@ -86,16 +87,43 @@ def _write_mark(record):
     os.replace(tmp, MARK)
 
 
+def _stale(force=False):
+    now = time.time()
+    return [n for n in module.MODULES if force or n not in _cache or now - _cache[n][0] > TTL.get(n, 60)]
+
+
+def _check(names):
+    """{이름: (시각, 종료 코드, 응답)}. 모듈마다 하위 프로세스라 함께 돌린다. 차례로 돌리면 합이 core 의 기다림
+    (STATUS_TIMEOUT_S + 10)을 넘는다."""
+    with ThreadPoolExecutor(max_workers=max(1, len(names))) as pool:
+        return {n: (time.time(), *r) for n, r in zip(names, pool.map(lambda n: run(n, "status", timeout=STATUS_TIMEOUT_S), names))}
+
+
+def _refresh():
+    """TTL 이 지난 모듈을 잠금 밖에서 다시 점검한다. 그동안 다른 조회는 지난 결과를 바로 받는다.
+    점검 중에 apply 가 지웠거나 강제 점검이 새로 쓴 항목은 덮지 않는다(적용 전 결과가 남지 않게)."""
+    try:
+        with _status_lock:
+            before = {n: _cache.get(n) for n in _stale()}
+        fresh = _check(list(before)) if before else {}
+        with _status_lock:
+            _cache.update({n: v for n, v in fresh.items() if _cache.get(n) is before[n]})
+    finally:
+        _refresh_lock.release()
+
+
 def status(force=False):
-    """게이트웨이 GET /api/modules: 모듈마다 status 와 마지막 apply 작업."""
+    """게이트웨이 GET /api/modules: 모듈마다 status 와 마지막 apply 작업.
+
+    처음(재시작·적용 뒤)과 다시 점검 버튼만 점검을 기다린다. TTL 만 지난 것은 지난 결과를 바로 주고 뒤에서 다시 점검한다
+    (doctor 는 하네스마다 --version, harness 는 레지스트리 조회라 수 초~수십 초 걸려 core 의 응답 전체를 붙잡는다)."""
     out = {}
-    with _status_lock:  # 같은 점검을 동시에 두 번 돌리지 않는다
-        stale = [n for n in module.MODULES if force or _cache.get(n, (0, 0, None))[2] is None
-                 or time.time() - _cache[n][0] > TTL.get(n, 60)]
-        # 모듈마다 하위 프로세스라 함께 돌린다. 차례로 돌리면 합이 core 의 기다림(STATUS_TIMEOUT_S + 10)을 넘는다
-        with ThreadPoolExecutor(max_workers=max(1, len(stale))) as pool:
-            for name, (code, body) in zip(stale, pool.map(lambda n: run(n, "status", timeout=STATUS_TIMEOUT_S), stale)):
-                _cache[name] = (time.time(), code, body)
+    with _status_lock:  # 기다리는 점검(처음·강제)을 동시에 두 번 돌리지 않는다
+        stale = _stale(force)
+        if force or any(n not in _cache for n in stale):
+            _cache.update(_check(stale))
+        elif stale and _refresh_lock.acquire(blocking=False):
+            threading.Thread(target=_refresh, daemon=True, name="jarvis-modules-status").start()
         for name in module.MODULES:
             at, code, body = _cache[name]
             out[name] = {**body, "checked_at": at, "ok": code == 0}

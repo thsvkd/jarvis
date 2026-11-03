@@ -10,6 +10,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SECRET = "sk-test-0123456789abcdef"
+# 모듈 CLI 그대로지만 PATH 보강(harness_module.user_path)을 임시 홈의 ~/.local/bin 으로 좁힌다.
+# 실제 보강은 기기의 /usr/local/bin·Homebrew 도 붙여 이 기기의 하네스가 섞인다(보강 자체는 test_harness_module 이 본다)
+CLI = ("import os, sys; from pathlib import Path; from jarvis import harness_module as h; "
+       "h.user_path = lambda p: str(Path.home() / '.local' / 'bin') + os.pathsep + p; "
+       "from jarvis.__main__ import main; sys.exit(main())")
 
 
 class DoctorModuleTest(unittest.TestCase):
@@ -31,7 +36,7 @@ class DoctorModuleTest(unittest.TestCase):
     def cli(self, *args):
         env = {**os.environ, "HOME": str(self.home), "PATH": f"{self.bin}{os.pathsep}{self.bin2}{os.pathsep}/usr/bin:/bin",
                "JARVIS_CONFIG": os.devnull, "PYTHONUSERBASE": site.getuserbase()}  # 사용자 site 의 psutil
-        r = subprocess.run([sys.executable, "-m", "jarvis", "module", "doctor", *args, "--json"], cwd=ROOT, env=env,
+        r = subprocess.run([sys.executable, "-c", CLI, "module", "doctor", *args, "--json"], cwd=ROOT, env=env,
                            capture_output=True, text=True, timeout=120)
         return r.returncode, json.loads(r.stdout), r.stdout + r.stderr
 
@@ -64,6 +69,19 @@ class DoctorModuleTest(unittest.TestCase):
         claude = next(t for t in out["details"]["tools"] if t["id"] == "claude")
         self.assertEqual(claude["found"][0], "~/.local/bin/claude")
         self.assertNotIn(str(self.home), raw)
+
+    @unittest.skipIf(sys.platform == "win32", "가짜 실행 파일이 POSIX 셸 스크립트다")
+    def test_status_finds_harnesses_in_user_bin_missing_from_the_service_path(self):
+        """covers: DOCTOR-7. 게이트웨이 서비스 PATH 에는 ~/.local/bin 이 없어도 설치된 하네스를 찾는다"""
+        local = self.home / ".local" / "bin"
+        local.mkdir(parents=True)
+        stub = local / "codex"
+        stub.write_text("#!/bin/sh\necho 'codex-cli 1.2.3'\n")
+        stub.chmod(0o755)
+        code, out, raw = self.cli("status")
+        self.assertEqual(code, 0, raw)
+        codex = next(t for t in out["details"]["tools"] if t["id"] == "codex")
+        self.assertEqual((codex["found"], codex["version"], codex["hint"]), (["~/.local/bin/codex"], "codex-cli 1.2.3", None))
 
     def test_plan_has_no_steps_and_apply_is_current_or_stale(self):
         """covers: DOCTOR-7"""

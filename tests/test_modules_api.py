@@ -55,6 +55,36 @@ class GatewayTest(unittest.TestCase):
         modules_api.status(force=True)
         self.assertEqual(len(self.calls), 2 * len(modules_api.module.MODULES))
 
+    def test_expired_status_is_served_at_once_and_checked_again_in_the_background(self):
+        """covers: SETUP-1. TTL 만 지난 점검은 화면을 기다리게 하지 않는다"""
+        modules_api.status()
+        at, code, body = modules_api._cache["doctor"]
+        modules_api._cache["doctor"] = (at - 10 ** 6, code, {**body, "health": "old"})
+        gate = threading.Event()
+        modules_api.run.side_effect = lambda *args, timeout: (gate.wait(5), (0, {"module": args[0], "health": "new"}))[1]
+        self.assertEqual(modules_api.status()["modules"]["doctor"]["health"], "old")  # 점검이 막혀 있어도 바로 온다
+        self.assertTrue(wait_until(lambda: any(c.args[0] == "doctor" for c in modules_api.run.call_args_list[len(modules_api.module.MODULES):])))
+        self.assertEqual(modules_api.status()["modules"]["doctor"]["health"], "old")  # 점검 중인 다른 조회도 잠금에 막히지 않는다
+        gate.set()
+        self.assertTrue(wait_until(lambda: modules_api._cache["doctor"][2]["health"] == "new"))
+        self.assertTrue(wait_until(lambda: not modules_api._refresh_lock.locked()))
+        self.assertEqual(sum(c.args[0] == "doctor" for c in modules_api.run.call_args_list), 2)
+
+    def test_background_check_does_not_restore_what_apply_dropped(self):
+        """covers: SETUP-1. 뒤 점검 중에 apply 가 지운 캐시는 적용 전 결과로 되살아나지 않는다"""
+        modules_api.status()
+        at, code, body = modules_api._cache["doctor"]
+        modules_api._cache["doctor"] = (at - 10 ** 6, code, body)
+        gate = threading.Event()
+        modules_api.run.side_effect = lambda *args, timeout: (gate.wait(5), (0, {"module": args[0], "health": "pre-apply"}))[1]
+        modules_api.status()
+        self.assertTrue(wait_until(lambda: modules_api.run.call_count > len(modules_api.module.MODULES)))
+        with modules_api._status_lock:
+            modules_api._cache.pop("doctor")  # apply 의 work() 와 같다
+        gate.set()
+        self.assertTrue(wait_until(lambda: not modules_api._refresh_lock.locked()))
+        self.assertNotIn("doctor", modules_api._cache)
+
     def test_plans_asked_together_run_once(self):
         """covers: SETUP-1"""
         self.assertEqual(modules_api.plan("orca")[0], 200)

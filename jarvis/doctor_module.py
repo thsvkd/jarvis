@@ -13,6 +13,7 @@ import tempfile
 from pathlib import Path
 
 from . import module
+from .harness_module import _env_path
 
 TOOLS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modules", "doctor", "doctor.py")
 _tools = None
@@ -41,7 +42,8 @@ def status():
 
     scratch = tempfile.mkdtemp(prefix="jarvis-doctor-")
     try:
-        with contextlib.redirect_stdout(io.StringIO()):  # 점검 함수의 제목 줄은 사람용 보고다
+        # 게이트웨이 서비스 PATH 에는 ~/.local/bin·nvm 이 없어 설치된 하네스를 없다고 낸다(harness 모듈과 같은 보강)
+        with _env_path(), contextlib.redirect_stdout(io.StringIO()):  # 점검 함수의 제목 줄은 사람용 보고다
             rows = d.inventory(catalog, d.probe_env(scratch), scratch)
             d.check_hook_drift(home, collect("hook_drift"))
             d.check_secrets(home, collect("secret"))

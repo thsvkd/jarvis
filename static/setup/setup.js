@@ -367,7 +367,10 @@
     const sel = a && a.dataset && a.dataset.act ? '[data-act="' + a.dataset.act + '"][data-id="' + (a.dataset.id || "") + '"][data-mod="' + (a.dataset.mod || "") + '"]' : null;
     const fid = a && a.closest && a.closest("[data-flow]") ? a.closest("[data-flow]").dataset.flow : null;
     const inSheet = !!(a && a.closest && a.closest("#suSheet"));
+    const todoTop = ($(".su-todo ul") || {}).scrollTop || 0; // 다시 그려도 할 일 목록 스크롤 유지
     P.render($("#suBody"), body());
+    const todoUl = $(".su-todo ul");
+    if (todoUl && todoTop) todoUl.scrollTop = todoTop;
     drawer();
     $("#suAge").textContent = S.refreshing ? "모든 기기를 다시 점검하는 중…" : S.data ? ago(S.data.generated_at) + " 모음" : "";
     $("#suRefresh").disabled = S.refreshing;

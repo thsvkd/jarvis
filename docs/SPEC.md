@@ -69,7 +69,7 @@ core 홈의 AI 셋업 화면(디자인 랩 05 의 C 안)은 기기마다 모듈 
 
 | 경로 | 누가 | 동작 |
 | --- | --- | --- |
-| 게이트웨이 `GET /api/modules[?refresh=1]` | 설정 core 만 | 모듈마다 `status` 와 `checked_at`·`ok`, 마지막 apply 작업(`job`). status 는 모듈별로 캐시하고(orca 60초, hooks·setup 300초, doctor 600초, harness 1800초), 오래된 것만 모듈마다 병렬로 다시 읽는다. `refresh=1` 은 `X-Jarvis-Action: modules-refresh` 가 있어야 한다 |
+| 게이트웨이 `GET /api/modules[?refresh=1]` | 설정 core 만 | 모듈마다 `status` 와 `checked_at`·`ok`, 마지막 apply 작업(`job`). status 는 모듈별로 캐시하고(orca 60초, hooks·setup 300초, doctor 600초, harness 1800초), 오래된 것만 모듈마다 병렬로 다시 읽는다. 캐시가 없을 때(재시작·apply 뒤)와 `refresh=1` 만 점검을 기다리고, 기간만 지난 것은 지난 결과를 바로 주고 뒤에서 다시 읽는다. `refresh=1` 은 `X-Jarvis-Action: modules-refresh` 가 있어야 한다 |
 | 게이트웨이 `GET /api/modules/<이름>/plan` | 설정 core 만 | 그 모듈의 `plan`. 10초 동안 캐시해 몰린 요청도 하위 프로세스 하나로 처리한다 |
 | 게이트웨이 `POST /api/modules/<이름>/apply?plan_id=<sha256>` | 설정 core 만, `X-Jarvis-Action: module-apply` | 뒤에서 `apply --plan-id` 를 돌리고 바로 202 와 작업을 준다. 한 번에 하나만 돌리고, 다른 적용·jarvis 갱신·Orca 업데이트·페어링 발급이 진행 중이면 409 다(그 작업들도 적용 중에는 409). 시작할 때 `module-apply.json` 표시를 남겨, 적용 중 재시작하면 다음 조회의 작업이 `interrupted` 다. 끝나면 그 모듈의 status·plan 캐시를 버린다 |
 | core `GET /api/devices/modules[?refresh=1]` | tailnet | 기기마다 위의 응답에 `id`·`host`·`status`(HTTP)를 붙여 모은다. 폴링이 실패 중인 기기는 묻지 않는다. viewers 가 아니면(`full: false`) 모듈은 `module·installed·owned·version·latest·health·checked_at·ok·error` 만, 작업은 상태와 결과 종류만 준다(doctor 의 시크릿 위치·경로, 결과 문구는 viewers 만) |

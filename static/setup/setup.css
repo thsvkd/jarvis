@@ -154,6 +154,7 @@ code,.mono{font-family:var(--mono)}
 .su-tw p{font-size:var(--fs-sm);color:var(--text-2);overflow-wrap:anywhere}
 .su-tw p b{color:var(--tone-ink)}
 .su-todo>.su-muted{margin-top:var(--sp-1)}
+.su-todo ul{max-height:360px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--line-2) transparent;padding-right:var(--sp-1)}
 .su-hist li{display:grid;grid-template-columns:12px minmax(0,1fr);gap:var(--sp-2_5);padding:var(--sp-2) 0;border-top:1px solid var(--line);font-size:var(--fs-sm)}
 .su-hist li:first-child{border-top:0}
 .su-hist li>.shape{margin-top:var(--sp-1_5)}
