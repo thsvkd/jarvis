@@ -70,7 +70,7 @@ ai-setup 의 AI-1~AI-6 을 옮긴 것이다. 테스트 본문은 원본과 같�
 
 ## 훅
 
-옮긴 훅 자체의 테스트(`tests/test_danger_guard.py`·`test_merge_and_diff.py`·`test_rm_shim.py`·`test_hook_compat.py`·`test_git_snapshot.py`, Pester `tests/RmShim.Tests.ps1`)는 ai-setup 원본 그대로이며 케이스 ID 없이 함께 돈다.
+옮긴 훅 자체의 테스트(`tests/test_danger_guard.py`·`test_merge_and_diff.py`·`test_rm_shim.py`·`test_hook_compat.py`·`test_git_snapshot.py`, Pester `tests/RmShim.Tests.ps1`)는 ai-setup 에서 옮겨 왔고 케이스 ID 없이 함께 돈다. 이 중 `test_danger_guard.py`·`test_hook_compat.py`·`test_git_snapshot.py` 는 1.7.4 에서 훅 정책을 바꾸며 고쳤다(deny 를 없애고 위험이 자명한 명령만 ask, `docs/guard-policy.md`). 나머지는 원본 그대로다.
 
 | ID | 케이스 | 테스트 | 상태 |
 | --- | --- | --- | --- |
