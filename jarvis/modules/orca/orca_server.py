@@ -1459,6 +1459,7 @@ def issue_pairing_offer(cli, server_profile, address, scope, timeout=45, port=67
             for line in process.stdout:
                 lines.put(line)
         finally:
+            process.stdout.close()
             lines.put(None)
 
     threading.Thread(target=read_output, daemon=True).start()

@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 
-from . import module, orca_install, orca_rpc, orca_serve, orca_update
+from . import module, orca_install, orca_pairing, orca_rpc, orca_serve, orca_update
 from .util import run
 
 TOOLS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modules", "orca")
@@ -54,7 +54,7 @@ def _save_server(record):
 
 
 def _server_tools():
-    """modules/orca/orca_server.py(페어링 주소 찾기). orca.py 와 같은 방법으로 형제 모듈을 읽는다."""
+    """이식한 페어링 워커. orca.py와 같은 방법으로 형제 모듈을 읽는다."""
     tools()
     if TOOLS not in sys.path:
         sys.path.insert(0, TOOLS)
@@ -138,21 +138,58 @@ def _linger_steps():
 
 
 def _server_steps(cli):
-    """POSIX 서버 서비스: 기록이 없을 때만 판정한다. 같은 형태면 받아들이고(파일은 그대로), 없으면 새로 쓰고, 다르면 막는다."""
+    """POSIX 페어링·서비스 계획. 기존 연결을 받아들이고 중단된 구성을 재개하며, 실행 중 서버는 보존한다."""
     record = _receipt().get("tool_installs", {}).get("orca_server")
-    if isinstance(record, dict) and record.get("state") == "configuring" and record.get("service_digest"):
-        return [{"id": "server", "summary": "작성한 Orca 서버 서비스의 활성화를 이어서 함", "risk": "config",
-                 "argv": orca_serve.activate_argv()[-1]}], []
-    if record:
+    # 형식을 모르는 기록도 다른 도구의 기록처럼 둔다(건드리지 않는다)
+    if record and not (isinstance(record, dict) and (record.get('service_digest') or record.get('adopted')
+                                                      or record.get('pairing_owner') == orca_pairing.OWNER)):
         return [], []
+    resume = bool(record and record.get('state') == 'configuring' and record.get('service_digest'))
     shape, why = orca_serve.form(cli, orca_serve.default_profile())
-    if shape == "same":
-        return [{"id": "server", "summary": "기존 Orca 서버 서비스를 받아들여 기록(파일·실행 중인 서버는 바꾸지 않음)",
-                 "risk": "update", "argv": None}], []
-    if shape == "different":
+    if shape == 'different' and not resume:
         return [], [{"step": "server", "reason": why}]
-    return [{"id": "server", "summary": "Orca 서버 서비스 작성(serve --supervise, 로그인 셸의 PATH·SHELL)", "risk": "config",
-             "argv": orca_serve.activate_argv()[-1]}] + _linger_steps(), []
+    profiles = _server_tools().profile_paths(sys.platform, tools().home_dir())
+    try:
+        state = orca_pairing.inspect(profiles['server'], profiles['client'], record)
+    except (RuntimeError, OSError) as e:
+        return [], [{'step': 'pairing', 'reason': str(e)}]
+    steps, blocked = [], []
+    needs_pairing = not state['environment_id'] or bool(record and record.get('state') == 'pairing')
+    if needs_pairing:
+        step = {'id': 'pairing', 'summary': '데스크톱 클라이언트에 이 서버 등록(임시 서버·중단 복구 기록)',
+                'risk': 'config', 'argv': None, 'pairing_state': state['fingerprint']}
+        steps.append(step)
+        try:
+            step['address'] = orca_pairing.tailnet_address(_server_tools().discover_pairing_address())
+            pending = record and record.get('state') == 'pairing' and 'client_environment_ids_before_pairing' in record
+            if (not state['environment_id'] or pending) and _server_tools().runtime_is_active(profiles['server']):
+                blocked.append({'step': 'pairing', 'reason': '실행 중인 서버를 멈춰야 페어링할 수 있습니다. 기존 서버는 바꾸지 않습니다'})
+        except RuntimeError as e:
+            blocked.append({'step': 'pairing', 'reason': str(e)})
+    if shape == 'same' and not resume:
+        if not record or needs_pairing:
+            # 적용(_server)은 우리가 만든 서비스면 파일을 검증하고 활성화·접속 확인을 재개한다. 계획도 그 일을 그대로 보인다
+            owned = bool(record and record.get('service_digest') and os.path.lexists(orca_serve.service_path()))
+            steps.append({'id': 'server', 'pairing_state': state['fingerprint'], **(
+                {'summary': '소유 Orca 서버 서비스 다시 활성화(파일은 검증만)·데스크톱 연결 확인', 'risk': 'config',
+                 'argv': orca_serve.activate_argv()[-1]} if owned else
+                {'summary': '기존 Orca 서버 서비스를 받아들여 기록(파일·실행 중인 서버는 바꾸지 않음)', 'risk': 'update', 'argv': None})})
+    elif shape == 'missing' or resume:
+        server_step = {'id': 'server', 'summary': 'Orca 서버 서비스 작성·활성화(serve --supervise, 데스크톱 연결 확인)',
+                       'risk': 'config', 'argv': orca_serve.activate_argv()[-1], 'pairing_state': state['fingerprint']}
+        steps.append(server_step)
+        if shape == 'missing':
+            try:
+                server_step['address'] = orca_pairing.tailnet_address(_server_tools().discover_pairing_address())
+            except RuntimeError as e:
+                blocked.append({'step': 'server', 'reason': str(e)})
+        if not resume:
+            steps += _linger_steps()
+    if blocked:
+        blocked_ids = {b['step'] for b in blocked}
+        blocked += [{'step': s['id'], 'reason': '데스크톱 페어링이 막혀 서버 구성을 진행하지 않습니다'}
+                    for s in steps if s['id'] not in blocked_ids]
+    return steps, blocked
 
 
 def _step(step, result, message=""):
@@ -180,27 +217,47 @@ def _skills():
 
 
 def _install(target):
-    """옮긴 설치기로 패키지·스킬(Windows 는 S4U 서버까지)을 목표 버전에 묶어 설치한다. POSIX 서버는 server 단계가 따로 한다."""
+    """옮긴 설치기로 패키지·스킬(Windows는 S4U 서버까지)을 목표 버전에 묶어 설치한다. POSIX 페어링·서비스는 별도 단계다."""
     argv = ["--expect-version", target] + (["--no-server"] if sys.platform != "win32" else [])
     return ("ok", "") if tools().main(argv) == 0 else ("failed", "Orca 설치 실패(표준 오류의 진행 로그를 보십시오)")
 
 
-def _server(cli):
+def _pair(cli, address):
+    profiles = _server_tools().profile_paths(sys.platform, tools().home_dir())
+    record = _receipt().get('tool_installs', {}).get('orca_server') or {}
+    record = {**record, 'state': 'pairing', 'pairing_owner': orca_pairing.OWNER,
+              'cli': cli, 'server_profile': str(profiles['server']), 'client_profile': str(profiles['client']),
+              'service_path': orca_serve.service_path(), 'pairing_address': address}
+    orca_pairing.pair(cli, record, _server_tools(), _save_server)
+    return 'ok', '데스크톱 서버 연결을 등록·확인했습니다'
+
+
+def _server(cli, address=None):
     record = _receipt().get("tool_installs", {}).get("orca_server")
-    if isinstance(record, dict) and record.get("state") == "configuring" and record.get("service_digest"):
-        orca_serve.write(cli, None, None, None, _save_server, record=record)
-        return "ok", "활성화를 이어서 마쳤습니다"
-    if record:  # 예전 ai-setup 기록(service_root·환경 ID)을 덮어쓰면 uninstall 이 그 서버를 더는 정리하지 못한다
+    if record and not (isinstance(record, dict) and (record.get('pairing_owner') == orca_pairing.OWNER
+                                                      or record.get('service_digest') or record.get('adopted'))):
         return "failed", "영수증에 다른 Orca 서버 기록이 있어 덮어쓰지 않습니다"
     profile = orca_serve.default_profile()
+    profiles = _server_tools().profile_paths(sys.platform, tools().home_dir())
+    state = orca_pairing.inspect(profiles['server'], profiles['client'], record)
+    if not state['environment_id']:
+        return 'failed', '이 서버의 데스크톱 연결이 없습니다. 페어링 계획을 먼저 적용하십시오'
+    record = {**(record or {}), 'client_profile': str(profiles['client']), 'desktop_environment_id': state['environment_id']}
+    ready = lambda: _server_tools().wait_for_remote_environment(cli, record['client_profile'], record['desktop_environment_id'])
+    if record.get('service_digest') and os.path.lexists(orca_serve.service_path()):
+        # 페어링을 더한 기존 소유 서비스도 그대로 우리 소유다. 기존 파일을 검증하고 활성화·접속 확인만 재개한다.
+        orca_serve.write(cli, None, None, None, _save_server, record={**record, 'state': 'configuring'}, on_ready=ready)
+        return 'ok', '활성화와 데스크톱 연결 확인을 이어서 마쳤습니다'
     shape, why = orca_serve.form(cli, profile)
     if shape == "same":
-        _save_server(orca_serve.adopted_record(cli, profile))
+        _save_server({**record, **orca_serve.adopted_record(cli, profile)})
         return "ok", "기존 서비스를 받아들였습니다(파일은 그대로)"
     if shape == "different":
         return "failed", why
-    address = _server_tools().discover_pairing_address()  # Tailscale IPv4 만(루프백·LAN 은 받지 않는다)
-    orca_serve.write(cli, address, profile, orca_serve.login_env(), _save_server)
+    if _server_tools().runtime_is_active(profile):
+        return 'failed', '이 프로필의 서버가 이미 실행 중이어서 새 서비스를 시작하지 않습니다'
+    address = orca_pairing.tailnet_address(address or _server_tools().discover_pairing_address())
+    orca_serve.write(cli, address, profile, orca_serve.login_env(), _save_server, record=record, on_ready=ready)
     return "ok", "serve --supervise 서비스를 쓰고 띄웠습니다"
 
 
@@ -221,11 +278,14 @@ def apply(plan_id):
     if current["plan_id"] != plan_id:
         return {"status": "stale", "plan_id": current["plan_id"], "steps": []}
     if not current["steps"]:
-        return {"status": "current", "steps": []}
+        return {"status": "failed" if current['blocked'] else "current", "steps": [
+            {'id': b['step'], 'result': 'skipped', 'message': b['reason']} for b in current['blocked']]}
     blocked = {b["step"]: b["reason"] for b in current["blocked"]}
     target = next((s["target"] for s in current["steps"] if s["id"] == "package"), None)
     cli = orca_install.profile()["cli"]
-    results, done = [], set()
+    step_ids = {s['id'] for s in current['steps']}
+    results = [_step({'id': name}, 'skipped', reason) for name, reason in blocked.items() if name not in step_ids]
+    done = set()
     for step in current["steps"]:
         if step["id"] in done:
             continue
@@ -242,8 +302,10 @@ def apply(plan_id):
                 done |= {"package", "skills"}
             elif step["id"] == "skills":
                 result, message = _skills()
+            elif step['id'] == 'pairing':
+                result, message = _pair(cli, step['address'])
             elif step["id"] == "server":
-                result, message = _server(cli)
+                result, message = _server(cli, address=step['address']) if 'address' in step else _server(cli)
             elif step["id"] == "linger":
                 result, message = _linger(step)
             else:
@@ -285,6 +347,9 @@ def uninstall(dry_run=False, plan_id=None):
         raise RuntimeError("중단된 Orca 설치 시도가 영수증에 남아 있습니다. 설치 상태를 확인한 뒤 다시 하십시오")
     steps = []
     server = receipt.get("tool_installs", {}).get("orca_server")
+    if isinstance(server, dict) and server.get('pairing_owner') == orca_pairing.OWNER and not (server.get('service_digest') or server.get('adopted')):
+        return {'status': 'deferred', 'plan_id': sealed['plan_id'], 'steps': [
+            {'id': 'pairing', 'result': 'skipped', 'message': '미완료 페어링 기록을 보존했습니다. 서버 구성을 재개한 뒤 제거하십시오'}]}
     if isinstance(server, dict) and (server.get("adopted") or server.get("service_digest")):  # Linux·macOS 의 새 형태
         outcome = orca_serve.remove(server, dry_run)
         if outcome == "changed":

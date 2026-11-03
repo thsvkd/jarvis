@@ -37,6 +37,13 @@ class Fixture(unittest.TestCase):
                                                                          "pairing_codes_path": "/secret/pairing-codes.txt",
                                                                          "desktop_environment_id": "env-1"}},
                                        "hooks": {"keep": True}}))
+        # 이 픽스처는 이미 서버에 페어링된 설치다. 신규 설치·페어링 중단은 별도 통합 테스트가 맡는다.
+        server, client = (self.home / '.config' / n for n in ('orca', 'orca-desktop'))
+        server.mkdir(parents=True)
+        client.mkdir()
+        (server / 'orca-e2ee-keypair.json').write_text(json.dumps({'publicKeyB64': 'fixture-key'}))
+        (client / 'orca-environments.json').write_text(json.dumps({'version': 1, 'environments': [{
+            'id': 'env-1', 'name': 'fixture', 'endpoints': [{'publicKeyB64': 'fixture-key', 'deviceToken': 'fixture-token'}]}]}))
         state = self.home / "state"  # jarvis 상태 폴더도 비교 대상이다(실제 ~/.local/state/jarvis 대신)
         state.mkdir()
         (state / "orca-skills-version").write_text("1.4.240")  # 번들 스킬은 지금 설치본의 판으로 맞춰져 있다
@@ -53,6 +60,8 @@ class Fixture(unittest.TestCase):
             mock.patch.object(orca_module.orca_rpc, "call", lambda method, *a, **k: {"appVersion": "1.4.240"}),
             mock.patch.object(orca_module.orca_serve, "form", lambda cli, profile, plat=None: ("same", None)),
             mock.patch.object(orca_module.orca_serve, "linger", lambda: True),
+            mock.patch.object(orca_module._server_tools(), 'runtime_is_active', lambda profile: False),
+            mock.patch.object(orca_module._server_tools(), 'discover_pairing_address', lambda: '100.64.0.5'),
             mock.patch.object(orca_module.sys, "platform", "linux"),
         ]
         for p in patches:

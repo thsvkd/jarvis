@@ -153,6 +153,7 @@ jarvis `docs/TEST_SPEC.md` 에 옮길 후보다. 출처의 AI-n은 ai-setup TEST
 | O11 | 닫힘(K4): Windows 는 S4U 하나로 통일하고 jarvis 의 windows-user 갱신 코드를 지웠다. |
 | O8b | 지금 jarvis 기기에는 스킬 소유 기록이 없다. ORCA-8 을 그대로 적용하면, 갱신해도 번들 스킬이 옛 판에 머문다(예전의 `--all` 보다 퇴행). 받아들일 때 지금 판의 사본과 내용이 같은지로 소유를 판정하는 방법은 쓸 수 없다. pi5-server2 의 orca-cli·orchestration 이 `orca skills get` 출력과 달랐다. (A) 엄격한 ORCA-8: 갱신하지 않고 status 에 알린다. (B) 받아들일 때 번들 목록에 이름이 있는 스킬을 `skills_adopted` 로 기록하고, 예전처럼 갱신하되 uninstall 은 지우지 않는다. 추천은 B 였다. **닫힘(K2)**: `--all` 로 정해져 소유 기록이 없어도 갱신하므로 이 문제가 없어졌다. |
 | O12 | 영수증 동시 쓰기(jarvis 갱신과 다른 셋업이 동시에 도는 경우)에는 잠금이 없다. |
+| O13 | POSIX 페어링(ai-setup 에서 옮긴 `orca_server.py`)은 `environment add ... --pairing-code <코드>` 로 코드를 argv 에 넣는다. 최대 60초 동안 같은 기기의 다른 로컬 계정이 `ps`·`/proc/<pid>/cmdline` 으로 읽을 수 있고, 그동안 임시 서버는 모든 인터페이스에서 듣는다. Orca CLI(`src/cli/handlers/environment.ts`)가 표준 입력이나 환경 변수로 코드를 받는지 확인해 바꾸거나, 위험을 받아들인다고 기록해야 한다(2026-11-03 보안 검토 M2). |
 
 ## 7. 사용자 확인 목록 (2026-10-30 아침)
 
@@ -179,6 +180,8 @@ jarvis `docs/TEST_SPEC.md` 에 옮길 후보다. 출처의 AI-n은 ai-setup TEST
 ## 8. 진행 기록
 
 두 세션이 함께 쓴다. 한 줄에 한 항목씩, 시각과 세션 이름을 붙인다.
+
+- 2026-11-02 Codex: POSIX 신규 설치의 데스크톱 페어링(P1)을 계약 층에 연결했다. 명시적인 pairing 계획·서버 키 기반 기존 연결 수용·등록 직후 중단 복구·서비스 활성화 뒤 접속 확인을 구현하고, 임시 서버가 남으면 완료로 보고하지 않는다. 서비스 소유와 기존 사용자 프로필을 보존한다. 신규 격리 테스트 25건, 전체 unittest 1,186건 OK(skip 11), 공용 JS OK, 변이 5종 탐지. 실제 OS 서비스·페어링·새 Mac/Windows 전체 설치·배포는 미검증이다. 상세 계획·검증은 `docs/superpowers/plans/2026-11-02-posix-orca-pairing.md`. 확정 TEST_SPEC의 상태 문구는 승인 없이 바꾸지 않았다.
 
 - 2026-10-30 ai-setup-49: 초안을 작성하고 jarvis-a3 의 검토 의견 R1~R11 을 반영했다. ai-setup 쪽에서는 AI-65 문서를 850a025 로 push 했다(사용자가 자율 진행을 지시하기 전에 승인한 항목이다). R4 참고 구현은 ai-setup 로컬 브랜치 `wip/orca-skill-update` 에 있다.
 - 2026-10-30 jarvis-a3: SSoT 골격 초안을 만들었다(`AGENTS.md`, `CLAUDE.md`, `docs/README.md`·`PRD.md`·`SPEC.md`·`TEST_SPEC.md`, 모두 draft). 4절 계약은 `SPEC.md` 로 옮겼고, 승인 뒤 4절은 SPEC 을 가리키게 줄이기를 제안한다. `plan_id` 불일치 케이스를 ORCA-13 으로 제안했다.

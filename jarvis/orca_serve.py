@@ -128,10 +128,10 @@ def activate_argv(plat=None):
     return [["systemctl", "--user", "daemon-reload"], ["systemctl", "--user", "enable", "--now", "orca-serve"]]
 
 
-def write(cli, address, profile, env, on_record, plat=None, record=None):
+def write(cli, address, profile, env, on_record, plat=None, record=None, on_ready=None):
     """새 서비스 파일을 쓰고 띄운다. 이미 파일이 있으면 덮어쓰지 않는다.
     띄우기 전에 configuring 기록을 on_record 로 남긴다: 활성화가 실패해도 다음 실행이 우리 파일(다이제스트가 같은)을
-    알아보고 활성화만 이어서 한다(record 로 그 기록을 넘긴다). 성공하면 configured 기록을 남긴다."""
+    알아보고 활성화를 이어서 한다(record로 그 기록을 넘긴다). on_ready의 접속 확인까지 성공하면 configured를 기록한다."""
     path = service_path(plat)
     resume = bool(record and record.get("state") == "configuring" and record.get("service_path") == path
                   and os.path.isfile(path) and not os.path.islink(path) and _digest(path) == record.get("service_digest"))
@@ -148,14 +148,20 @@ def write(cli, address, profile, env, on_record, plat=None, record=None):
         finally:
             if os.path.exists(tmp):
                 os.remove(tmp)
-        record = {"state": "configuring", "cli": cli, "server_profile": str(profile),
+        record = {**{k: v for k, v in (record or {}).items() if k != 'adopted'},
+                  "state": "configuring", "cli": cli, "server_profile": str(profile),
                   "service_manager": "launchd" if (plat or sys.platform) == "darwin" else "systemd-user",
                   "service_path": path, "service_digest": hashlib.sha256(text.encode()).hexdigest()}
         on_record(record)
-    for argv in activate_argv(plat):
-        rc, out, err = run(argv, timeout=60)
-        if rc:
-            raise RuntimeError(f"{shlex.join(argv)} 실패: {(err or out).strip()[:200]}")
+    # 활성화는 끝났지만 접속 확인에서 중단되었으면 적재된 서비스를 다시 bootstrap하지 않는다.
+    loaded = (plat or sys.platform) == 'darwin' and resume and form(cli, record['server_profile'], plat)[0] == 'same'
+    if not loaded:
+        for argv in activate_argv(plat):
+            rc, out, err = run(argv, timeout=60)
+            if rc:
+                raise RuntimeError(f"{shlex.join(argv)} 실패: {(err or out).strip()[:200]}")
+    if on_ready:
+        on_ready()
     record = {**record, "state": "configured"}
     on_record(record)
     return record

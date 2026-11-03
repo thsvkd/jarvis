@@ -31,6 +31,9 @@ class Base(unittest.TestCase):
         for p in (home, run):
             p.start()
             self.addCleanup(p.stop)
+        manager = mock.patch.object(orca_serve.orca_issue, 'manager', lambda pairing=True: None)
+        manager.start()
+        self.addCleanup(manager.stop)
         os.environ.pop("XDG_CONFIG_HOME", None)  # patch.dict 가 끝나면 되돌린다
 
     def manager(self, argv, env=None):
