@@ -97,6 +97,11 @@ def read():
                 fetched = None
             email = provider_usage._email(ident)
             has_usage = bool(windows or buckets)
+            # hswap 이 갱신 토큰을 죽었다고 본 슬롯(AUTH_DEAD_STRIKES=1)은 다시 읽지 않는다. 남은 값은 격리 전의 것이다.
+            # 새 자격으로 고쳐지면 hswap 이 이 기록을 지운다(harness-swap src/claude_swap/usage_store.py token_dead)
+            strikes = row.get("authDeadStrikes") if valid else None
+            dead = isinstance(strikes, int) and strikes >= 1
+            note = cswap_usage.STATUS["relogin_required"][0] if dead else None
             # 화면은 이메일+조직 이름으로 같은 계정을 묶는다. Orca 경로와 같은 규칙으로 개인 조직("<email>'s Organization")은 None.
             # 조직 UUID 는 내보내지 않는다
             org = ident.get("organizationName")
@@ -106,7 +111,8 @@ def read():
             active = live is not None and (ident.get("email"), ident.get("organizationUuid", "")) == live
             result.append({"label": email, "org": org, "active": active, "slot": str(number),
                            "status": "ok" if has_usage else "error",
-                           "error": None if has_usage else "저장된 사용량이 없습니다.", "note": None, "attention": False,
+                           "error": None if has_usage else note or "저장된 사용량이 없습니다.",
+                           "note": note if has_usage else None, "attention": dead,
                            "failure": None, "plan": None, "updated_at": fetched, "windows": windows, "buckets": buckets,
                            "extra": None, "credits": None, "source": "cswap-cache"})
         return {"accounts": result} if result else None

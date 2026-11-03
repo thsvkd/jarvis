@@ -24,7 +24,8 @@ SWITCH_TIMEOUT_S = 30  # switch 는 현재 로그인을 백업하고 macOS 는 K
 # usageStatus → (화면 문구, 사람이 손봐야 하는가). ok·api_key·unavailable 은 따로 다룬다
 STATUS = {
     "token_expired": ("토큰 갱신을 기다리는 중입니다(hswap 이 다시 시도합니다).", False),
-    "relogin_required": ("다시 로그인해야 합니다(hswap).", True),
+    # hswap 은 죽은 갱신 토큰을 슬롯 백업 기준으로 격리한다. Claude Code 에서 다시 로그인만 하면 격리가 남는다
+    "relogin_required": ("다시 로그인해야 합니다: 그 계정으로 Claude Code 에서 /login 한 뒤 hswap claude add 를 실행하세요.", True),
     "keychain_unavailable": ("Keychain 을 읽지 못했습니다.", True),
     "foreign_credential": ("지금 로그인이 다른 계정입니다. hswap claude switch 로 맞추세요.", True),
     "no_credentials": ("자격 증명이 없습니다.", True),

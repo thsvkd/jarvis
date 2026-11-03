@@ -24,8 +24,12 @@
  // ---------------------------------------------------------------- 값
  const pct=n=>n==null?"–":Math.round(n)+"%";
  const tone=p=>p==null?"muted":p>=90?"crit":p>=75?"warn":"ok";
+ // 리셋 시각이 지난 창의 값은 지난 기간의 것이다(그 뒤로 읽지 못했다). 지금 값처럼 보이지 않게 비운다
+ const gone=w=>!!w.resets_at&&w.resets_at*1000<=Date.now();
+ const cur=w=>gone(w)?null:w.used;
  const left=ts=>{
   if(!ts)return "리셋 시각 모름";
+  if(gone({resets_at:ts}))return "리셋됨";
   const m=Math.max(0,Math.round((ts*1000-Date.now())/60000));
   return (m<60?m+"분":m<1440?Math.floor(m/60)+"시간 "+m%60+"분":Math.floor(m/1440)+"일 "+Math.floor(m%1440/60)+"시간")+" 후";
  };
@@ -40,7 +44,7 @@
   ["server","프로바이더 오류","프로바이더 서버가 오류를 냈습니다. 잠시 뒤 새로고침하세요.",/\b5\d\d\b|server error|unavailable|bad gateway/i],
  ];
  const kind=a=>{const t=(a.failure||"")+" "+(a.error||"");return KINDS.find(k=>k[3].test(t))||["unknown","알 수 없는 오류","사용량을 읽지 못했습니다.",null];};
- const peak=a=>{const v=[...a.windows,...a.buckets].map(w=>w.used);return isErr(a)||!v.length?null:Math.max(...v);};
+ const peak=a=>{const v=[...a.windows,...a.buckets].map(cur).filter(u=>u!=null);return isErr(a)||!v.length?null:Math.max(...v);};
  const isHot=a=>isErr(a)||a.attention===true||(peak(a)??0)>=75; // attention: 재로그인 등 사람이 손봐야 다시 읽힌다
  // 같은 구독 계정(이메일·조직)은 어느 기기에서 보든 한도가 같다. 이메일이 없는 '기본 계정'은 기기마다 따로 센다.
  const keyOf=(d,p,a,index)=>p.id+":"+(a.label.includes("@")?a.label.toLowerCase()+"\n"+(a.org||""):d.id+":"+index);
@@ -88,7 +92,7 @@
  const dot=id=>html`<i class="ul-dot" data-p="${id}" aria-hidden="true"></i>`;
  const meter=u=>html`<div class="meter" data-tone="${tone(u)}"><i style="${"--v:"+u/100}"></i></div>`;
  // Claude(hswap) 는 창이 아직 시작되지 않았을 때(그 기간에 쓰지 않음) 리셋 시각을 비워 둔다. 다른 프로바이더는 정말 모르는 것이다
- const win=(w,a)=>html`<div class="ul-win"><span class="ul-wl">${WIN[w.key]||w.key}</span>${meter(w.used)}<b class="ul-wp" data-tone="${tone(w.used)}">${pct(w.used)}</b><span class="ul-wr" title="${at(w.resets_at)}">${!w.resets_at&&/^cswap/.test(a.source||"")?"사용 전":left(w.resets_at)}</span></div>`;
+ const win=(w,a,u=cur(w))=>html`<div class="ul-win"><span class="ul-wl">${WIN[w.key]||w.key}</span>${meter(u)}<b class="ul-wp" data-tone="${tone(u)}">${pct(u)}</b><span class="ul-wr" title="${at(w.resets_at)}">${!w.resets_at&&/^cswap/.test(a.source||"")?"사용 전":left(w.resets_at)}</span></div>`;
  function extra(e){
   if(!e)return "";
   if(e.unit==="currency")return html`<p class="ul-extra">추가 사용량 ${e.currency==="USD"?"$":""}${e.spent??"–"}${e.limit!=null?" / "+(e.currency==="USD"?"$":"")+e.limit:""}${e.currency&&e.currency!=="USD"?" "+e.currency:""} · ${e.enabled?"켜짐":"꺼짐"+(e.reason?"("+(REASON[e.reason]||e.reason)+")":"")}</p>`;
@@ -101,7 +105,7 @@
   if(!a.windows.length&&!a.buckets.length)return note||html`<p class="ul-muted">${a.status==="fetching"?"사용량을 읽는 중입니다.":"아직 사용량을 읽지 않았습니다."}</p>`;
   // Claude(hswap) 는 2026-10-30 요금제 개편 뒤 계정에 따라 5시간 창이 없다(인증된 Ultra). 읽지 못한 것과 구분해 적는다
   const no5h=/^cswap/.test(a.source||"")&&a.windows.some(w=>w.key==="weekly")&&!a.windows.some(w=>w.key==="session");
-  return html`${note}<div class="ul-wins">${a.windows.map(w=>win(w,a))}</div>${no5h?html`<p class="ul-extra">5시간 한도 없음 · 주간 한도만 적용</p>`:""}${a.buckets.length?html`<p class="ul-extra">세부 한도 · ${a.buckets.map((b,i)=>html`${i?" · ":""}${b.name} <b>${pct(b.used)}</b>`)}</p>`:""}${extra(a.extra)}${a.credits?html`<p class="ul-extra">한도 리셋 크레딧 ${a.credits}개</p>`:""}`;
+  return html`${note}<div class="ul-wins">${a.windows.map(w=>win(w,a))}</div>${no5h?html`<p class="ul-extra">5시간 한도 없음 · 주간 한도만 적용</p>`:""}${a.buckets.length?html`<p class="ul-extra">세부 한도 · ${a.buckets.map((b,i)=>html`${i?" · ":""}${b.name} <b>${pct(cur(b))}</b>`)}</p>`:""}${extra(a.extra)}${a.credits?html`<p class="ul-extra">한도 리셋 크레딧 ${a.credits}개</p>`:""}`;
  }
  const head=a=>html`<div class="ul-ah"><b class="ul-email">${a.label}</b>${a.plan?html`<span class="ul-plan">${a.plan}</span>`:""}${a.org?html`<span class="ul-plan">${a.org}</span>`:""}${a.active?html`<span class="badge" data-tone="info">사용 중</span>`:""}${isErr(a)||a.attention?html`<span class="badge" data-tone="crit">${isErr(a)?kind(a)[1]:"조치 필요"}</span>`:""}</div>`;
  const relog=(d,id,again=true)=>html`<button type="button" class="seg-action" data-login="${d.id}" data-lp="${id}">${LOGIN[id]} ${again?"다시 로그인":"로그인"}</button>`;
@@ -121,7 +125,7 @@
  function view(){
   const all=uniq(),hot=all.filter(x=>isHot(x.a));
   const bad=S.devs.filter(failed);
-  const wins=all.flatMap(({a,p})=>isErr(a)?[]:a.windows.filter(w=>w.used>=50&&w.resets_at).map(w=>({a,p,w}))).sort((x,y)=>x.w.resets_at-y.w.resets_at);
+  const wins=all.flatMap(({a,p})=>isErr(a)?[]:a.windows.filter(w=>cur(w)>=50&&w.resets_at).map(w=>({a,p,w}))).sort((x,y)=>x.w.resets_at-y.w.resets_at);
   const next=wins.find(o=>o.w.used>=75);
   const kpi=html`<div class="bento"><div class="tile span-4 m-3 ul-kpi" data-tone="${hot.length?"warn":"ok"}"><span class="ul-wl">주의 필요 계정</span><b>${hot.length}</b><span class="ul-muted">75% 이상 또는 확인 실패 · 같은 계정은 한 번</span></div><div class="tile span-4 m-3 ul-kpi"><span class="ul-wl">다음 리셋(주의 계정)</span><b class="ul-kpi-s">${next?left(next.w.resets_at):"–"}</b><span class="ul-muted">${next?next.a.label+" · "+next.p.name+" "+(WIN[next.w.key]||next.w.key):"주의 계정 없음"}</span></div><div class="tile span-4 m-6 ul-kpi" data-tone="${bad.length?"crit":"ok"}"><span class="ul-wl">읽지 못한 기기</span><b>${bad.length}</b><span class="ul-muted">${bad.map(d=>d.host||d.id).join(" · ")||"없음"}</span></div></div>`;
   const soon=wins.length?html`<div class="tile ul-soon"><h3 class="sub-h">곧 풀리는 한도 (50% 이상)</h3><ol>${wins.slice(0,6).map(({a,p,w})=>html`<li><span class="ul-when" title="${at(w.resets_at)}">${left(w.resets_at)}</span>${dot(p.id)}<span class="ul-email">${a.label}</span><span class="ul-wl">${p.name} ${WIN[w.key]||w.key}</span>${meter(w.used)}<b class="ul-wp" data-tone="${tone(w.used)}">${pct(w.used)}</b></li>`)}</ol></div>`:"";

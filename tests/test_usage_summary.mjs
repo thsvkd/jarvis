@@ -1,4 +1,4 @@
-// covers: USAGE-1, USAGE-4. 실행: node tests/test_usage_summary.mjs
+// covers: USAGE-1, USAGE-3, USAGE-4. 실행: node tests/test_usage_summary.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
@@ -106,6 +106,17 @@ click({}, "ulHot");
 assert.doesNotMatch(rendered(), /data-lp="grok"/); // 주의 필터는 로그인 카드를 세지 않는다
 click({}, "ulHot");
 click({ prov: "all" });
+
+// 리셋 시각이 지난 창·세부 한도는 지난 기간의 값이다: 지금 값처럼 보이지 않고 주의·곧 풀리는 한도에 세지 않는다
+const hotBefore = element("ulHotN").textContent;
+devices[0].providers[0].accounts.push(account("stale@example.com", null, 86400, { source: "cswap-cache",
+  windows: [{ key: "weekly", used: 100, resets_at: now - 3600 }], buckets: [{ name: "모델별 한도 1", used: 100, resets_at: now - 3600 }] }));
+click({ prov: "all" });
+const stale = summary().match(/stale@example\.com[\s\S]*?ul-age/)?.[0] || "";
+assert.match(stale, /리셋됨/);
+assert.doesNotMatch(stale, /100%/);
+assert.doesNotMatch(rendered().match(/<div class="tile ul-soon">[\s\S]*?<\/ol>/)?.[0] || "", /stale@example\.com/);
+assert.equal(element("ulHotN").textContent, hotBefore);
 
 // 탭과 섹션은 사용량 모으기(기기마다 프로바이더를 불러 수십 초)를 기다리지 않고 core 확인(/api/devices)만으로 뜬다.
 // 셸이 core 로 기억한 탭이면(지도에서 넘어올 때) 어떤 응답보다 먼저 섹션을 연다

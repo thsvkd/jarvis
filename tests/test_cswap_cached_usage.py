@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from jarvis import cswap_cached_usage
+from jarvis import cswap_cached_usage, cswap_usage
 
 LIVE_IDENTITY = cswap_cached_usage._live_identity  # setUp 이 가짜로 바꾸기 전의 실제 함수
 
@@ -101,6 +101,26 @@ class CswapCachedTest(unittest.TestCase):
             self.assertEqual(live(), ("b@example.com", "o"))
             write(".config.json", "{broken")
             self.assertIsNone(live())
+
+    def test_quarantined_slot_says_why_its_value_is_old(self):
+        """covers: USAGE-3. hswap 이 갱신 토큰을 죽었다고 본 슬롯은 남은 값에 재로그인 안내를 붙이고 '조치 필요'로 센다"""
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(cswap_cached_usage, "_root", return_value=tmp):
+            os.mkdir(os.path.join(tmp, "cache"))
+            for name, body in (("sequence.json", {"sequence": [1, 2, 3], "accounts": {
+                    "1": {"email": "a@example.com"}, "2": {"email": "b@example.com"}, "3": {"email": "c@example.com"}}}),
+                    ("cache/usage.json", {"schemaVersion": 2, "accounts": {
+                        "1": {"email": "a@example.com", "authDeadStrikes": 1, "lastGood": {"seven_day": {"pct": 100}}},
+                        "2": {"email": "b@example.com", "authDeadStrikes": 1},
+                        "3": {"email": "c@example.com", "authDeadStrikes": 0, "lastGood": {"seven_day": {"pct": 5}}}}})):
+                p = os.path.join(tmp, name)
+                with open(p, "w", encoding="utf-8") as f:
+                    json.dump(body, f)
+                os.chmod(p, 0o600)
+            rows = cswap_cached_usage.read()["accounts"]
+        relogin = cswap_usage.STATUS["relogin_required"][0]
+        self.assertEqual((rows[0]["status"], rows[0]["note"], rows[0]["attention"]), ("ok", relogin, True))
+        self.assertEqual((rows[1]["status"], rows[1]["error"], rows[1]["attention"]), ("error", relogin, True))
+        self.assertEqual((rows[2]["note"], rows[2]["attention"]), (None, False))
 
     def test_missing_cache_does_not_invent_usage(self):
         """covers: USAGE-3"""
