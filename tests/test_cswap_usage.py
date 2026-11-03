@@ -28,7 +28,9 @@ def proc(body, rc=0):
 
 class AccountTest(unittest.TestCase):
     def test_rows(self):
-        me, work, old, gone, key = [cswap_usage.account(r) for r in ROWS["accounts"]]
+        # 픽스처를 받은 시점(usageFetchedAt)에 시계를 고정한다: 실제 시계면 loginExpiresAt 3일 전부터 만료 경고가 붙는다
+        with mock.patch.object(cswap_usage.time, "time", return_value=cswap_usage.parse_iso("2026-10-27T16:00:02Z")):
+            me, work, old, gone, key = [cswap_usage.account(r) for r in ROWS["accounts"]]
         self.assertEqual((me["label"], me["active"], me["status"], me["note"], me["attention"]),
                          ("me@example.com", True, "ok", None, False))
         self.assertEqual([(w["key"], w["used"]) for w in me["windows"]], [("session", 31), ("weekly", 12), ("fable", 0)])
