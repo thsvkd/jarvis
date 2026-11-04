@@ -142,6 +142,16 @@ class Common(unittest.TestCase):
             self.assertEqual(set(r), {"proto", "addr", "port", "process", "pid"})
             self.assertIn(r["proto"], ("tcp", "udp"))
 
+    def test_cpu_freq_system_error(self):
+        """psutil 7.2 의 cpu_freq 가 Apple M6(macOS 27)에서 SystemError 를 던져도 게이트웨이가 뜬다."""
+        from unittest import mock
+        from jarvis import system
+        from jarvis.platform import common
+        with mock.patch("psutil.cpu_freq", side_effect=SystemError("boom")):
+            self.assertEqual(common.cpu_freqs(), [])
+            st = system.SystemCollector._static(mock.Mock())
+        self.assertIsNone(st["cpu_max_mhz"])
+
     def test_disk_mount_tmpfs(self):
         """ebf8aff: /tmp 가 tmpfs 면 디스크 목록에 넣고, 다른 tmpfs 는 뺀다."""
         from jarvis.platform import common

@@ -30,7 +30,7 @@ def cpu_freqs():
     """코어별 현재 클럭(MHz)."""
     try:
         return [round(f.current) for f in psutil.cpu_freq(percpu=True) or [] if f.current]
-    except (NotImplementedError, OSError):
+    except (NotImplementedError, OSError, SystemError):  # SystemError: psutil 7.2 가 Apple M6(macOS 27)에서 던진다
         return []
 
 

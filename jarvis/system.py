@@ -136,7 +136,7 @@ class SystemCollector:
         u = os.uname() if hasattr(os, "uname") else _stdplatform.uname()
         try:
             f = psutil.cpu_freq()
-        except (NotImplementedError, OSError, FileNotFoundError):
+        except (NotImplementedError, OSError, SystemError):  # SystemError: psutil 7.2 가 Apple M6(macOS 27)에서 던진다
             f = None
         hw = rpi.static()
         return {
