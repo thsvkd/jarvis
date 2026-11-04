@@ -76,7 +76,7 @@
   const [tone,state]=!d.reachable?["crit",d.ok_at?"응답 없음":"접속 불가"]:[d.status||"ok",{ok:"정상",warn:"주의",crit:"심각"}[d.status]||"정상"];
   const al=d.alerts||{};
   // 제목은 기기가 보고한 호스트명(수집 전이면 설정 id)
-  return html`<header class="tile-head"><h3 class="tile-title">${d.host||d.id}</h3><span class="badge" data-tone="${tone}">${state}</span><span class="tile-aside">${d.model||""}</span></header>
+  return html`<header class="tile-head"><h3 class="tile-title">${d.host||d.id}</h3><span class="badge" data-tone="${tone}">${state}</span><span class="tile-aside">${d.model||""}${String(d.url||"").startsWith("ssh:")?" · SSH 경유":""}</span></header>
 <p class="dev-stats">CPU ${fmt.pct(d.cpu_pct)} · 메모리 ${fmt.pct(d.mem_pct)} · 디스크 ${fmt.pct(d.disk_pct)} · 경보 ${al.crit??"–"}/${al.warn??"–"} · ${d.ok_at?fmt.ago(d.ok_at,now)+" 수집":"수집 전"}${d.version?html` · <span title="${d.commit?"커밋 "+d.commit:""}">jarvis v${d.version}</span>`:d.commit?" · jarvis "+d.commit:""}${d.error?" · "+d.error:""}</p>`;
  }
  function tile(d){

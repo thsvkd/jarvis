@@ -12,7 +12,7 @@
 | `POST /api/orca/issue?scope=desktop\|mobile` | 그 scope 의 Orca 기기가 하나도 없을 때(처음 한 번)만 Orca 를 잠시 내리고 serve 를 그 모드로 한 번 띄워 코드를 만든 뒤 다시 띄운다(Linux orca-serve 유닛 · macOS LaunchAgent · Windows 데스크톱 앱). 202 로 시작하고 진행은 `/api/orca` 의 `issue`, 발급 가능한 scope 는 `issuable`. 진행 중 409, 실패 뒤 15분 429 | 설정 `core` 만. 헤더 `X-Jarvis-Action: orca-issue` 필수(CSRF) |
 | `POST /api/orca/update` | Linux deb(`orca-ide`)만. 공식 릴리스가 더 새로우면 deb 를 받아 sha512 를 확인한 뒤 `orca-serve` 를 멈추고 `sudo -n apt install -y -- <deb>` 로 설치하고 다시 띄운다. 이어서 `orca-ide skills update --all`. 이미 최신이면 패키지는 건너뛰고 스킬만 갱신한다. 202 로 시작하고 진행은 `/api/orca` 의 `update`(`phase`: manifest·download·install·skills, `app`: current·updated, `from_version`, `to_version`). deb 가 아니거나 유닛이 없으면 409 | 설정 `core` 만. 헤더 `X-Jarvis-Action: orca-update` 필수 |
 | `GET /api/orca/update` | 읽기 전용 `{supported, installed, latest, current, error}`. 설치본과 공식 릴리스를 비교한다. 패키지를 받거나 서비스를 멈추지 않는다. `current` 는 설치본이 릴리스와 같거나 더 새로울 때. 지원하지 않으면 `supported:false` 와 이유 | 설정 `core` 의 tailnet IP 만. 캐시 없음 |
-| `GET /api/devices` | core 전용(설정 `devices`). 기기별 요약 `{generated_at, devices:[{id, url, reachable, ok_at, error, fails, host, version, status, alerts, services, model, cpu_pct, mem_pct, disk_pct}]}` | 10초마다 각 게이트웨이 `/api/snapshot` 을 pull. 게이트웨이(core 가 아닌 jarvis)는 404 |
+| `GET /api/devices` | core 전용(설정 `devices`). 기기별 요약 `{generated_at, devices:[{id, url, reachable, ok_at, error, fails, host, version, status, alerts, services, model, cpu_pct, mem_pct, disk_pct}]}` | 10초마다 각 게이트웨이 `/api/snapshot` 을 pull. 게이트웨이(core 가 아닌 jarvis)는 404. SSH 기기(설정 `{id, ssh}`)는 `url` 이 `ssh://<별칭>` 이고 `ssh -W` 로 받는다 |
 | `GET /api/devices/<id>/inbound` | core 전용. 다른 기기의 Caddy 라우트가 SSH 터널(그 기기 `ssh_tunnels`) 또는 tailnet 주소로 이 기기 포트에 닿는 길 `{generated_at, device, paths:[{from, host, public, via: "ssh"|"tailnet", port(ssh 일 때 출발 기기의 로컬 포트), to_port, service_id, guess, status}]}`. 기기는 각 스냅샷의 tailnet 이름·IP·설정 id·ssh 별칭으로 맞춘다. `guess`: 포트 주인이 OrbStack 같은 대리 프로세스라 주소 첫 칸과 이름이 맞는 컨테이너로 추정했다 | 스냅샷과 같다. 캐시 없음(요청마다 core 가 들고 있는 스냅샷을 맞댄다) |
 | `GET /api/devices/<id>/snapshot` · `/history?range=` · `/changes` | core 전용. 그 기기 응답 그대로. snapshot 은 마지막 성공본(없으면 503), 나머지는 요청 시 전달(실패 502) | |
 | `GET /api/devices/<id>/orca` | core 전용. 페어링 버튼: 그 기기 `/api/orca` 에 QR 행렬 `codes.*.qr`(행마다 `"0101…"`)과 `supported` 를 붙인다. 옛 게이트웨이(404)·core 미지정(403)은 `{supported:false, error}` | 설정 `viewers` 의 tailnet IP 만(루프백·LAN 포함 그 밖은 403). 설정 `proxies` 의 프록시를 거친 요청은 그 프록시가 붙인 X-Forwarded-For 마지막 항목으로 판정. 캐시 없음 |
@@ -21,6 +21,8 @@
 | `POST /api/devices/<id>/orca/update` | core 전용. 그 기기 Orca 업데이트. 게이트웨이 `POST /api/orca/update` 로 전달 | `viewers`. 헤더 `X-Jarvis-Action: orca-update` 필수 |
 | `POST /api/devices/orca/update` | core 전용. 목록의 기기마다 업데이트를 시작한다. `{devices:[{id, status, ...}]}`. 한 대 실패가 나머지를 멈추지 않는다 | `viewers`. 헤더 `X-Jarvis-Action: orca-update` 필수 |
 | `GET /api/changes` | 최근 구성 변경 최대 200건 `{changes:[...]}` | 10초. 30초마다 저장 및 종료 시 저장 |
+
+SSH 기기(`url` 이 `ssh://…`, `docs/SPEC.md` 의 "SSH 기기"): 모듈(`/api/devices/modules`·`plan`·`apply`)과 jarvis 업데이트는 HTTP 기기와 같은 응답 모양이다. 그 밖의 기기 조작(페어링·`orca/issue`·Orca 업데이트 확인·실행·사용량·로그인·계정 전환)은 ssh 를 실행하지 않고 501 `{error}`(페어링은 `{supported:false, error}`)다. 스냅샷 판이 1.7.8 미만이면 조작이 501, 스냅샷이 없거나 ssh·원격 실행이 실패하면 502, 그 기기에서 core 가 시작한 apply·갱신이 진행 중이면 409 다. history·changes 는 기기마다 동시에 4개까지이고 넘치면 502 다.
 
 클라이언트는 `/shared/jarvis.js` 의 `JARVIS.subscribe()` / `JARVIS.history()` 를 쓴다.
 시간은 전부 **epoch 초(float)**, 크기는 **바이트**, 속도는 **바이트/초**, 비율은 **0~100 퍼센트**다.

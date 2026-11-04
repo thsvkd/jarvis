@@ -17,6 +17,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 from . import config, module
+from .core import PRE, jarvis_line
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TTL = {"orca": 60, "doctor": 600, "hooks": 300, "setup": 300, "harness": 1800}  # status 캐시(초). doctor 는 하네스마다 --version 을,
@@ -37,6 +38,9 @@ _refresh_lock = threading.Lock()  # 뒤에서 도는 다시 점검은 하나만
 _plan_lock = threading.Lock()
 _job_lock = threading.Lock()
 job = {}  # 마지막 apply: {module, plan_id, state: running/finished/interrupted, started_at, finished_at, code, result}
+# core 의 SSH 기기 작업(_job_lock 으로 지킨다). running() 이 함께 보므로 SSH apply 중에는 core 자신의 갱신도 409 다
+ssh_jobs = {}  # 기기 id -> job 과 같은 모양
+ssh_updating = set()  # jarvis 갱신 중인 SSH 기기 id
 
 
 def run(*args, timeout):
@@ -64,7 +68,7 @@ def run(*args, timeout):
 
 def running():
     with _job_lock:
-        return job.get("state") == "running"
+        return job.get("state") == "running" or any(j.get("state") == "running" for j in ssh_jobs.values())
 
 
 def _busy():
@@ -87,16 +91,16 @@ def _write_mark(record):
     os.replace(tmp, MARK)
 
 
-def _stale(force=False):
+def _stale(force=False, cache=_cache):
     now = time.time()
-    return [n for n in module.MODULES if force or n not in _cache or now - _cache[n][0] > TTL.get(n, 60)]
+    return [n for n in module.MODULES if force or n not in cache or now - cache[n][0] > TTL.get(n, 60)]
 
 
-def _check(names):
+def _check(names, one=lambda n: run(n, "status", timeout=STATUS_TIMEOUT_S)):
     """{이름: (시각, 종료 코드, 응답)}. 모듈마다 하위 프로세스라 함께 돌린다. 차례로 돌리면 합이 core 의 기다림
     (STATUS_TIMEOUT_S + 10)을 넘는다."""
     with ThreadPoolExecutor(max_workers=max(1, len(names))) as pool:
-        return {n: (time.time(), *r) for n, r in zip(names, pool.map(lambda n: run(n, "status", timeout=STATUS_TIMEOUT_S), names))}
+        return {n: (time.time(), *r) for n, r in zip(names, pool.map(one, names))}
 
 
 def _refresh():
@@ -204,6 +208,10 @@ class CoreModules:
 
     def __init__(self, core):
         self.core = core
+        # SSH 기기마다 status 캐시. 규칙은 게이트웨이 status() 와 같다
+        # ponytail: 게이트웨이 status() 캐시와 같은 흐름을 기기마다 다시 쓴다. 합칠 필요가 생기면 상태 객체로 합친다
+        self._ssh = {i: {"cache": {}, "lock": threading.Lock(), "bg": threading.Lock()}
+                     for i, d in core.devices.items() if d.get("ssh")}
 
     def _url(self, i, path):
         return self.core.devices[i]["url"] + path
@@ -218,6 +226,8 @@ class CoreModules:
                 host = (self.core.state[i]["summary"] or {}).get("host")
             if err:  # 꺼진 기기는 묻지 않는다(기다리면 화면 전체가 늦는다)
                 code, body = 502, {"error": f"{i} 에 닿지 못했습니다: {err}"}
+            elif i in self._ssh:
+                code, body = self.core.ssh_gate(i) or self._ssh_status(i, force)
             else:
                 req = urllib.request.Request(self._url(i, "/api/modules" + ("?refresh=1" if force else "")),
                                              headers={"X-Jarvis-Action": "modules-refresh"} if force else {})
@@ -228,11 +238,85 @@ class CoreModules:
         with ThreadPoolExecutor(max_workers=max(1, min(16, len(ids)))) as pool:
             return {"generated_at": time.time(), "full": full, "devices": list(pool.map(one, ids))}
 
+    def _status_one(self, i):
+        return lambda n: self.core.ssh(i, PRE + jarvis_line("module", n, "status", "--json"), STATUS_TIMEOUT_S + 10)
+
+    def _ssh_status(self, i, force):
+        """SSH 기기의 GET /api/modules 몫. 처음과 강제만 기다리고, TTL 만 지났으면 지난 값을 주고 뒤에서 하나만 다시 읽는다."""
+        c = self._ssh[i]
+        with c["lock"]:
+            stale = _stale(force, c["cache"])
+            if force or any(n not in c["cache"] for n in stale):
+                c["cache"].update(_check(stale, self._status_one(i)))
+            elif stale and c["bg"].acquire(blocking=False):
+                threading.Thread(target=self._ssh_refresh, args=(i,), daemon=True, name="jarvis-ssh-status").start()
+            mods = {n: {**c["cache"][n][2], "checked_at": c["cache"][n][0], "ok": c["cache"][n][1] == 0} for n in module.MODULES}
+        with _job_lock:
+            j = ssh_jobs.get(i)
+            return 200, {"modules": mods, "job": dict(j) if j else None}
+
+    def _ssh_refresh(self, i):
+        c = self._ssh[i]
+        try:
+            with c["lock"]:
+                before = {n: c["cache"].get(n) for n in _stale(cache=c["cache"])}
+            fresh = _check(list(before), self._status_one(i)) if before else {}
+            with c["lock"]:  # 그사이 apply 가 지웠거나 강제 점검이 새로 쓴 항목은 덮지 않는다
+                c["cache"].update({n: v for n, v in fresh.items() if c["cache"].get(n) is before[n]})
+        finally:
+            c["bg"].release()
+
     def plan(self, i, name):
+        if i in self._ssh:
+            if name not in module.MODULES:
+                return 404, {"error": "not found"}
+            bad = self.core.ssh_gate(i)
+            if bad:
+                return bad
+            code, body = self.core.ssh(i, PRE + jarvis_line("module", name, "plan", "--json"), PLAN_TIMEOUT_S + 10)
+            return (200 if code == 0 else 502), body
         req = urllib.request.Request(self._url(i, f"/api/modules/{urllib.parse.quote(name)}/plan"))
         return self.core._ask(i, req, PLAN_TIMEOUT_S + 10, "AI 셋업 모듈을")
 
+    def _ssh_apply(self, i, name, plan_id):
+        """SSH 기기의 apply: 바로 202 를 주고 뒤에서 원격 apply 를 돌린다. 승인한 계획과의 일치는 원격 모듈이 확인한다(stale)."""
+        if name not in module.MODULES:
+            return 404, {"error": "not found"}
+        if not PLAN_ID_RE.fullmatch(plan_id or ""):
+            return 400, {"error": "plan_id 는 계획에서 받은 sha256 이어야 합니다"}
+        bad = self.core.ssh_gate(i)
+        if bad:
+            return bad
+        with _job_lock:
+            j = ssh_jobs.get(i) or {}
+            if j.get("state") == "running":
+                return 409, {"error": f"{j['module']} 적용이 진행 중입니다", "job": dict(j)}
+            if i in ssh_updating:
+                return 409, {"error": "jarvis 갱신이 끝난 뒤에 적용하세요"}
+            j = ssh_jobs[i] = {"module": name, "plan_id": plan_id, "state": "running", "started_at": time.time()}
+            snapshot = dict(j)
+        print(f"[jarvis] core: {i} module apply 시작: {name} plan_id={plan_id[:12]}", flush=True)
+
+        def work():
+            try:
+                script = PRE + jarvis_line("module", name, "apply", "--json", "--plan-id", plan_id, write=True)
+                code, body = self.core.ssh(i, script, APPLY_TIMEOUT_S + 60)
+            except Exception as e:  # running 으로 남으면 그 기기와 core 자신의 갱신이 core 재시작 전까지 409 다
+                code, body = None, {"error": f"{type(e).__name__}: {e}"[:200]}
+            with self._ssh[i]["lock"]:
+                self._ssh[i]["cache"].pop(name, None)  # 바뀐 상태를 다음 조회에서 다시 읽는다
+            with _job_lock:  # ssh 가 끊기거나 시간을 넘기면 결과를 모른다(원격은 끝까지 돌았을 수 있다)
+                j.update(state="interrupted" if code in (None, 255) else "finished", finished_at=time.time(),
+                         code=code, result=body)
+            print(f"[jarvis] core: {i} module apply 끝: {name} plan_id={plan_id[:12]} -> "
+                  f"{body.get('status') or body.get('error')}", flush=True)
+
+        threading.Thread(target=work, daemon=True, name=f"jarvis-ssh-{name}").start()
+        return 202, snapshot
+
     def apply(self, i, name, plan_id):
+        if i in self._ssh:
+            return self._ssh_apply(i, name, plan_id)
         req = urllib.request.Request(
             self._url(i, f"/api/modules/{urllib.parse.quote(name)}/apply?plan_id={urllib.parse.quote(plan_id)}"),
             data=b"", method="POST", headers={"X-Jarvis-Action": "module-apply"})

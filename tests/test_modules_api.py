@@ -242,7 +242,7 @@ class CoreRouteTest(unittest.TestCase):
         self.assertEqual(Gateway.posted, (f"/api/modules/orca/apply?plan_id={PLAN_ID}", "module-apply"))
 
     def test_gateway_routes_answer_only_the_configured_core(self):
-        """covers: SETUP-2"""
+        """covers: SETUP-2, SSH-5"""
         self.on_tailnet(["127.0.0.1"])  # viewers 여도 게이트웨이 경로는 설정 core 만이다
         for path, post in (("/api/modules", False), ("/api/modules/orca/plan", False),
                            (f"/api/modules/orca/apply?plan_id={PLAN_ID}", True)):

@@ -187,6 +187,7 @@ class AccessTest(unittest.TestCase):
         self.assertIn("core", json.loads(e.exception.read())["error"])
 
     def test_no_loopback(self):
+        """covers: SSH-5"""
         old, config.CORE = config.CORE, ["127.0.0.1"]
         try:
             self.assertEqual(self.get(), 403)

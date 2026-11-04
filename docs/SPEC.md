@@ -194,3 +194,142 @@ ai-setup 의 update-ai(`jarvis/modules/setup/res/update/update_ai.py`)를 감싼
   - 옛 IP 를 빼는 좁히기(`--remove`)는 새 core 에서 200 을 받은 기기에서만 한다. 501·502 를 받은 기기는 미반영으로 남긴다.
   - 서비스가 읽는 설정 경로는 `/api/snapshot` 의 `config_path` 로 대조한다. 확인에 페어링 코드 경로는 쓰지 않는다.
 - 전환 순서(넓히기 → 확인 → 인그레스 → 좁히기)와 수동 단계(새 core 설정·proxy_key 회전·재시작, pit5 Caddy, 옛 core 정리), 기기별 실행 위치와 python, 최소 버전 확인은 `README.md` 가 소유한다.
+
+## SSH 기기
+
+> 상태: 2026-11-04 사용자 승인으로 추가했다(설계 비평 반영). 구현됨, 단위 GREEN(가짜 ssh. 실제 ssh·대상 기기 미검증). core 쪽 확장이며, 게이트웨이 계약(`server.py` `_trusted`·`_peer_ok`·Host 검사)은 바꾸지 않는다. 코드는 `jarvis/core.py`·`jarvis/modules_api.py` 다.
+
+tailnet 으로는 닿지 않고 SSH 로만 닿는 기기(예: 다른 tailnet 의 기기에 ProxyJump 로 닿는 경우)는 설정 `devices` 에 `ssh` 로 적는다. core 는 그 기기를 SSH 로 조회하고, AI 셋업 모듈과 jarvis 갱신만 원격 CLI 로 조작한다.
+
+    [[devices]]
+    id = "thsvkd-kgolf-macmini"
+    ssh = "kgolf-macmini-m1"
+
+### 형식
+
+- 항목은 `{id, url}` 또는 `{id, ssh}` 중 정확히 하나다. 둘 다 있거나, 둘 다 없거나, 형식이 틀리면 한 줄 경고를 내고 건너뛴다.
+- `ssh` 는 core 를 실행하는 사용자의 `~/.ssh/config` Host 별칭이다. `re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")` 를 통과하는 것만 받는다(끝 개행도 거절한다).
+- 접속 세부(HostName·User·ProxyJump·키)는 그 파일이 소유한다. jarvis 는 그 파일을 읽지도 쓰지도 않는다.
+- 내부 url 은 `ssh://<별칭>` 이다. `GET /api/devices` 의 `url` 도 같고, 화면은 이 스킴을 보고 'SSH 경유' 를 표시한다.
+- 재시작 키이고, 새 환경 변수는 없다.
+- 대상의 배치는 install.sh 규약으로 고정한다. 저장소는 `~/Workspace/jarvis`, python 은 `~/.local/share/jarvis/venv/bin/python` 이고, 대상은 macOS 또는 Linux 여야 한다. 규약과 다른 기기는 조작이 502 로 끝난다.
+
+### ssh 실행 공통
+
+- 실행 파일은 macOS 면 `/usr/bin/ssh`(Homebrew openssh 는 `UseKeychain` 을 거절한다), 그 밖은 `PATH` 의 `ssh` 다.
+- 공통 옵션은 `-o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -o LogLevel=ERROR` 다. `StrictHostKeyChecking`·`UserKnownHostsFile` 은 주지 않는다(사용자 known_hosts 를 쓴다).
+- 연결 공유(`-o ControlMaster=auto -o ControlPath=~/.ssh/jarvis-%C -o ControlPersist=60`)는 조회(`-W`)에만, Windows 가 아닐 때만 붙인다. 조작에는 `-o ControlMaster=no -o ControlPath=none` 을 줘서 연결마다 따로 띄우고, `-a -x -o ClearAllForwardings=yes` 로 core 사용자 `~/.ssh/config` 의 에이전트·X11·포트 전달이 대상 기기로 넘어가지 않게 한다. 그래서 한 호출의 시간 초과가 진행 중인 apply·update 를 끊지 않는다.
+- ssh 는 새 세션(`start_new_session`)으로 띄우고 표준 오류는 임시 파일로 받는다. 상한을 넘으면 프로세스 그룹 전체를 끝낸다(ProxyJump 자식이 고아로 남지 않게).
+- ssh 의 표준 입력은 물려주지 않는다. 조회는 파이프로 요청을 쓴 직후 닫고, 조작은 `/dev/null` 이다(표준 입력을 물려받은 ssh 는 호출자의 입력을 먹는다).
+
+### 조회
+
+- 다음을 실행하고, 그 표준 입출력으로 HTTP/1.0 GET 하나를 `Host: 127.0.0.1:9300` 으로 보낸다. 원격 셸 명령은 없다.
+
+      ssh … -W 127.0.0.1:9300 -- <별칭>
+
+- 요청을 쓴 직후 표준 입력을 닫고, 응답은 `Content-Length` 만큼만 읽는다.
+- 대상은 그 기기의 루프백으로 고정한다. 그 기기 게이트웨이는 출발지를 `local` 로 보므로 신뢰 경로는 언제나 403 이다.
+- 보내는 경로는 `/api/snapshot`·`/api/history?range=1h|24h`·`/api/changes` 뿐이다. 다른 경로는 ssh 를 실행하지 않고 오류로 처리한다.
+- 상한은 HTTP 와 같다. 압축 해제 기준 16 MiB, gzip 잘림 검사, 전체 `DEADLINE_S + 10` 초다.
+- relay(history·changes)는 SSH 기기마다 동시에 4개까지 띄운다. 넘치면 ssh 를 실행하지 않고 바로 502 다.
+- 실패하면 그 기기의 `fails`·`error` 에 남긴다. `error` 는 ssh 표준 오류의 마지막 줄(200자) 또는 `HTTP n` 이다.
+
+### 조작: 원격 CLI
+
+조작은 다음 형태로 실행한다. 스크립트는 상수이고, 끼우는 값은 `module.MODULES` 키, 64자 hex `plan_id`, 정수 pid 뿐이다. 모든 토큰은 끼우기 전에 `re.fullmatch(r"[A-Za-z0-9._-]+")` 를 다시 검사하고, 전체를 `shlex.quote` 로 감싼다.
+
+    ssh … -o ControlMaster=no -o ControlPath=none -a -x -o ClearAllForwardings=yes -T -- <별칭> "sh -c '<스크립트>'"
+
+- 스크립트 머리(`PRE`)는 저장소로 이동하고 venv python 을 확인한다. 둘 중 하나라도 없으면 종료 코드 90 이다.
+- `PRE` 는 `PATH` 를 `deploy/jarvis.plist` 와 같게 두고 `PYTHONIOENCODING=utf-8` 을 export 한다(원격 로케일과 무관하게 출력을 읽는다).
+- 보내는 하위 명령은 `module`·`update`·`--version` 과 재시작 스크립트뿐이다. `core-trust` 와 `module … uninstall` 은 원격으로 실행하지 않는다.
+- orca 모듈 apply 도 다른 모듈과 같이 허용한다. GUI 없는 SSH 세션에서 실패하는 단계는 모듈 결과(`failed`·`deferred`)로 보인다.
+- ssh 를 실행하기 전에 스냅샷의 `meta.version` 을 본다(게이트). 근거는 시험한 최저 판 이상만 허용한다는 것이다.
+  - 스냅샷이 없으면 502 다.
+  - `launch.key` 로 읽지 못하거나 1.7.8 보다 낮으면 501 `"이 기기의 jarvis <v> 는 SSH 조작을 지원하지 않습니다(그 기기에서 직접 갱신)"` 다.
+
+| core 요청 | 원격 실행 | 응답 |
+| --- | --- | --- |
+| `GET /api/devices/modules[?refresh=1]` 의 그 기기 몫 | 모듈마다 `python -m jarvis module <이름> status --json`. 병렬로 돈다 | 게이트웨이 `GET /api/modules` 와 같은 모양 `{modules, job}`. 모듈별 캐시 기간(`TTL`)도 같다. 처음과 `refresh=1` 일 때만 기다리고, 기간만 지났으면 지난 값을 바로 주고 기기마다 하나만 뒤에서 다시 읽는다. `job` 은 core 가 그 기기에 시작한 마지막 apply 다 |
+| `GET /api/devices/<id>/modules/<이름>/plan` | `module <이름> plan --json` | 종료 0 이고 JSON 이면 200, 아니면 502 |
+| `POST /api/devices/<id>/modules/<이름>/apply?plan_id=…` | `module <이름> apply --json --plan-id <sha256> 2>/dev/null` | 바로 202 와 작업을 준다(아래 규칙) |
+| `POST /api/devices/<id>/jarvis/update` (일괄 포함) | `update 2>/dev/null && --version`. `to` 가 스냅샷 판보다 크면 재시작 스크립트를 따로 보낸다 | `{running, to, restart}` (HTTP 기기와 같다) |
+
+#### apply 규칙
+
+1. 이름이 `module.MODULES` 에 없으면 404 이고, `plan_id` 가 `PLAN_ID_RE.fullmatch` 를 통과하지 못하면 400 이다. 둘 다 ssh 를 실행하기 전에 판단한다.
+2. 그 기기에서 core 가 시작한 apply 가 진행 중이면 409 다. jarvis 갱신이 진행 중이어도 409 다.
+3. SSH 작업 목록은 `modules_api` 모듈 수준에 두고 `modules_api.running()` 이 그것까지 본다. 그래서 SSH apply 가 진행 중이면 core 기기 자신의 jarvis 갱신(`self_update.start`, 단일·일괄)도 409 다.
+4. 끝나면 작업을 `finished`(`code`, `result`) 로 바꾸고, 그 모듈의 status 캐시를 버린다.
+5. ssh 가 255 로 끝나거나 시간 상한(`APPLY_TIMEOUT_S + 60`)을 넘기면 작업을 `interrupted` 로 둔다. 원격은 끝까지 돌았을 수 있다.
+6. 승인한 계획과의 일치는 원격 모듈이 다시 세운 계획으로 확인한다. 다르면 stale(종료 3)이다.
+7. 로그에는 시작과 끝, `plan_id` 앞 12자만 남긴다.
+
+#### jarvis 갱신 규칙
+
+- core 가 그 기기에 시작한 apply 가 진행 중이거나 이미 갱신 중이면 409 다.
+- 받지 못하면 502 이고, 오류는 원격 출력의 마지막 줄이다.
+- `to` 는 표준 출력에서 `^jarvis (\d+\.\d+\.\d+)` 로 시작하는 마지막 줄의 판이다. 그 줄이 없으면 502 다.
+- `to` 가 스냅샷 판보다 크면 재시작한다. 같거나 작으면 재시작하지 않고 `restart: false` 다.
+  - pid 는 `STALE_S` 안 스냅샷의 `monitor.pid` 이고, `type(pid) is int and pid > 1` 일 때만 쓴다(bool·0·1·음수는 거절).
+  - 재시작 스크립트는 상수다. `ps -o command= -p <pid>` 의 명령줄이 `-m jarvis` 로 끝날 때만 `kill -TERM <pid>` 를 보내고, 아니면 종료 코드 91 이다.
+  - pid 를 쓸 수 없거나, 91 이거나, kill 이 실패하면 502 `"받았지만 재시작하지 못했습니다(그 기기에서 재시작하세요)"` 다.
+- 재시작은 서비스 관리자에 맡긴다. launchd `KeepAlive`, systemd `Restart=always` 가 다시 띄우고, 롤백과 확정은 `launch` 가 그대로 한다.
+
+#### 종료 코드와 오류 문구
+
+| 결과 | 오류 문구 |
+| --- | --- |
+| 255 | `"<id> 에 닿지 못했습니다: <ssh 표준 오류 마지막 줄>"` |
+| 90 | `"install.sh 배치(~/Workspace/jarvis, ~/.local/share/jarvis/venv)가 아닙니다"` |
+| 91 | `"받았지만 재시작하지 못했습니다(그 기기에서 재시작하세요)"` |
+| 시간 초과 | `"<n>초 안에 끝나지 않았습니다"` |
+| 그 밖 | 표준 출력에서 `{` 로 시작하는 마지막 줄을 JSON 으로 읽는다. JSON 이 아니면 종료 코드만 `error` 로 낸다 |
+
+- 읽기 동작(status·plan·`--version`)은 원격 표준 오류를 core 로그에만 남긴다. 마지막 줄 300자다.
+- 쓰기 동작(apply·update)은 원격 표준 오류를 버린다. 대상 디스크에도 남기지 않는다.
+- 명령줄과 응답 본문은 오류 문구와 로그에 넣지 않는다.
+
+### 지원하지 않는 조작
+
+다음 요청은 ssh 도 HTTP 도 보내지 않고 501 `{error: "SSH 로 닿는 기기는 이 조작을 지원하지 않습니다(그 기기에서 직접)"}` 를 준다. 페어링은 `{supported: false, error}` 를 준다.
+
+- 페어링 `/orca`, `orca/issue`
+- Orca 업데이트 확인·실행
+- 사용량(독립 포함)
+- 로그인 상태·시작
+- 계정 전환
+
+이유는 둘이다. 이 조작들은 CLI 가 없다. 그리고 페어링 코드·로그인 코드·계정 이메일이 SSH 경로를 지나지 않게 하기 위해서다.
+
+### 일괄 동작의 순서
+
+일괄 동작은 지금 코드 순서를 그대로 둔다.
+
+- `usage_all`·`jarvis_update_all`·`/api/devices/modules` 는 폴링 실패(502)를 SSH 가드(501)보다 먼저 본다. 폴링이 실패 중인 기기는 묻지 않고 502 다. 그래서 SSH 기기의 501 은 폴링이 성공 중일 때만 나온다.
+- `orca_update_all` 은 폴링 상태를 보지 않으므로 SSH 기기는 늘 501 이다.
+- `jarvis_update_all` 에서 SSH 기기는 core 자신보다 먼저 처리한다.
+
+### 전제 (사용자 쪽, jarvis 는 설정하지 않는다)
+
+- core 기기
+  - 별칭과 ProxyJump 는 `~/.ssh/config` 에 둔다.
+  - 점프 호스트 Host 블록에도 `BatchMode yes`·`ConnectTimeout`·`ServerAliveInterval` 을 둔다. 명령줄 옵션은 목적지 홉에만 걸린다.
+  - known_hosts 에 점프 호스트와 대상의 호스트 키를 등록한다.
+  - core 서비스 세션에서 BatchMode 로(passphrase 입력 없이) 쓸 수 있는 키가 있어야 한다.
+- 대상 기기
+  - sshd 가 명령 실행과 TCP 포워딩(`direct-tcpip`)을 허용한다.
+  - 게이트웨이가 루프백 9300 에서 받는다.
+  - install.sh 배치다.
+  - 재시작 버튼은 서비스 정의가 `KeepAlive=true`(launchd) 또는 `Restart=always`(systemd)이고 스냅샷 `monitor.pid` 가 서비스 관리자가 띄운 pid 일 때만 쓴다. 아니면 kill 뒤 게이트웨이가 꺼진 채 남는다.
+- 신뢰의 뿌리는 core 사용자의 SSH 키다. 조작에는 원격 명령이 필요하므로 그 키를 `permitopen` 전용으로 좁힐 수 없다.
+- SSH 기기 스냅샷(피어 목록·명령줄)과 ssh 오류 마지막 줄은 core 의 `/api/devices*` 로 core 의 tailnet 에 보인다. 서로 다른 tailnet 의 100.64/10 IP 는 겹칠 수 있다.
+
+### 위험
+
+- 프로세스 사이 잠금이 없다. core 의 잠금은 core 가 시작한 조작만 막고, 대상 게이트웨이가 스스로 하는 작업(기동 때 recover, 그 기기 화면에서 시작한 작업)과는 겹칠 수 있다.
+- apply 중 연결이 끊기면 core 는 `interrupted` 로 두지만 원격은 계속 돌 수 있다. 원격 잠금이 없으므로 다시 apply 하면 원격에서 겹칠 수 있다. core 가 재시작하면 SSH 작업 목록은 사라진다.
+- 연결 공유 마스터는 setsid 로 살아남지만, ProxyJump 의 점프 프로세스는 마스터를 만든 조회 호출의 프로세스 그룹에 남는다. 그 조회가 시간 초과로 끝나면 마스터 연결이 끊기고 다음 조회가 다시 만든다. 조작은 연결을 공유하지 않으므로 영향이 없다.
+- 판 차이: 게이트는 서비스의 판(스냅샷)을 보지만 원격 CLI 는 `current.json` 이 가리키는 판으로 돈다. 받아만 두고 재시작하지 않은 기기는 둘이 다를 수 있다.
+- `_confirm` 경합: 원격 update 가 원격 기동 후 60초 안의 `_confirm` 과 겹치면 `current.json` 을 서로 덮어쓸 수 있다. 다음 갱신에서 회복된다.

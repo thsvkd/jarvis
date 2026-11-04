@@ -9,8 +9,8 @@
 | 문서 | 답하는 질문 | 상태 |
 | --- | --- | --- |
 | `PRD.md` | 무엇을 왜 만드는가 | `authoritative` (ai-setup 흡수 범위, 2026-10-30 K1) |
-| `SPEC.md` | 모듈 계약과 Orca 서버 형태 | `authoritative` (2026-10-30 K1, K4·K10. setup·harness 절은 2026-11-01, core 전환 절은 2026-11-04) |
-| `TEST_SPEC.md` | 무엇이 완료인가 | `authoritative` (Orca 케이스 2026-10-30 K1, K4·K10. 셋업·하네스 갱신·AGENTS.md·BOOT-2·3 은 2026-11-01, CORE-1~8 은 2026-11-04) |
+| `SPEC.md` | 모듈 계약과 Orca 서버 형태 | `authoritative` (2026-10-30 K1, K4·K10. setup·harness 절은 2026-11-01, core 전환·SSH 기기 절은 2026-11-04) |
+| `TEST_SPEC.md` | 무엇이 완료인가 | `authoritative` (Orca 케이스 2026-10-30 K1, K4·K10. 셋업·하네스 갱신·AGENTS.md·BOOT-2·3 은 2026-11-01, CORE-1~8·SSH-1~10 은 2026-11-04) |
 | `2026-10-30-ai-setup-absorption.md` | 흡수 결정·기각한 대안·열린 문제·진행 기록 | `draft` |
 | `guard-policy.md` | 훅(danger_guard·rm 셔임)이 왜 그렇게 판정하는가 | `reference` (ai-setup README 에서 옮김) |
 | `setup-guide.md` | setup·harness 모듈이 무엇을 설치하고 바꾸는가(사용량에 영향을 주는 mod, 줄바꿈 키, update-ai) | `reference` (ai-setup README 에서 옮김) |
