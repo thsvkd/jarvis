@@ -1113,7 +1113,8 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
 .dev-acts button.seg-action:disabled { opacity: .45; cursor: not-allowed; }
 .dev-note { color: var(--text-2); font-size: var(--fs-sm); }
 .dev-err, .dev-note.dev-err { color: var(--crit-ink); font-weight: var(--fw-semibold); }
-.dev-tile { align-self: start; }
+.dev-tile { align-self: start; cursor: pointer; }
+.dev-tile .dev-orca { cursor: auto; }
 .dev-orca:not(:empty) { margin-top: var(--sp-3); }
 .orca-state { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-sm); margin-bottom: var(--sp-3); }
 .orca-help { color: var(--text-2); font-size: var(--fs-sm); margin-bottom: var(--sp-3); }

@@ -93,6 +93,12 @@
   }
   setTimeout(load,10000);
  }
+ // 카드의 빈 곳을 눌러도 상세 보기로 간다. 조작 요소·페어링 패널·글자 선택은 제외한다
+ list.addEventListener("click",e=>{
+  const t=e.target.closest(".dev-tile");
+  if(!t||e.target.closest("a,button,input,select,textarea,label,.dev-orca")||String(getSelection()))return;
+  location.href="/?device="+encodeURIComponent(t.dataset.dev);
+ });
  list.addEventListener("click",async e=>{
   const c=e.target.closest("[data-orca-copy]");
   if(c){
