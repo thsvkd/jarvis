@@ -174,7 +174,7 @@ curl -s localhost:9300/api/health
 
 ```sh
 git clone https://github.com/thsvkd/jarvis.git ~/Workspace/jarvis && cd ~/Workspace/jarvis   # public 저장소라 인증이 필요 없다
-install -Dm644 deploy/gateway.toml ~/.config/jarvis/config.toml     # s2 는 deploy/s2.toml(core), pit5 는 deploy/pit5.toml
+install -Dm644 deploy/gateway.toml ~/.config/jarvis/config.toml     # core 는 deploy/s2.toml 형식(지금 core 는 thsvkd-macmini), pit5 는 deploy/pit5.toml
 install -Dm644 deploy/jarvis.service ~/.config/systemd/user/jarvis.service
 loginctl enable-linger && systemctl --user daemon-reload && systemctl --user enable --now jarvis
 # ss -p 로 root 소유 리스너의 프로세스를 보려면: pi 그룹만 실행할 수 있는 능력 부여 사본(없으면 10초마다 sudo 를 시도한다)
@@ -217,7 +217,7 @@ s2(Linux)에서 `sys.platform` 을 darwin 으로 바꿔 크래시 없이 스냅�
 설치(새 Mac·Linux 포함. git·Homebrew 가 없어도 된다):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh -s -- --core 100.115.245.91
+curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh -s -- --core 100.107.29.19
 ```
 
 `install.sh` 는 uv 로 Python venv(`~/.local/share/jarvis/venv`)를 만들고, 최신 릴리스 묶음을 sha256 으로 확인해 `~/Workspace/jarvis` 에 푼다.
@@ -247,7 +247,7 @@ Windows 는 게이트웨이로만 돈다: Orca 데스크톱 앱(`%APPDATA%\orca`
 새 기기는 관리자 PowerShell 에서 한 줄로 설치한다. Python 이 없으면 winget 으로 깔고, 최신 릴리스를 sha256 으로 확인해 `%USERPROFILE%\Workspace\jarvis` 에 푼 뒤 아래 `deploy\install-windows.ps1` 과 모듈(Orca·훅·셋업) 적용까지 한다. `-DryRun` 은 할 일만 보인다.
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/thsvkd/jarvis/main/install.ps1))) -Core 100.115.245.91
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/thsvkd/jarvis/main/install.ps1))) -Core 100.107.29.19
 ```
 
 ```powershell

@@ -1,4 +1,4 @@
-# pi5-server2(s2) 설정: core + 자기 자신의 게이트웨이. 설치: install -Dm644 deploy/s2.toml ~/.config/jarvis/config.toml
+# core 설정 예시(core + 자기 자신의 게이트웨이). 2026-11-04 까지 pi5-server2(s2), 지금은 thsvkd-macmini 가 core 다. 설치: ~/.config/jarvis/config.toml
 # devices 를 바꾸면 재시작, core·viewers 는 자동 반영. 키 설명은 jarvis/config.py.
 
 port = 9300
@@ -7,7 +7,7 @@ bind = "0.0.0.0"
 caddy = "pi5-server2-caddy"
 tunnel = ""
 
-# Hermes(ubuntu-1) 게이트웨이는 core 가 상태 API 로 본다. 2026-10-13 OpenClaw 에서 Hermes 로 옮김.
+# Hermes 게이트웨이는 core 가 상태 API 로 본다. 2026-10-13 OpenClaw 에서 Hermes(thsvkd-ubuntu-1)로, 2026-11-04 thsvkd-macmini 로 옮김.
 hermes_url = "https://hermes.example.com/api/status"
 
 # 자기 자신도 tailnet IP 로 모은다(/api/orca 는 루프백을 받지 않는다)

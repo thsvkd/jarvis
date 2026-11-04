@@ -4,7 +4,7 @@
 port = 9300
 bind = "0.0.0.0"
 
-# 이 기기 Orca 페어링 코드(/api/orca)를 받아 갈 core(pi5-server2)의 tailnet IP
+# 이 기기 Orca 페어링 코드(/api/orca)를 받아 갈 core(thsvkd-macmini)의 tailnet IP
 core = ["100.64.0.1"]
 
 # Caddy·cloudflared 가 없는 기기는 빈 값(없으면 다운으로 보인다)
