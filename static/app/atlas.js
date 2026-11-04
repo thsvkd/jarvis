@@ -103,6 +103,7 @@
     // 관점: 주소(?view=) > 기억 > 개념
     view: "concept",
     offOpen: store.get("offOpen", false) === true,   // 물리: 오프라인 기기 묶음 펼침
+    ifOpen: store.get("ifOpen", false) === true,     // 물리: 쓰지 않는 인터페이스 펼침(MAP-7)
     tree: null,                                        // 물리(모바일): 펼친 나무 칸(Set) — 첫 스냅샷에 기본값
   };
   // 관점 이름 규약은 공용(JarvisShell.mapView): ?view=concept|conceptual|physical|phys. 주소로 고른 관점은 기억한다(개요 타일과 같은 값).
@@ -171,7 +172,7 @@
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   };
   const ic = (n, cls) => raw('<svg class="ic' + (cls ? " " + cls : "") + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + (ICON[n] || "") + "</svg>");
-  const CAT_ICON = { public: "globe", tailnet: "tailnet", hermes: "route", host: "server", internal: "db", infra: "layers", system: "gear" };
+  const CAT_ICON = { local: "lock", public: "globe", tailnet: "tailnet", hermes: "route", host: "server", internal: "db", infra: "layers", system: "gear" };
 
   // ------------------------------------------------------------------ 작은 조각들
   const statusText = (st) => labels.status[st] || "확인 불가";
@@ -280,7 +281,7 @@
     for (const a of s.alerts || []) { const nid = alertTarget(d, a); if (nid) d.alertNode.set(a.key || a.message, nid); }
     return d;
   }
-  const catName = (c) => (D && D.catLabel[c]) || labels.category[c] || c || "기타";
+  const catName = (c) => (c === "local" ? "이 기기 안에서만" : (D && D.catLabel[c]) || labels.category[c] || c || "기타");
   const kindName = (k) => (SH.kindLabel ? SH.kindLabel(k) : labels.kind[k] || k || "");
   const isStatic = (sv) => !!sv && sv.kind === "static";
 
@@ -454,7 +455,10 @@
   { let x = 0; for (let i = 0; i < 6; i++) { COLX[i] = x; x += COLW[i] + (GAP[i] || 0); } }
   // 척추(서비스 열)는 촘촘하게 — 기본 맞춤에서 글자가 읽히는 배율이 나오도록(행 27px, 머리 24px)
   const H1 = 23, PITCH = 27, H2 = 46, GH = 24, GG = 18, RP = 10;
-  const BUS = { public: 7, tailnet: 7, lan: 14, depends: 7 };   // 척추 왼쪽 버스선의 자리(영역 테두리에서 떨어진 거리)
+  // 척추 왼쪽 버스선의 자리(영역 테두리에서 떨어진 거리). 테두리에 붙이면 행으로 들어가는 가지가 몇 px 라 묶음에 꽂힌 것처럼 보인다(MAP-3)
+  const BUS = { public: 20, tailnet: 20, lan: 30, depends: 20 };
+  /** 척추 묶음: 루프백에만 열었고 들어오는 길이 없으면 '이 기기 안에서만'(MAP-4), 아니면 카테고리 */
+  const spineCat = (d, n) => (n.local_only && !(d.inE.get(n.id) || []).length ? "local" : n.category || "other");
 
   const SPINE_LIMIT = 12, SPINE_SHOW = 10;
   function sigOf(d) {
@@ -462,7 +466,7 @@
     const es = d.edges.map((e) => e.key + "|" + (e.label || "")).sort().join(";");
     // 접힌 큰 카테고리는 무엇을 보이는지(문제 있는 노드)가 배치에 들어간다
     const big = {};
-    for (const n of d.nodes.values()) if (n.layer === 4 && n.type !== "extra") (big[n.category] = big[n.category] || []).push(n);
+    for (const n of d.nodes.values()) if (n.layer === 4 && n.type !== "extra") { const c = spineCat(d, n); (big[c] = big[c] || []).push(n); }
     const vis = Object.entries(big).filter(([c, l]) => l.length > SPINE_LIMIT && !ui.expanded[c])
       .map(([c, l]) => c + ":" + l.filter((n) => n.status && n.status !== "up").map((n) => n.id).sort().join(",")).join(";");
     return ns + "#" + es + "#" + Object.keys(ui.expanded).filter((k) => ui.expanded[k]).sort().join(",") + "#" + vis;
@@ -474,17 +478,27 @@
       if (!G.layout || G.layout.pos.has(id) || !PD) return false;
       const pn = PD.nodes.get(id);
       if (pn && pn.parent === "grp:offline" && !ui.offOpen) { ui.offOpen = true; store.set("offOpen", true); G.sig = null; return true; }
+      if (pn && PHYS.idleIf && PHYS.idleIf(pn) && !ui.ifOpen) { ui.ifOpen = true; store.set("ifOpen", true); G.sig = null; return true; }
       return false;
     }
     if (!G.layout || G.layout.pos.has(id) || !D) return false;
     const n = D.nodes.get(id);
-    if (!n || !n.category || ui.expanded[n.category]) return false;
-    ui.expanded[n.category] = true;
+    const cat = n && n.layer === 4 ? spineCat(D, n) : n && n.category;
+    if (!cat || ui.expanded[cat]) return false;
+    ui.expanded[cat] = true;
     store.set("expanded", ui.expanded);
     G.sig = null;
     return true;
   }
   function setExpanded(cat, on) {
+    if (isPhys() && cat === "ifaces") {
+      ui.ifOpen = !!on;
+      store.set("ifOpen", ui.ifOpen);
+      G.sig = null;
+      renderAll();
+      requestAnimationFrame(() => { const b = vp.querySelector('[data-more="ifaces"]'); if (b) b.focus({ preventScroll: true }); });
+      return;
+    }
     if (isPhys() && cat === "offline") {
       ui.offOpen = !!on;
       store.set("offOpen", ui.offOpen);
@@ -510,7 +524,7 @@
     const nodes = [...d.nodes.values()];
     const colOf = (n) => (n.type === "extra" ? (directExtra(d, n) ? 3 : 5) : clamp(n.layer | 0, 0, 5));
     const cats = (d.s.categories || []).map((c) => c.id);
-    const catRank = (c) => { const i = cats.indexOf(c); return i < 0 ? 99 : i; };
+    const catRank = (c) => { if (c === "local") return 98; const i = cats.indexOf(c); return i < 0 ? 99 : i; };
     const byName = (a, b) => catRank(a.category) - catRank(b.category) || String(a.label).localeCompare(String(b.label));
     const place = (n, col, y, h) => pos.set(n.id, { x: COLX[col], y, w: COLW[col], h, col });
     const cy = (id) => { const p = pos.get(id); return p ? p.y + p.h / 2 : null; };
@@ -531,10 +545,10 @@
     const spine = nodes.filter((n) => colOf(n) === 4).sort(byName);
     const center = {}; const regOf = {};
     let y = 0;
-    const groupCats = [...new Set(spine.map((n) => n.category || "other"))].sort((a, b) => catRank(a) - catRank(b));
+    const groupCats = [...new Set(spine.map((n) => spineCat(d, n)))].sort((a, b) => catRank(a) - catRank(b));
     const moreRows = [];
     for (const cat of groupCats) {
-      const all = spine.filter((n) => (n.category || "other") === cat);
+      const all = spine.filter((n) => spineCat(d, n) === cat);
       let mem = all; let hidden = 0;
       if (all.length > SPINE_LIMIT && !ui.expanded[cat]) {
         const keep = new Set(all.filter((n) => n.status && n.status !== "up").map((n) => n.id));
@@ -622,12 +636,14 @@
       const maxY = Math.max(...inside.map((p) => p.y + p.h), ...regIn.map((r) => r.y + r.h));
       box = { x: COLX[2] - 30, y: minY - 40, w: COLX[5] + COLW[5] + 28 - (COLX[2] - 30), h: maxY - minY + 40 + 32 };
     }
-    // 8) 엣지 경로
+    // 8) 엣지 경로 — 양 끝이 아닌 노드 상자는 피한다(MAP-2)
+    const allRects = [...pos.entries()];
+    const obstacles = (e) => allRects.filter(([id]) => id !== e.from && id !== e.to).map(([, r]) => r);
     const edges = [];
     for (const e of d.edges) {
       const a = pos.get(e.from); const b = pos.get(e.to);
       if (!a || !b) continue;
-      edges.push(Object.assign({}, e, edgeGeom(a, b, e, spineReg.get(e.to))));
+      edges.push(Object.assign({}, e, edgeGeom(a, b, e, spineReg.get(e.to), obstacles(e))));
     }
     // 9) 경계
     const allP = [...pos.values()];
@@ -640,27 +656,59 @@
     return { pos, regions, edges, box, bounds, moreRows };
   }
   const f1 = (v) => Math.round(v * 10) / 10;
-  /** 엣지 한 줄의 경로. 척추(4열) 서비스로 들어가는 길은 묶는다: 출발점 → (영역 쪽 끝 높이까지) 한 줄기 → 척추 왼쪽 버스선 → 짧은 가지. */
-  function edgeGeom(a, b, e, reg) {
+  /** 수평선(y, x0~x1)과 곡선(c: 3차 베지어 8값)이 상자 하나라도 지나가는가 */
+  function crosses(obs, y, x0, x1, c) {
+    const hitR = (px, py) => obs.some((r) => px > r.x - 3 && px < r.x + r.w + 3 && py > r.y - 3 && py < r.y + r.h + 3);
+    for (let x = x0; x < x1; x += 8) if (hitR(x, y)) return true;
+    for (let i = 1; i < 24; i++) {
+      const t = i / 24; const u = 1 - t;
+      if (hitR(u * u * u * c[0] + 3 * u * u * t * c[2] + 3 * u * t * t * c[4] + t * t * t * c[6], u * u * u * c[1] + 3 * u * u * t * c[3] + 3 * u * t * t * c[5] + t * t * t * c[7])) return true;
+    }
+    return false;
+  }
+  /** 출발점(x1,y1)에서 (xe,ye)까지의 줄기. "M x1 y1" 뒤에 붙일 d 와 라벨 곡선(lc)을 준다(MAP-2: 양 끝이 아닌 상자는 피한다).
+   *  ① 수평으로 달리다 꺾는 자리: 원래 자리(want) → 앞쪽 열 사이 빈칸 → 출발점. 상자를 안 지나는 첫 자리.
+   *  ② 다 막히면 첫 빈칸에서 빈 높이로 옮겨 탄 뒤 want 까지 수평으로 가서 꺾는다. ③ 그래도 막히면 원래 자리. */
+  function trunk(x1, y1, want, xe, ye, obs) {
+    obs = obs || [];
+    const C = (c) => `C${f1(c[2])} ${f1(c[3])} ${f1(c[4])} ${f1(c[5])} ${f1(c[6])} ${f1(c[7])}`;
+    const bend = (sx, y, x) => { const dx = Math.max(8, (xe - sx) * 0.5); return [sx, y, sx + dx, y, xe - dx, ye, xe, ye]; };
+    const gaps = [];
+    for (let k = 3; k >= 1; k--) { const g = COLX[k] - GAP[k - 1] / 2; if (g > x1 + 1 && g < want) gaps.push(g); }
+    for (const sx of [want, ...gaps, x1]) {
+      const c = bend(sx, y1);
+      if (!crosses(obs, y1, x1, sx, c)) return { d: (sx > x1 + 1 ? `H${f1(sx)}` : "") + C(c), lc: c, sx };
+    }
+    const g = gaps.length ? Math.min(...gaps) : x1 + 12;
+    const ys = [ye, ...obs.flatMap((r) => [r.y - 10, r.y + r.h + 10])].sort((a, b) => Math.abs(a - ye) - Math.abs(b - ye));
+    for (const yl of ys) {
+      const c1 = [g, y1, g + 18, y1, g + 18, yl, g + 36, yl];
+      const sx = Math.max(want, g + 36);
+      const c2 = bend(sx, yl);
+      if (!crosses(obs, y1, x1, g, c1) && !crosses(obs, yl, g + 36, sx, c2)) {
+        return { d: `H${f1(g)}` + C(c1) + (sx > g + 37 ? `H${f1(sx)}` : "") + C(c2), lc: c2, sx };
+      }
+    }
+    const c = bend(want, y1);
+    return { d: (want > x1 + 1 ? `H${f1(want)}` : "") + C(c), lc: c, sx: want };
+  }
+  /** 엣지 한 줄의 경로. 척추(4열) 서비스로 들어가는 길은 묶는다: 출발점 → (영역 쪽 끝 높이까지) 한 줄기 → 척추 왼쪽 버스선 → 행으로 가는 가지. */
+  function edgeGeom(a, b, e, reg, obs) {
     const y1 = a.y + a.h / 2; const y2 = b.y + b.h / 2;
     const x1 = a.x + a.w; const x2 = b.x;
     if (b.col === 4 && a.col < 4 && reg && e.kind !== "depends") {
       const xb = COLX[4] - RP - (BUS[e.kind] || 7);
-      const sx = a.col < 3 ? COLX[3] + COLW[3] + 4 : x1;
       const yE = clamp(y1, reg.first, reg.last);
       const r = Math.min(6, Math.abs(y2 - yE) / 2);
-      let d = `M${f1(x1)} ${f1(y1)}`;
-      if (sx > x1 + 1) d += `H${f1(sx)}`;
       const xe = r > 0.5 ? xb - r : xb;
-      const dx = Math.max(8, (xe - sx) * 0.5);
-      d += `C${f1(sx + dx)} ${f1(y1)} ${f1(xe - dx)} ${f1(yE)} ${f1(xe)} ${f1(yE)}`;
-      const lc = [sx, y1, sx + dx, y1, xe - dx, yE, xe, yE];
+      const tr = trunk(x1, y1, a.col < 3 ? COLX[3] + COLW[3] + 4 : x1, xe, yE, obs);
+      let d = `M${f1(x1)} ${f1(y1)}` + tr.d;
       if (r > 0.5) {
         const sg = y2 > yE ? 1 : -1;
         d += `Q${f1(xb)} ${f1(yE)} ${f1(xb)} ${f1(yE + sg * r)}V${f1(y2 - sg * r)}Q${f1(xb)} ${f1(y2)} ${f1(xb + r)} ${f1(y2)}`;
       }
       d += `H${f1(x2)}`;
-      return { d, lx: (sx + xb) / 2, ly: (y1 + yE) / 2, ex: x2, ey: y2, lc };
+      return { d, lx: (tr.sx + xb) / 2, ly: (tr.lc[1] + yE) / 2, ex: x2, ey: y2, lc: tr.lc };
     }
     if (b.col === a.col) {
       const x = a.x + a.w; const bulge = 24 + Math.min(34, Math.abs(y2 - y1) * 0.35);
@@ -670,12 +718,9 @@
       const xa = a.x; const xz = b.x + b.w; const dx = (xa - xz) / 2;
       return { d: `M${xa} ${y1}C${xa - dx} ${y1} ${xz + dx} ${y2} ${xz} ${y2}`, lx: (xa + xz) / 2, ly: (y1 + y2) / 2, ex: xz, ey: y2, lc: [xa, y1, xa - dx, y1, xz + dx, y2, xz, y2] };
     }
-    const xk = COLX[b.col] - GAP[b.col - 1];
-    let d = `M${x1} ${y1}`; let sx = x1;
-    if (xk > x1 + 1) { d += `H${xk}`; sx = xk; }
-    const dx = (x2 - sx) * 0.55;
-    d += `C${(sx + dx).toFixed(1)} ${y1} ${(x2 - dx).toFixed(1)} ${y2} ${x2} ${y2}`;
-    return { d, lx: (sx + x2) / 2, ly: (y1 + y2) / 2, ex: x2, ey: y2, lc: [sx, y1, sx + dx, y1, x2 - dx, y2, x2, y2] };
+    // 끝은 12px 수평 가지로 상자에 꽂는다(MAP-3: 묶음 테두리가 아니라 그 행에 닿는 것이 보이게)
+    const tr = trunk(x1, y1, Math.min(COLX[b.col] - GAP[b.col - 1], x2 - 24), x2 - 12, y2, obs);
+    return { d: `M${f1(x1)} ${f1(y1)}` + tr.d + `H${f1(x2)}`, lx: (tr.sx + x2) / 2, ly: (tr.lc[1] + y2) / 2, ex: x2, ey: y2, lc: tr.lc };
   }
 
   // ------------------------------------------------------------------ 그래프 그리기
@@ -693,6 +738,7 @@
     if (n.id === "zone:internet") return "globe";
     if (n.id === "zone:tailnet") return "mesh";
     if (n.id === "zone:lan") return "router";
+    if (n.id.startsWith("zone:peer:")) return "gate";
     if (n.type === "edge") return "cloud";
     const k = n.svc && n.svc.kind;
     if (k === "tunnel") return "tunnel";
@@ -742,6 +788,7 @@
 </g>`;
   }
   function regionLabel(r) {
+    if (r.cat === "local") return "이 기기 안에서만 · 루프백";
     if (r.direct) return "포트 직접 · LAN";
     if (r.extra) return catName(r.cat) + " · 경로 밖";
     return catName(r.cat);
@@ -768,9 +815,15 @@
       if (!e.label) continue;
       // 포트 직접 묶음(tailscale·avahi …)은 노드의 보조 줄이 포트를 보여 주므로 선 라벨을 달지 않는다(겹침 방지)
       if (e.synthetic && (D.nodes.get(e.to) || {}).type === "extra") continue;
-      const k = e.from + "|" + e.label;
-      if (!lab.has(k)) lab.set(k, { label: e.label, kind: e.kind, xs: [], ys: [], keys: [] });
+      // 다른 기기에서 오는 길은 같은 줄기를 타므로 출발 기기마다 라벨 하나로 합친다(주소 하나 + "외 N")
+      const k = e.peer ? e.from + "|peer" : e.from + "|" + e.label;
+      if (!lab.has(k)) lab.set(k, { label: e.label, kind: e.kind, xs: [], ys: [], keys: [], hosts: [] });
       const o = lab.get(k); o.xs.push(e.lx); o.ys.push(e.ly); o.keys.push(e.key); o.lc = e.lc; o.syn = !!e.synthetic;
+      if (e.peer) o.hosts.push(...e.hosts);
+    }
+    for (const o of lab.values()) if (o.hosts.length) {
+      const hs = o.hosts.slice().sort((a, b) => a.endsWith("(추정)") - b.endsWith("(추정)"));
+      o.label = hs[0] + (hs.length > 1 ? " 외 " + (hs.length - 1) : "");
     }
     // 라벨끼리 겹치면 같은 곡선 위의 다른 자리(가운데 → 조금 앞·뒤)로 옮긴다. 토폴로지 라벨이 합성(LAN 직접) 라벨보다 먼저 자리를 잡는다.
     const bez = (c, t) => { const u = 1 - t; return [u * u * u * c[0] + 3 * u * u * t * c[2] + 3 * u * t * t * c[4] + t * t * t * c[6], u * u * u * c[1] + 3 * u * u * t * c[3] + 3 * u * t * t * c[5] + t * t * t * c[7]]; };
@@ -2166,6 +2219,7 @@ ${errs.length ? html`<section class="xsec"><header class="xsec-h"><h3>수집 오
       return "내 tailnet 기기만 (" + fmt.num(ts.peers_online) + "/" + fmt.num(ts.peers_total) + " 온라인)" + (toProxy && host ? " · " + host + " → " + (nw.tailnet_ip || "tailnet IP") : "");
     }
     if (nid === "zone:lan") return "같은 LAN의 기기 · 이 기기 " + ((nw.lan_ips || [])[0] || "");
+    if (n && n.peer) return "다른 기기 " + n.peer + " — 내 tailnet 기기가 그 기기의 Caddy 로 들어온다";
     if (!n) return "";
     // 합성 LAN 엣지: 관문(Caddy·cloudflared …) 자체의 포트가 LAN 에 바로 열려 있다
     if (nid === target && inE && inE.terminal) return "LAN 에 바로 열린 포트 " + (inE.label || "") + " — " + nodeName(nid) + " 자체로 닿음(프록시 경로 아님)";
@@ -2181,6 +2235,7 @@ ${errs.length ? html`<section class="xsec"><header class="xsec-h"><h3>수집 오
     }
     if (sv && sv.kind === "remote-access") return "SSH " + ((inE && inE.label) || ":22");
     if (nid === target) {
+      if (inE && inE.peer) return inE.peer + " 의 Caddy 가 " + (inE.via === "ssh" ? "SSH 터널로" : "tailnet 으로") + " 이 기기 포트에 닿음 · " + inE.hosts.join(", ");
       if (inE && D.nodes.get(inE.from) && D.nodes.get(inE.from).type === "zone") return "포트 " + (edgeLabel(inE) || "?") + " 로 바로 — Caddy 를 거치지 않음";
       if (inE && inE.kind === "depends") return nodeName(inE.from) + " 이(가) 안에서 사용 · 밖으로는 열리지 않음";
       if (isStatic(tsv)) return "앱 없이 Caddy 가 직접 응답(정적 라우트)";
@@ -2219,7 +2274,9 @@ ${errs.length ? html`<section class="xsec"><header class="xsec-h"><h3>수집 오
     const through = gateway ? [...new Set(cs.map(chainKind))].map((k) => KN[k] || k) : [];
     const sumText = gateway
       ? (through.length ? through.join(" · ") + " 경로가 지나는 관문이에요." : "지나는 경로가 없어요.") + (sv.exposure && sv.exposure.lan ? " 포트는 LAN에도 바로 열려 있어요." : "")
-      : SUM[lv];
+      : lv === "local" && (D.inE.get(n.id) || []).some((e) => e.peer)
+        ? "이 기기에서는 루프백에만 열었지만, 다른 기기의 Caddy 가 터널로 들어와요(아래 길)."  // MAP-6
+        : SUM[lv];
     const blocks = cs.map((c, ci) => {
       const kind = chainKind(c);
       const ind = chainIndirect(c);
@@ -2624,13 +2681,13 @@ ${alt.length ? html`<ul class="alts"><li class="alts-h">다른 길</li>${alt}</u
     } else {
       const ph = isPhys() && !!PD;
       step("graph", () => {
-        const sig = ph ? PHYS.sig(PD, { offOpen: ui.offOpen }) : sigOf(D);
+        const sig = ph ? PHYS.sig(PD, { offOpen: ui.offOpen, ifOpen: ui.ifOpen }) : sigOf(D);
         if (sig !== G.sig) {
           G.sig = sig;
           // 다시 그리면 SVG 가 통째로 바뀐다 — 키보드 초점이 지도 안에 있었으면 같은 노드(또는 "더 보기" 단추)로 되돌린다
           const ae = document.activeElement;
           const keep = ae && ae !== vp && vp.contains(ae) ? (ae.hasAttribute("data-id") ? '[data-id="' + cssEsc(ae.getAttribute("data-id")) + '"]' : ae.hasAttribute("data-more") ? '[data-more="' + cssEsc(ae.getAttribute("data-more")) + '"]' : null) : null;
-          if (ph) { G.layout = PHYS.layout(PD, { offOpen: ui.offOpen }); buildPhys(G.layout); }
+          if (ph) { G.layout = PHYS.layout(PD, { offOpen: ui.offOpen, ifOpen: ui.ifOpen }); buildPhys(G.layout); }
           else { G.layout = layout(D); buildGraph(G.layout); }
           if (view.auto) fitView(false); else { clampView(); applyView(false); }
           if (keep) { const el = vp.querySelector(keep); if (el) { try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); } } }

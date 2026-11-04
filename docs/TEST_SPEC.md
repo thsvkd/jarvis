@@ -172,3 +172,17 @@ ai-setup 의 update-ai(`res/update/update_ai.py`)를 옮긴 것이다. 아래 HA
 | ID | 케이스 | 테스트 | 상태 |
 | --- | --- | --- | --- |
 | AGENTSMD-1 | WHEN `python -m jarvis agentsmd [--harness L] [--force] [--dry-run]` 를 실행하면 THE SYSTEM SHALL 지금 폴더에 ai-setup 의 setup_agentsmd 워커와 같은 결과(고른 하네스의 AGENTS.md·CLAUDE.md, 있는 파일은 --force 없이 두기)를 만든다 | `tests/test_setup_module.py::AgentsMdCliTest`, bats `setup_agentsmd.sh …` 10건, Pester `project instructions harness selection` | GREEN (단위. kgolf(Windows) 임시 폴더 실측: dry-run 은 아무것도 쓰지 않음, claude,codex 는 AGENTS.md·CLAUDE.md(`@AGENTS.md`), 모르는 하네스는 종료 코드 1) |
+
+## 네트워크 맵
+
+> 2026-11-04 사용자 승인. 지금 지도 디자인을 유지하면서 가독성·실용성만 고친다(새 시안 3개는 기각).
+
+| ID | 케이스 | 테스트 | 상태 |
+| --- | --- | --- | --- |
+| MAP-1 | WHEN 설정 `caddy` 가 빈 값이거나 Caddy 서비스가 없으면 THE SYSTEM SHALL 개념 토폴로지에 Caddy 노드와 Caddy 로 이어지는 엣지(Tailnet :443, cloudflared :80)를 만들지 않는다. | `tests/test_topology_map.py` | GREEN (단위; 시험 core 에서 macmini 지도에 Caddy 없음 확인. 미배포) |
+| MAP-2 | WHEN 개념 지도가 엣지를 그리면 THE SYSTEM SHALL 그 엣지가 양 끝이 아닌 노드의 상자를 가로지르지 않게 경로를 잡는다. | 브라우저 확인(`tools/check-map.mjs`) | GREEN (s2 시험 core 로 9대 개념 지도 검사 통과. 미배포) |
+| MAP-3 | WHEN 묶음 안의 서비스로 가는 엣지를 그리면 THE SYSTEM SHALL 묶음 테두리가 아니라 그 서비스의 행에 눈에 보이는 가지와 끝점으로 잇는다. | 브라우저 확인(`tools/check-map.mjs`) | GREEN (s2 시험 core 로 9대 개념 지도 검사 통과. 미배포) |
+| MAP-4 | WHEN 서비스가 루프백에만 열려 있고 들어오는 엣지가 없으면 THE SYSTEM SHALL 그 서비스를 '이 기기 안에서만' 묶음에 넣고 선을 긋지 않는다. | `tests/test_topology_map.py`(local_only 표시), 브라우저 확인 | GREEN (단위 + 9대 브라우저 검사. 옛 게이트웨이는 화면이 서비스 리스너로 판정. 미배포) |
+| MAP-5 | WHEN 기기에서 `ssh -L` 포워딩 프로세스가 돌고 있으면 THE SYSTEM SHALL 스냅샷 `ssh_tunnels` 에 로컬 포트·ssh 대상 호스트·대상 포트만 넣는다(키 경로·옵션·명령 전체는 넣지 않는다). | `tests/test_tunnels.py` | GREEN (단위; s2 실측 hermes-tunnel 7개. 미배포) |
+| MAP-6 | WHEN core 가 모은 다른 기기의 Caddy 라우트가 SSH 터널 또는 tailnet 주소로 이 기기의 포트에 닿으면 THE SYSTEM SHALL `/api/devices/<id>/inbound` 로 그 길(출발 기기·주소·경유·도착 포트·서비스)을 주고, 개념 지도는 '다른 기기에서' 입구와 그 서비스까지의 엣지를 그린다. | `tests/test_fleet.py`, 브라우저 확인 | GREEN (단위 + 시험 core 실데이터: macmini 로 s2 7길·pit5 1길, cm5-1 로 pit5 1길. 미배포) |
+| MAP-7 | WHEN 물리 지도의 인터페이스가 IP 도 없고 트래픽도 없으면 THE SYSTEM SHALL 그 인터페이스들을 'N개 더' 한 칸으로 접고, 누르면 펼친다. | 브라우저 확인(`tools/check-map.mjs`) | GREEN (macmini 7개·thsvkd-mac 6개 접기/펼치기 브라우저 검사. 미배포) |

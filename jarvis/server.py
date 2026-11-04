@@ -20,7 +20,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from . import __version__, cli_login, config, cswap_usage, independent_usage, modules_api, orca, orca_issue, orca_update, orca_usage, self_update
+from . import __version__, cli_login, config, cswap_usage, fleet, independent_usage, modules_api, orca, orca_issue, orca_update, orca_usage, self_update
 from .core import why
 from .util import client_kind
 
@@ -215,7 +215,7 @@ def make_handler(collector, core=None):
             return self._json({"error": "not found"}, head, 404)
 
         def _device(self, path, u, head):
-            """core: /api/devices/<id>/(snapshot|history|changes|orca|usage)."""
+            """core: /api/devices/<id>/(snapshot|inbound|history|changes|orca|usage)."""
             parts = path.split("/")
             if len(parts) != 5 or not core.has(parts[3]):
                 return self._json({"error": "not found"}, head, 404)
@@ -227,6 +227,8 @@ def make_handler(collector, core=None):
                 gz = self._gz_ok()
                 extra = {"Cache-Control": "no-store", **({"Content-Encoding": "gzip", "Vary": "Accept-Encoding"} if gz else {})}
                 return self._send(200, snap[1] if gz else snap[0], "application/json; charset=utf-8", extra, head)
+            if what == "inbound":  # 다른 기기의 프록시를 거쳐 이 기기로 들어오는 길(MAP-6). 스냅샷과 같은 공개 범위
+                return self._json(fleet.inbound(core, dev), head)
             try:
                 if what == "orca":
                     if not self._trusted(config.VIEWERS, config.PROXIES):

@@ -8,7 +8,7 @@ import time
 import traceback
 from collections import deque
 
-from . import __version__, config, discovery, ingress, model, runtime, svc, tailnet, util
+from . import __version__, config, discovery, ingress, model, runtime, svc, tailnet, tunnels, util
 from .changes import InventoryJournal
 from .system import SystemCollector
 from .util import http_probe
@@ -194,6 +194,7 @@ class Collector:
         self._guard("neighbors", lambda: self._set(neighbors=discovery.neighbors(
             (self.raw.get("medium") or {}).get("iface_addrs") or {})))
         self._guard("tailscale", lambda: self._set(tailscale=tailnet.tailscale_status()))
+        self._guard("ssh_tunnels", lambda: self._set(ssh_tunnels=tunnels.collect()))
         if config.TUNNEL_CONTAINER:  # 설정에서 빈 값이면 이 기기에 터널이 없는 것이다
             self._guard("tunnel", lambda: self._set(tunnel=self.tunnel.collect()))
 

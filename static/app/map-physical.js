@@ -34,6 +34,8 @@
   const TN_KINDS = new Set(["overlay", "tailnet-direct", "tailnet-relay", "tailnet-idle", "offline"]);
   const TN_PEER = new Set(["tailnet-direct", "tailnet-relay", "tailnet-idle"]);
   const IF_RANK = { wired: 0, wifi: 1, tailnet: 2, docker: 3, other: 4 };
+  /** 쓰지 않는 인터페이스: IP 도 없고 트래픽도 없다 → 기본으로 'N개 더' 한 칸에 접는다(MAP-7) */
+  const idleIf = (n) => n.type === "iface" && n.kind !== "tailnet" && !(n.ips || []).length && !(n.rx_bps > 0) && !(n.tx_bps > 0);
   const f1 = (v) => Math.round(v * 10) / 10;
 
   const TYPE_L = {
@@ -364,7 +366,16 @@
       const right = bx + (lane ? 56 : DP);
       // 위 테두리 인터페이스: 제목 칩과 터널 통로(있으면)를 비켜서
       let px = Math.max(tab.x + tab.w + 28, tunnelMaxX != null ? tunnelMaxX + 34 : -Infinity);
-      for (const p of topPorts) { place(p.id, { x: px, y: devY - PH / 2, w: PW, h: PH, role: "port", side: "top" }); px += PW + 18; }
+      const idle = topPorts.filter(idleIf);
+      const fold = idle.length > 1 && !opt.ifOpen;  // 하나뿐이면 접어도 칸이 줄지 않는다
+      const shownTop = fold ? topPorts.filter((p) => !idleIf(p)) : topPorts;
+      for (const p of shownTop) { place(p.id, { x: px, y: devY - PH / 2, w: PW, h: PH, role: "port", side: "top" }); px += PW + 18; }
+      if (idle.length > 1) {
+        const mw = fold ? 132 : 56;
+        more.push({ id: "ifaces", kind: "ifaces", x: px, y: devY - 11, w: mw, h: 22, open: !fold, count: idle.length });
+        px += mw + 18;
+      }
+      topPorts.splice(0, topPorts.length, ...shownTop);
       const w = Math.max(right, px - 18 + 24) - DX;
       const hgt = DTOP + Math.max(bodyH, 60) + DBOT;
       dev = place(self.id, { x: DX, y: devY, w, h: hgt, role: "dev", tab });
@@ -573,6 +584,7 @@
     for (const nn of PD.nodes.values()) {
       if (pos.has(nn.id)) continue;
       if (nn.parent === "grp:offline" && !opt.offOpen) continue;
+      if (!opt.ifOpen && idleIf(nn) && more.some((m) => m.kind === "ifaces")) continue;  // 'N개 더'로 접힌 인터페이스(MAP-7)
       if (nn.parent && pos.has(nn.parent) && pos.get(nn.parent).role === "card") continue;
       place(nn.id, { x: lx, y: rowY, w: CARDW, h: CARDH, role: "card" }); order.push(nn.id); lx += P;
     }
@@ -771,7 +783,8 @@
     if (!PD) return "";
     const ns = [...PD.nodes.values()].map((n) => [n.id, n.type, n.parent || "", n.label, n.role || "", n.kind || "", n.online === false ? 0 : 1].join("|")).sort().join(";");
     const es = PD.edges.map((e) => e.key).sort().join(";");
-    return "P#" + ns + "#" + es + "#" + (opt && opt.offOpen ? 1 : 0);
+    const idle = [...PD.nodes.values()].filter(idleIf).map((n) => n.id).sort().join(",");  // 접히는 인터페이스가 바뀌면 다시 배치
+    return "P#" + ns + "#" + es + "#" + (opt && opt.offOpen ? 1 : 0) + (opt && opt.ifOpen ? 1 : 0) + "#" + idle;
   }
 
   // ------------------------------------------------------------------ SVG
@@ -877,7 +890,12 @@ ${two ? html`<text class="n-meta" x="30" y="32" data-mx="${f1(p.w - 30 - 12)}"><
         }
       }
     }
-    const tog = L.more.map((m) => html`<g class="n-more p-more" data-more="offline" data-open="${m.open ? "1" : "0"}" tabindex="0" role="button" aria-expanded="${m.open ? "true" : "false"}" aria-label="${m.open ? "오프라인 기기 목록 접기" : "오프라인 기기 " + m.count + "대 펼치기"}" transform="${"translate(" + f1(m.x) + " " + f1(m.y) + ")"}"><rect width="${m.w}" height="${m.h}" rx="7"/><text x="${m.w / 2}" y="${m.h / 2 + 4}" text-anchor="middle">${m.open ? "접기" : "펼치기"}</text></g>`);
+    const tog = L.more.map((m) => {
+      const ifs = m.kind === "ifaces";
+      const aria = ifs ? (m.open ? "쓰지 않는 인터페이스 접기" : "쓰지 않는 인터페이스 " + m.count + "개 펼치기") : m.open ? "오프라인 기기 목록 접기" : "오프라인 기기 " + m.count + "대 펼치기";
+      const txt = m.open ? "접기" : ifs ? "인터페이스 " + m.count + "개 더" : "펼치기";
+      return html`<g class="n-more p-more" data-more="${ifs ? "ifaces" : "offline"}" data-open="${m.open ? "1" : "0"}" tabindex="0" role="button" aria-expanded="${m.open ? "true" : "false"}" aria-label="${aria}" transform="${"translate(" + f1(m.x) + " " + f1(m.y) + ")"}"><rect width="${m.w}" height="${m.h}" rx="7"/><text x="${m.w / 2}" y="${m.h / 2 + 4}" text-anchor="middle">${txt}</text></g>`;
+    });
     return html`<g class="pboxes">${boxes}${caps}</g><g class="pghosts">${ghosts}</g><g class="edges">${edges}</g><g class="p-virt" aria-hidden="true"></g><g class="elabels">${labels}</g><g class="nodes">${nodes}${tog}</g>`;
   }
 
@@ -1476,7 +1494,7 @@ ${kids.length ? html`<ul class="pt-kids" id="${tid}"${raw(o ? "" : " hidden")}>$
 
   window.JarvisMapPhys = {
     init(helpers) { h = helpers; },
-    derive, name, typeLabel, layout, sig, svg, info, hl, virt, published, cellSet, focusRects, caption, inspect, tree, treeIds, summary, groupTitle, labelW,
+    derive, name, typeLabel, layout, sig, svg, idleIf, info, hl, virt, published, cellSet, focusRects, caption, inspect, tree, treeIds, summary, groupTitle, labelW,
     capText: (PD, id) => (id === "lan" ? lanText(PD) : null), staticFor,
     TYPE_L, KIND_L, FS,
   };

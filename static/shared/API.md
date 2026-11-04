@@ -13,6 +13,7 @@
 | `POST /api/orca/update` | Linux deb(`orca-ide`)만. 공식 릴리스가 더 새로우면 deb 를 받아 sha512 를 확인한 뒤 `orca-serve` 를 멈추고 `sudo -n apt install -y -- <deb>` 로 설치하고 다시 띄운다. 이어서 `orca-ide skills update --all`. 이미 최신이면 패키지는 건너뛰고 스킬만 갱신한다. 202 로 시작하고 진행은 `/api/orca` 의 `update`(`phase`: manifest·download·install·skills, `app`: current·updated, `from_version`, `to_version`). deb 가 아니거나 유닛이 없으면 409 | 설정 `core` 만. 헤더 `X-Jarvis-Action: orca-update` 필수 |
 | `GET /api/orca/update` | 읽기 전용 `{supported, installed, latest, current, error}`. 설치본과 공식 릴리스를 비교한다. 패키지를 받거나 서비스를 멈추지 않는다. `current` 는 설치본이 릴리스와 같거나 더 새로울 때. 지원하지 않으면 `supported:false` 와 이유 | 설정 `core` 의 tailnet IP 만. 캐시 없음 |
 | `GET /api/devices` | core 전용(설정 `devices`). 기기별 요약 `{generated_at, devices:[{id, url, reachable, ok_at, error, fails, host, version, status, alerts, services, model, cpu_pct, mem_pct, disk_pct}]}` | 10초마다 각 게이트웨이 `/api/snapshot` 을 pull. 게이트웨이(core 가 아닌 jarvis)는 404 |
+| `GET /api/devices/<id>/inbound` | core 전용. 다른 기기의 Caddy 라우트가 SSH 터널(그 기기 `ssh_tunnels`) 또는 tailnet 주소로 이 기기 포트에 닿는 길 `{generated_at, device, paths:[{from, host, public, via: "ssh"|"tailnet", port(ssh 일 때 출발 기기의 로컬 포트), to_port, service_id, guess, status}]}`. 기기는 각 스냅샷의 tailnet 이름·IP·설정 id·ssh 별칭으로 맞춘다. `guess`: 포트 주인이 OrbStack 같은 대리 프로세스라 주소 첫 칸과 이름이 맞는 컨테이너로 추정했다 | 스냅샷과 같다. 캐시 없음(요청마다 core 가 들고 있는 스냅샷을 맞댄다) |
 | `GET /api/devices/<id>/snapshot` · `/history?range=` · `/changes` | core 전용. 그 기기 응답 그대로. snapshot 은 마지막 성공본(없으면 503), 나머지는 요청 시 전달(실패 502) | |
 | `GET /api/devices/<id>/orca` | core 전용. 페어링 버튼: 그 기기 `/api/orca` 에 QR 행렬 `codes.*.qr`(행마다 `"0101…"`)과 `supported` 를 붙인다. 옛 게이트웨이(404)·core 미지정(403)은 `{supported:false, error}` | 설정 `viewers` 의 tailnet IP 만(루프백·LAN 포함 그 밖은 403). 설정 `proxies` 의 프록시를 거친 요청은 그 프록시가 붙인 X-Forwarded-For 마지막 항목으로 판정. 캐시 없음 |
 | `POST /api/devices/<id>/orca/issue?scope=` | core 전용. 화면의 발급 버튼: 그 게이트웨이 `POST /api/orca/issue` 로 전달 | `viewers`(proxies 판정 포함) 만. 헤더 `X-Jarvis-Action: orca-issue` 필수 |
@@ -54,6 +55,7 @@ ingress     caddy(라우트·버전) · tunnel(Cloudflare) · traffic(Caddy 접�
 tailscale   tailnet 상태·피어
 topology    네트워크 맵 — 개념 관점(서비스가 어떤 경로로 노출되는가)
 topology_physical  네트워크 맵 — 물리 관점(어느 기기·인터페이스·도커 네트워크 안에 무엇이 있는가)
+ssh_tunnels[] 이 기기에서 도는 ssh 로컬 포워딩(-L) {port, host(ssh 대상), to_port}. 원격 쪽 루프백으로 가는 것만, 키·옵션·명령은 넣지 않는다
 monitor     이 모니터 자신의 상태(버전·커밋·수집기별 최신성과 오류·자원)
 pm2         pm2 데몬과 앱 목록 {available, daemon_pid, apps:[{name, pm_id, pid, status, restarts, unstable_restarts, uptime_s, cpu_pct, mem_bytes, exec, cwd, autorestart}]}
 spark       최근 5분(5초 간격 60점) 시계열 — 스파크라인용
@@ -240,10 +242,12 @@ listeners:  {proto: "tcp"|"udp", port, addrs, process, pid, owner_kind: "contain
 
 ```js
 nodes: [{id, label, type: "zone"|"edge"|"infra"|"service"|"internal"|"host", layer: 0..5, status,
-         category?, service_id?, detail?}]
+         category?, service_id?, detail?, local_only?}]
 edges: [{from, to, kind: "public"|"tailnet"|"lan"|"depends", label}]
 ```
 `layer` 는 왼쪽→오른쪽 배치 힌트다: 0 영역(Internet·Tailnet·LAN) · 1 Cloudflare 엣지 · 2 cloudflared · 3 Caddy·SSH · 4 서비스·호스트 서버 · 5 내부 백엔드.
+Caddy 노드와 그리로 가는 엣지는 설정 `caddy` 가 있고 Caddy 서비스가 있을 때만 생긴다. `local_only`(host 노드): 루프백에만 열었다 — 지도는 들어오는 엣지가 없으면 '이 기기 안에서만' 묶음에 둔다.
+화면은 core 의 `/api/devices/<id>/inbound` 를 읽어 출발 기기마다 영역 `zone:peer:<id>` 와 그 기기에서 서비스로 가는 엣지(kind tailnet)를 더한다(스냅샷에는 없다).
 
 ## topology_physical
 

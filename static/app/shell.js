@@ -688,10 +688,36 @@ ${href ? html`<a class="sh-pop-link" href="${href}">자기 진단 자세히 보�
     };
     return origSubscribe.call(P, (snap, state) => {
       try { update(snap, state); } catch (x) { console.error("[shell] 헤더 갱신 실패:", x); }
+      inboundTick(snap);
       // 페이지 렌더 오류가 jarvis.js 로 새면 "가져오기 실패"로 잡혀 오프라인·재시도 지연이 된다 → 여기서 막는다.
       if (cb) { try { cb(snap, state); } catch (x) { console.error("[shell] 페이지 렌더 실패:", x); } }
     }, o);
   };
+
+  // ---- 다른 기기를 거쳐 들어오는 길(MAP-6): core 만 안다(/api/devices/<id>/inbound). 30초마다, 게이트웨이(404)면 그만 묻는다.
+  //   ?device= 로 보면 그 기기, 아니면 core 의 기기 목록에서 이 스냅샷의 호스트 이름과 같은 기기.
+  let INB = null; let inbAt = 0; let inbOff = false; let inbBusy = false;
+  const tmo = () => (AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined);  // 응답이 없으면 다음 주기를 막지 않게
+  async function inboundTick(snap) {
+    if (inbOff || inbBusy || Date.now() - inbAt < 30000) return;
+    inbBusy = true; inbAt = Date.now();
+    try {
+      let id = P.device;
+      if (!id) {
+        const r = await fetch("/api/devices", { cache: "no-store", signal: tmo() });
+        if (!r.ok) { inbOff = r.status === 404; return; }
+        const host = ((snap && snap.meta) || {}).host;
+        const rows = ((await r.json()).devices || []).filter((d) => d.host && d.host === host);
+        if (rows.length !== 1) return;  // 같은 호스트 이름의 기기가 둘이면 어느 쪽인지 모른다
+        const row = rows[0];
+        id = row.id;
+      }
+      const r = await fetch("/api/devices/" + encodeURIComponent(id) + "/inbound", { cache: "no-store", signal: tmo() });
+      if (!r.ok) { inbOff = r.status === 404; return; }
+      const d = await r.json();
+      INB = d && Array.isArray(d.paths) && d.paths.length ? d : null;
+    } catch (e) { /* 다음 주기에 다시 */ } finally { inbBusy = false; }
+  }
 
   // ================================================================== 제품 공용 도구
   // 두 페이지(개요·네트워크 맵)가 같은 말·같은 숫자·같은 판정을 쓰도록 한곳에 둔다. 페이지 스크립트보다 먼저 실행된다.
@@ -962,13 +988,18 @@ ${href ? html`<a class="sh-pop-link" href="${href}">자기 진단 자세히 보�
   const SERVICE_LIKE = new Set(["service", "host", "internal", "extra"]);
   function graphOf(s) {
     if (!s) return null;
-    if (s.__jarvisGraph) return s.__jarvisGraph;
+    if (s.__jarvisGraph && s.__jarvisGraph.inb === INB) return s.__jarvisGraph;
     const svcById = new Map((s.services || []).map((x) => [x.id, x]));
     const topo = s.topology || {};
     const nodes = new Map();
     for (const n of topo.nodes || []) {
       if (!n || !n.id) continue;
-      nodes.set(n.id, Object.assign({}, n, { svc: n.service_id ? svcById.get(n.service_id) || null : null }));
+      const svc = n.service_id ? svcById.get(n.service_id) || null : null;
+      if (n.id === "infra:caddy" && !svc) continue;  // 옛 게이트웨이는 Caddy 가 없어도 노드를 줬다(MAP-1)
+      // 옛 게이트웨이에는 local_only 표시가 없다 → 서비스 노출 정보로 채운다(MAP-4)
+      const tcp = ((svc && svc.listeners) || []).filter((l) => l.proto === "tcp");
+      const lo = n.local_only != null ? n.local_only : n.type === "host" && tcp.length > 0 && tcp.every((l) => l.scope === "loopback");
+      nodes.set(n.id, Object.assign({}, n, { svc, local_only: lo }));
     }
     const svcNode = new Map();
     for (const n of nodes.values()) if (n.service_id) svcNode.set(n.service_id, n.id);
@@ -996,13 +1027,34 @@ ${href ? html`<a class="sh-pop-link" href="${href}">자기 진단 자세히 보�
         add({ from: "zone:lan", to: nid, kind: "lan", label: ports.slice(0, 2).join(" ") + (ports.length > 2 ? " +" + (ports.length - 2) : ""), synthetic: true, terminal: true });
       }
     }
+    // 다른 기기의 프록시에서 들어오는 길: 출발 기기마다 영역 하나(zone:peer:<id>), 같은 서비스로 가는 주소는 선 하나로 묶는다
+    if (INB) {
+      // 주소는 도메인을 뗀 앞부분만(yt.hermes.example.dev → yt.hermes). 도메인을 모르면 끝 두 칸을 뗀다
+      const dom = ((s.meta || {}).domain || "").toLowerCase();
+      const short = (h) => { h = String(h || ""); if (dom && h.toLowerCase().endsWith("." + dom)) return h.slice(0, -dom.length - 1); const p = h.split("."); return p.length > 2 ? p.slice(0, -2).join(".") : h; };
+      for (const p of INB.paths) {
+        const nid = p.service_id && svcNode.get(p.service_id);
+        if (!nid) continue;
+        const zid = "zone:peer:" + p.from;
+        if (!nodes.has(zid)) nodes.set(zid, { id: zid, label: p.from, type: "zone", layer: 0, status: "up", peer: p.from, vias: new Set(), synthetic: true });
+        const z = nodes.get(zid);
+        z.vias.add(p.via);
+        z.detail = "Caddy → " + (z.vias.has("ssh") ? "SSH 터널" : "tailnet");
+        const key = zid + "→" + nid + "·tailnet";
+        let e = edges.find((x) => x.key === key);
+        if (!e) { e = { from: zid, to: nid, kind: "tailnet", peer: p.from, hosts: [], key }; seen.add(key); edges.push(e); }
+        e.hosts.push(short(p.host) + (p.guess ? "(추정)" : ""));
+        e.via = p.via;
+        e.label = e.hosts[0] + (e.hosts.length > 1 ? " 외 " + (e.hosts.length - 1) : "");
+      }
+    }
     const inE = new Map(); const outE = new Map();
     for (const e of edges) {
       if (!inE.has(e.to)) inE.set(e.to, []);
       if (!outE.has(e.from)) outE.set(e.from, []);
       inE.get(e.to).push(e); outE.get(e.from).push(e);
     }
-    const G = { s, svcById, nodes, edges, inE, outE, svcNode };
+    const G = { s, svcById, nodes, edges, inE, outE, svcNode, inb: INB };
     try { Object.defineProperty(s, "__jarvisGraph", { value: G, enumerable: false, configurable: true }); } catch (e) { /* 얼린 객체: 캐시 없이 */ }
     return G;
   }
@@ -1019,6 +1071,8 @@ ${href ? html`<a class="sh-pop-link" href="${href}">자기 진단 자세히 보�
     if (ex.public) k.add("public");
     if (ex.tailnet) k.add("tailnet");
     if (ex.lan) k.add("lan");
+    // 다른 기기의 프록시가 터널로 들어오는 길(루프백 전용 서비스도 그 길로는 닿는다)
+    for (const e of G.inE.get(id) || []) if (e.peer) k.add(e.kind);
     return k;
   }
   /** 영역에서 노드까지의 길 목록. 각 길 = { nodes: [id…], edges: [e…] } */

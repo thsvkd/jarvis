@@ -955,6 +955,7 @@ def build(raw):
         "tailscale": ts,
         "topology": topo,
         "topology_physical": topo_phys,
+        "ssh_tunnels": raw.get("ssh_tunnels") or [],
         "pm2": pm2 or {"available": False, "apps": []},
         "monitor": monitor,
         "changes": raw.get("changes") or [],
@@ -984,10 +985,13 @@ def _topology(services, tunnel, ts, lan_ips):
         node("infra:cloudflared", "cloudflared", "infra", 2, cf["status"] if cf else "unknown",
              detail=f"{tunnel.get('connections') or 0} conns", service_id="infra:cloudflared")
         edge("edge:cloudflare", "infra:cloudflared", "public", "QUIC")
-        edge("infra:cloudflared", "infra:caddy", "public", ":80")
     cd = by_id.get("infra:caddy")
-    node("infra:caddy", "Caddy", "infra", 3, cd["status"] if cd else "unknown", service_id="infra:caddy")
-    edge("zone:tailnet", "infra:caddy", "tailnet", ":443")
+    # Caddy 가 없는 기기(설정 caddy = "" 이거나 서비스가 없음)에는 Caddy 노드도 그리로 가는 선도 없다(MAP-1)
+    if config.CADDY_CONTAINER and cd:
+        if config.TUNNEL_CONTAINER:
+            edge("infra:cloudflared", "infra:caddy", "public", ":80")
+        node("infra:caddy", "Caddy", "infra", 3, cd["status"], service_id="infra:caddy")
+        edge("zone:tailnet", "infra:caddy", "tailnet", ":443")
     ssh = by_id.get("infra:ssh")
     if ssh:
         node("infra:ssh", "SSH", "infra", 3, ssh["status"], service_id="infra:ssh")
@@ -997,14 +1001,19 @@ def _topology(services, tunnel, ts, lan_ips):
         if s["category"] in ("public", "tailnet"):
             node(s["id"], s["name"], "service", 4, s["status"], category=s["category"], service_id=s["id"],
                  detail=s["hostnames"][0])
-            edge("infra:caddy", s["id"], s["category"], None)
+            if any(n["id"] == "infra:caddy" for n in nodes):
+                edge("infra:caddy", s["id"], s["category"], None)
         elif s["category"] == "internal":
             node(s["id"], s["name"], "internal", 5, s["status"], category="internal", service_id=s["id"],
                  detail=s["title"])
         elif s["category"] in ("host", "hermes") and (s["runtime"] or {}).get("type") != "remote":
-            node(s["id"], s["name"], "host", 4, s["status"], category=s["category"], service_id=s["id"],
-                 detail=", ".join(str(l["port"]) for l in s["listeners"] if l["proto"] == "tcp"))
             ex = s["exposure"]
+            # local_only: TCP 포트를 열었고 모두 루프백이다(포트가 없거나 멈춘 서비스는 아니다). 다른 기기에서 터널로
+            # 들어오는 길이 없으면 지도가 '이 기기 안에서만'에 둔다(MAP-4)
+            tcp = [l for l in s["listeners"] if l["proto"] == "tcp"]
+            node(s["id"], s["name"], "host", 4, s["status"], category=s["category"], service_id=s["id"],
+                 detail=", ".join(str(l["port"]) for l in tcp),
+                 local_only=bool(tcp) and all(l.get("scope") == "loopback" for l in tcp))
             if ex["lan"]:
                 edge("zone:lan", s["id"], "lan", None)
             if "direct-tailnet" in ex["via"]:
@@ -1018,7 +1027,7 @@ def _topology(services, tunnel, ts, lan_ips):
 
 # 수집기별 '오래됐다'고 볼 나이(초). 주기의 3~4배.
 STALE_LIMIT_S = {"system_fast": 10, "system": 45, "processes": 45, "docker": 45, "systemd": 45, "listeners": 45,
-                 "tailscale": 45, "tunnel": 45, "caddy_log": 45, "caddy": 200, "probes": 200,
+                 "tailscale": 45, "ssh_tunnels": 45, "tunnel": 45, "caddy_log": 45, "caddy": 200, "probes": 200,
                  "hermes": 200, "dns": 900, "http_ports": 900, "config": 45, "inventory": 45, "neighbors": 45,
                  "pm2": 120}
 

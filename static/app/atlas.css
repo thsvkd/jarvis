@@ -550,6 +550,9 @@ button.hchip:hover { background: color-mix(in srgb, var(--kc) 22%, transparent);
 .reg-loose .reg-bg { fill: none; stroke-dasharray: 2 4; }
 .reg-shelf .reg-bg { fill: color-mix(in srgb, var(--kc) 3%, transparent); }
 .reg[data-cat="direct"] { --kc: var(--k-lan); }
+/* 이 기기 안에서만(루프백, 들어오는 길 없음) — 선이 없는 묶음이라 점선 테두리로 "닫힌 칸"을 보인다 */
+.reg[data-cat="local"] { --kc: var(--muted); }
+.reg[data-cat="local"] .reg-bg { fill: color-mix(in srgb, var(--kc) 4%, transparent); stroke-dasharray: 4 3; }
 .reg-direct .reg-bg { fill: color-mix(in srgb, var(--kc) 4%, transparent); stroke-dasharray: 3 3; }
 .reg-ic { color: var(--kc); fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .reg-l { font-size: var(--fs-xs); font-weight: var(--fw-bold); fill: color-mix(in srgb, var(--kc) 70%, var(--text)); }
@@ -612,6 +615,9 @@ button.hchip:hover { background: color-mix(in srgb, var(--kc) 22%, transparent);
 .n-zone-internet { --kc: var(--k-public); }
 .n-zone-tailnet { --kc: var(--k-tailnet); }
 .n-zone-lan { --kc: var(--k-lan); }
+/* 다른 기기의 프록시(zone:peer:<id>) — 사용자는 tailnet 으로 그 기기에 닿는다 */
+.n-zone-peer { --kc: var(--k-tailnet); }
+.n-zone-peer .n-bg { stroke-dasharray: 4 3; }
 .n-zone .n-bg { fill: color-mix(in srgb, var(--kc) 11%, var(--tile)); stroke: color-mix(in srgb, var(--kc) 50%, transparent); }
 .n-zone .n-ic { stroke: var(--kc); }
 .n-edge .n-bg { fill: color-mix(in srgb, var(--k-public) 5%, var(--tile)); }
