@@ -99,7 +99,7 @@ class IndependentUsageTest(unittest.TestCase):
         self.assertEqual(data["unavailable"], [])
 
     def test_fresh_logins_identify_where_a_login_would_lose_nothing(self):
-        """covers: USAGE-4"""
+        """covers: USAGE-4, USAGE-5"""
         self.fresh.return_value = ["codex"]  # 가짜: codex 자격만 없음
         self.orca.return_value = [{"id": "codex", "accounts": [{"label": "a@example.com", "windows": [], "buckets": []}]}]
         empty = {"status": "unavailable", "accounts": []}
@@ -112,8 +112,10 @@ class IndependentUsageTest(unittest.TestCase):
                 mock.patch.object(independent_usage.kimi_usage, "read", return_value=empty), \
                 mock.patch.object(independent_usage.minimax_usage, "read", return_value=empty), \
                 mock.patch.object(independent_usage.zcode_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.cli_login, "available", return_value=["codex", "grok"]):
+                mock.patch.object(independent_usage.cli_login, "available", return_value=["codex", "grok"]), \
+                mock.patch.object(independent_usage.cswap_usage, "status", return_value={"version": "0.2.0", "pinned": "0.2.1", "note": None}):
             data = independent_usage.read(force=True)
+        self.assertEqual(data["hswap"], {"version": "0.2.0", "pinned": "0.2.1", "note": None})  # 기기 행의 hswap 버전
         self.assertEqual(data["logins"], ["codex", "grok"])
         self.assertEqual(data["fresh_logins"], ["codex"])  # 화면은 이 목록으로만 기기 행 '로그인' 버튼을 낸다
 
@@ -139,7 +141,7 @@ class IndependentUsageTest(unittest.TestCase):
         self.assertFalse(data["providers"][0]["accounts"][0]["active"])
 
     def test_fresh_logins_are_omitted_when_nothing_is_confirmed(self):
-        """covers: USAGE-4"""
+        """covers: USAGE-4, USAGE-5"""
         # 자격이 없음이 확인되지 않으면(빈 목록) 키 자체를 넣지 않는다: 화면은 버튼을 내지 않는다
         with mock.patch.object(independent_usage, "_claude", return_value={"accounts": []}), \
                 mock.patch.object(independent_usage, "_codex", return_value=[]), \
@@ -149,9 +151,11 @@ class IndependentUsageTest(unittest.TestCase):
                 mock.patch.object(independent_usage.gemini_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
                 mock.patch.object(independent_usage.kimi_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
                 mock.patch.object(independent_usage.minimax_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.zcode_usage, "read", return_value={"status": "unavailable", "accounts": []}):
+                mock.patch.object(independent_usage.zcode_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent_usage.cswap_usage, "status", return_value=None):
             data = independent_usage.read(force=True)
         self.assertNotIn("fresh_logins", data)  # 키가 없으면 화면도 버튼을 내지 않는다
+        self.assertNotIn("hswap", data)  # 게이트웨이가 아직 확인하지 않았다
 
     def test_collects_without_orca_and_keeps_unavailable_distinct(self):
         """covers: USAGE-3"""

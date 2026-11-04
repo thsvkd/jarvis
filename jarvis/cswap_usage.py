@@ -32,41 +32,98 @@ STATUS = {
 }
 _lock = threading.Lock()
 _cache = None  # (monotonic, 결과)
-# 자동 설치: 검증한 커밋으로 고정한다(서비스가 최신판을 저절로 받아 실행하지 않게). PyPI 에 없어 GitHub 소스 묶음을 받는다
-# (git 이 없는 기기도 된다). 올리기는 사람이 한다: 여기 커밋을 바꾸고, 이미 깔린 기기는 uv tool install --force 로 다시 깐다
-PACKAGE = "harness-swap @ https://github.com/thsvkd/harness-swap/archive/51c7a8a5f26586930405f52e628a7cc3867718d1.zip"  # v0.2.0
+# 자동 설치·올리기: 검증한 버전으로 고정한다(서비스가 최신판을 저절로 받아 실행하지 않게). PyPI 배포본이 그 태그의 소스와 같은지
+# 대조한 뒤 여기 버전을 올려 릴리스하면, 게이트웨이(maintain)가 이보다 낮은 hswap 을 이 버전으로 올린다
+# ponytail: 버전만 고정한다. 같은 버전에 나중에 더해진 배포 파일은 대조 없이 받을 수 있다. 막으려면 파일 해시로 고정한다
+VERSION = "0.2.1"  # 태그 v0.2.1 = 38be330
+PACKAGE = f"harness-swap=={VERSION}"
 INSTALL_TIMEOUT_S = 600  # 처음이면 uv 가 Python 3.12+ 까지 받는다
+CHECK_S = 3600  # 버전 확인 주기. 설치에 실패하면 Installer 가 6시간 뒤에 다시 시도한다
+_version = None  # 마지막으로 확인한 설치 버전("0.2.1"). 화면의 기기 행에 보인다
 
 
 def binary():
     return which_local("hswap")
 
 
+def installed_version():
+    """설치된 hswap 의 버전("0.2.1"). 없거나 읽지 못하면 None."""
+    exe = binary()
+    if not exe:
+        return None
+    try:
+        p = subprocess.run([exe, "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT_S,
+                           stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    m = re.fullmatch(r"hswap (\d+\.\d+\.\d+)", p.stdout.strip())
+    return m.group(1) if m else None
+
+
+def _key(v):
+    return tuple(int(x) for x in v.split("."))
+
+
 def _install():
-    """uv tool install(없으면 pipx)."""
+    """uv tool install(없으면 pipx). 이미 깔린 낮은 버전도 같은 명령으로 올린다: uv 는 기존 도구 환경의 Python 을 그대로 쓴다
+    (thsvkd-home 처럼 Python 경로를 고정해 둔 기기도 유지된다). pipx 는 --force 가 있어야 다시 깐다."""
+    global _version
     uv, pipx = which_local("uv"), which_local("pipx")
     if not (uv or pipx):
         raise RuntimeError("uv·pipx 가 없어 hswap 을 설치할 수 없습니다")
-    cmd = [uv, "tool", "install", PACKAGE] if uv else [pipx, "install", PACKAGE]
-    try:
-        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=INSTALL_TIMEOUT_S,
-                           stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    except subprocess.TimeoutExpired:
-        raise RuntimeError(f"hswap 설치가 {INSTALL_TIMEOUT_S}초 안에 끝나지 않았습니다")
+    cmd = [uv, "tool", "install", PACKAGE] if uv else [pipx, "install", "--force", PACKAGE]
+    # 환경을 바꾸는 동안 jarvis 의 list·switch 가 hswap 을 띄우지 않게 한다(자격을 바꾸던 switch 가 중간에 끊기지 않게)
+    with _lock:
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=INSTALL_TIMEOUT_S,
+                               stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"hswap 설치가 {INSTALL_TIMEOUT_S}초 안에 끝나지 않았습니다")
     if p.returncode or not binary():
         last = (p.stderr.strip().splitlines() or ["원인 모름"])[-1]
         raise RuntimeError(f"hswap 설치 실패(종료 코드 {p.returncode}): {last}")
+    _version = installed_version()
+    if _version is None or _key(_version) < _key(VERSION):  # PATH 앞의 다른 hswap 이 가리는 경우 등. 실패로 보여 6시간 간격을 지킨다
+        raise RuntimeError(f"hswap {VERSION} 을 설치했지만 실행되는 hswap 은 {_version or '버전을 읽지 못하는 것'}입니다")
 
 
 installer = Installer("hswap", _install)
 
 
 def ensure():
-    """hswap 이 없으면 뒤에서 설치를 시작한다. Claude Code 가 없는 기기는 hswap 이 쓸모없어 설치하지 않는다.
-    None(설치하지 않음) 또는 화면에 붙일 문구."""
+    """hswap 이 없거나 고정 버전보다 낮으면 뒤에서 고정 버전을 설치한다. Claude Code 가 없는 기기는 hswap 이 쓸모없어 설치하지 않는다.
+    버전을 아직 모르거나 읽지 못했거나 더 높으면(사람이 먼저 올린 것) 그대로 둔다. None(할 일 없음) 또는 화면에 붙일 문구."""
     if not config.CSWAP_INSTALL or not which_local("claude"):
         return None
+    if binary() and (_version is None or _key(_version) >= _key(VERSION)):
+        return None
     return installer.ensure("Claude 계정별 사용량")
+
+
+def check():
+    """설치된 버전을 다시 읽고 ensure() 로 맞춘다."""
+    global _version
+    _version = installed_version()
+    return ensure()
+
+
+def maintain():
+    """게이트웨이가 도는 동안 hswap 버전을 CHECK_S 마다 맞춘다. 독립 조회 경로는 설치하지 않으므로(USAGE-3) 여기서 한다."""
+    while True:
+        try:
+            check()
+        except Exception as e:
+            print(f"[jarvis] hswap 버전 확인 실패: {scrub_home(str(e))[:200]}", flush=True)
+        time.sleep(CHECK_S)
+
+
+def status():
+    """화면의 기기 행: 확인한 hswap 버전(없으면 None)과 고정 버전, 설치 중이거나 실패했으면 그 문구. 확인 전이면 None."""
+    if _version is None and installer.state is None:
+        return None
+    behind = _version is None or _key(_version) < _key(VERSION)  # 맞은 뒤에는 지난 실패 문구를 보이지 않는다
+    note = {"running": "설치하는 중", "failed": installer.error}.get(installer.state) if behind else None
+    return {"version": _version, "pinned": VERSION, "note": note}
 
 
 def _sec(iso):

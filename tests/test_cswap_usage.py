@@ -187,13 +187,66 @@ class InstallTest(unittest.TestCase):
     def test_installs_pinned_with_uv_once(self):
         def run(cmd, **k):
             self.which["hswap"] = "/home/alice/.local/bin/hswap"
-            return mock.Mock(returncode=0, stderr="")
-        with mock.patch.object(cswap_usage.subprocess, "run", side_effect=run) as r:
+            return mock.Mock(returncode=0, stderr="", stdout=f"hswap {cswap_usage.VERSION}\n")
+        with mock.patch.object(cswap_usage.subprocess, "run", side_effect=run) as r, mock.patch.object(cswap_usage, "_version", None):
             self.assertIsNone(cswap_usage.ensure())  # 그 자리에서 끝났다(실제로는 뒤에서 돌아 '설치 중'이 먼저 보인다)
-        self.assertEqual(r.call_args[0][0], ["/home/alice/.local/bin/uv", "tool", "install", cswap_usage.PACKAGE])
-        # PyPI 에 없어 GitHub 소스 묶음을 커밋으로 고정한다(최신판을 저절로 받지 않게, git 없는 기기도)
-        self.assertRegex(cswap_usage.PACKAGE, r"^harness-swap @ https://github\.com/thsvkd/harness-swap/archive/[0-9a-f]{40}\.zip$")
+            self.assertEqual(cswap_usage.status(), {"version": cswap_usage.VERSION, "pinned": cswap_usage.VERSION, "note": None})
+        self.assertEqual(r.call_args_list[0][0][0], ["/home/alice/.local/bin/uv", "tool", "install", cswap_usage.PACKAGE])
+        # PyPI 배포본을 버전으로 고정한다(최신판을 저절로 받지 않게)
+        self.assertEqual(cswap_usage.PACKAGE, f"harness-swap=={cswap_usage.VERSION}")
+        self.assertRegex(cswap_usage.VERSION, r"^\d+\.\d+\.\d+$")
         self.assertEqual(cswap_usage.installer.state, "done")
+
+    def test_upgrades_only_an_older_hswap(self):
+        """covers: USAGE-5. 고정 버전보다 낮으면 같은 설치 명령으로 올리고, 같거나 높거나 버전을 읽지 못했거나 설치를 껐으면 그대로 둔다"""
+        self.which["hswap"] = "/home/alice/.local/bin/hswap"
+        installed = {}
+
+        def run(cmd, **k):
+            if cmd[1:] == ["--version"]:
+                return mock.Mock(returncode=0, stderr="", stdout=installed["out"])
+            installed["out"] = f"hswap {cswap_usage.VERSION}\n"
+            return mock.Mock(returncode=0, stderr="", stdout="")
+        with mock.patch.object(cswap_usage, "_version", None):
+            for out, install in (("hswap 0.0.1\n", True), (f"hswap {cswap_usage.VERSION}\n", False), ("hswap 999.0.0\n", False),
+                                 ("", False), ("hswap 0.0.1\n", "off")):
+                cswap_usage.installer.state, cswap_usage.installer.error, cswap_usage.installer.at = None, None, 0.0
+                installed["out"] = out
+                with mock.patch.object(cswap_usage.subprocess, "run", side_effect=run) as r, \
+                        mock.patch.object(cswap_usage.config, "CSWAP_INSTALL", install != "off"):
+                    self.assertIsNone(cswap_usage.check())
+                cmds = [c[0][0] for c in r.call_args_list if c[0][0][1:] != ["--version"]]
+                self.assertEqual(cmds, [["/home/alice/.local/bin/uv", "tool", "install", cswap_usage.PACKAGE]] if install is True else [], out)
+                after = (installed["out"].split() or [None, None])[1]
+                self.assertEqual(cswap_usage.status(), {"version": after, "pinned": cswap_usage.VERSION, "note": None}
+                                 if after or install is True else None, out)
+
+    def test_status_reports_a_failed_upgrade(self):
+        """covers: USAGE-5. 올리기에 실패하면 기기 행에 그 이유를 보인다(홈 경로는 가린다)"""
+        self.which["hswap"] = "/home/alice/.local/bin/hswap"
+        old = mock.Mock(returncode=0, stderr="", stdout="hswap 0.0.1\n")
+        bad = mock.Mock(returncode=2, stderr="error: /home/alice/.local/bin/hswap.exe is in use\n", stdout="")
+        with mock.patch.object(cswap_usage.subprocess, "run", side_effect=[old, bad]), mock.patch.object(cswap_usage, "_version", None):
+            note = cswap_usage.check()
+            st = cswap_usage.status()
+        self.assertEqual((st["version"], st["pinned"], st["note"]), ("0.0.1", cswap_usage.VERSION, note))
+        self.assertIn("종료 코드 2", note)
+        self.assertNotIn("alice", note)
+        with mock.patch.object(cswap_usage, "_version", cswap_usage.VERSION):  # 사람이 직접 올린 뒤에는 지난 실패를 보이지 않는다
+            self.assertIsNone(cswap_usage.status()["note"])
+
+    def test_an_install_that_leaves_an_older_hswap_running_is_a_failure(self):
+        """covers: USAGE-5. 설치는 끝났는데 실행되는 hswap 이 여전히 낮으면(PATH 앞의 다른 hswap) 실패로 보이고 6시간 뒤에야 다시 한다"""
+        self.which["hswap"] = "/home/alice/.local/bin/hswap"
+        old = mock.Mock(returncode=0, stderr="", stdout="hswap 0.0.1\n")
+        with mock.patch.object(cswap_usage.subprocess, "run", side_effect=lambda cmd, **k: old) as r, \
+                mock.patch.object(cswap_usage, "_version", None):
+            note = cswap_usage.check()
+            self.assertEqual(cswap_usage.check(), note)
+            self.assertEqual(cswap_usage.status()["note"], note)
+        self.assertEqual(sum(1 for c in r.call_args_list if c[0][0][1:] != ["--version"]), 1)
+        self.assertIn("0.0.1", note)
+        self.assertEqual(cswap_usage.installer.state, "failed")
 
     def test_failure_is_reported_and_retried_later(self):
         self.which.update(uv=None, pipx="/usr/bin/pipx")
@@ -202,7 +255,7 @@ class InstallTest(unittest.TestCase):
             err = cswap_usage.ensure()
             self.assertEqual(cswap_usage.ensure(), err)  # 6시간 안에는 다시 시도하지 않고 실패 이유만 준다
             self.assertEqual(r.call_count, 1)
-            self.assertEqual(r.call_args[0][0][:2], ["/usr/bin/pipx", "install"])
+            self.assertEqual(r.call_args[0][0], ["/usr/bin/pipx", "install", "--force", cswap_usage.PACKAGE])  # 낮은 버전도 다시 깐다
             self.assertIn("종료 코드 1", err)
             self.assertNotIn("alice", err)
             cswap_usage.installer.at -= cswap_usage.installer.RETRY_S + 1

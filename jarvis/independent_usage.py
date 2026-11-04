@@ -122,4 +122,7 @@ def read(force=False):
     # 저장한 자격가 없어 새로 로그인해도 잃을 게 없는 프로바이더(기기 행의 '로그인' 버튼). 알 수 없으면 넣지 않는다
     if fresh_logins := cli_login.fresh():
         body["fresh_logins"] = fresh_logins
+    # 기기 행에 보일 hswap 버전(게이트웨이가 확인해 둔 값만 쓴다. 여기서 실행·설치하지 않는다)
+    if hswap := cswap_usage.status():
+        body["hswap"] = hswap
     return body

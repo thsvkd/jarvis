@@ -1,4 +1,4 @@
-// covers: USAGE-1, USAGE-3, USAGE-4. 실행: node tests/test_usage_summary.mjs
+// covers: USAGE-1, USAGE-3, USAGE-4, USAGE-5. 실행: node tests/test_usage_summary.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
@@ -117,6 +117,15 @@ assert.match(stale, /리셋됨/);
 assert.doesNotMatch(stale, /100%/);
 assert.doesNotMatch(rendered().match(/<div class="tile ul-soon">[\s\S]*?<\/ol>/)?.[0] || "", /stale@example\.com/);
 assert.equal(element("ulHotN").textContent, hotBefore);
+
+// 기기 행에 게이트웨이가 확인한 hswap 버전을 보인다. 고정 버전과 다르거나 올리기에 실패하면 그 사실을 붙인다
+devices[0].hswap = { version: "0.2.1", pinned: "0.2.1", note: null };
+devices[1].hswap = { version: "0.2.0", pinned: "0.2.1", note: "hswap 설치 실패(종료 코드 2): <in use>" };
+click({ prov: "all" });
+assert.match(rendered(), /<span class="ul-muted">hswap 0\.2\.1<\/span>/);
+assert.match(rendered(), /hswap 0\.2\.0 \(고정 0\.2\.1\) · hswap 설치 실패\(종료 코드 2\): &lt;in use&gt;/);
+assert.equal((rendered().match(/>hswap /g) || []).length, 2); // 확인 전인 기기(hswap 없음)에는 적지 않는다
+delete devices[0].hswap; delete devices[1].hswap;
 
 // 탭과 섹션은 사용량 모으기(기기마다 프로바이더를 불러 수십 초)를 기다리지 않고 core 확인(/api/devices)만으로 뜬다.
 // 셸이 core 로 기억한 탭이면(지도에서 넘어올 때) 어떤 응답보다 먼저 섹션을 연다

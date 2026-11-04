@@ -118,8 +118,10 @@
  function devMeta(d){
   const busy=S.busy.has(d.id),unknown=(d.unavailable||[]).filter(id=>!fresh(d).includes(id));
   if((d.status===200&&d.installed===false&&!(d.providers||[]).length)||d.status===501)return ""; // Orca·hswap 모두 없거나 갱신 전 jarvis 는 다시 물어도 같다
-  return html`<p class="ul-meta">${d.fetched_at?html`<span>${P.fmt.ago(d.fetched_at)} 수집</span>`:""}${refBtn(d.id,(d.host||d.id)+" 새로고침",busy)}</p>${d.mode==="independent"&&unknown.length?html`<span class="ul-muted">확인 불가: ${unknown.map(id=>PROVIDER[id]||id).join(" · ")}</span>`:""}`;
+  return html`<p class="ul-meta">${d.fetched_at?html`<span>${P.fmt.ago(d.fetched_at)} 수집</span>`:""}${refBtn(d.id,(d.host||d.id)+" 새로고침",busy)}</p>${d.mode==="independent"&&unknown.length?html`<span class="ul-muted">확인 불가: ${unknown.map(id=>PROVIDER[id]||id).join(" · ")}</span>`:""}${hswapMeta(d.hswap)}`;
  }
+ // 게이트웨이가 확인한 hswap 버전. 고정 버전과 다르거나 설치 중·실패면 그 사실을 붙인다
+ const hswapMeta=h=>h?html`<span class="ul-muted">hswap ${h.version||"없음"}${h.version!==h.pinned?` (고정 ${h.pinned})`:""}${h.note?" · "+h.note:""}</span>`:"";
 
  // ---------------------------------------------------------------- 화면
  function view(){
