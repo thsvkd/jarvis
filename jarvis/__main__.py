@@ -1,4 +1,5 @@
-"""python3 -m jarvis · python3 -m jarvis update [--check] · python3 -m jarvis module <이름> <동작> --json"""
+"""python3 -m jarvis · python3 -m jarvis update [--check] · python3 -m jarvis module <이름> <동작> --json
+· python3 -m jarvis agentsmd · python3 -m jarvis core-trust <plan|apply> · python3 -m jarvis --version"""
 
 import os
 import signal
@@ -58,6 +59,13 @@ def main():
     if sys.argv[1:2] == ["--version"]:
         print(f"jarvis {__version__}" + (" (릴리스)" if launch.release() else " (저장소)"))
         return 0
+    if sys.argv[1:2] == ["core-trust"]:
+        from . import core_trust
+        return core_trust.cli(sys.argv[2:])
+    if sys.argv[1:]:  # 오타를 게이트웨이 기동으로 받지 않는다(같은 포트에 게이트웨이를 하나 더 띄우지 않게)
+        print("사용법: python -m jarvis [update [--check] | module <이름> <동작> --json | agentsmd [인자] "
+              "| core-trust <plan|apply> … | --version]", file=sys.stderr)
+        return 1
     sigs = {signal.SIGTERM, signal.SIGINT}
     masked = os.environ.get("JARVIS_TRAY") == "1" and hasattr(signal, "pthread_sigmask")
     if masked:

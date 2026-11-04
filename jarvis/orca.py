@@ -19,6 +19,10 @@ DIRS = ("~/.config/orca", "~/Library/Application Support/orca") + \
 # ai-setup 이 서버(위 폴더)와 따로 둔 데스크톱 클라이언트 프로필. 사용자 세션의 앱이라 구독 사용량을 읽는다
 DESKTOP_DIRS = ("~/.config/orca-desktop", "~/Library/Application Support/orca-desktop") + \
     ((os.path.join(os.environ["APPDATA"], "orca-desktop"),) if os.environ.get("APPDATA") else ())
+# Orca SSH 호스트 연결: 다른 기기의 Orca 데스크톱이 SSH 로 이 기기에 orcad 를 배포해 띄운 런타임의 프로필.
+# 실행 파일은 ~/.orca-remote 에 있고 정식 서버(DIRS, orca-serve)와 따로 돈다. 출처: pi5-server2·thsvkd-kgolf 관찰(2026-11-04, Orca 1.4.247)
+SSH_DIRS = ("~/.orca",)
+REMOTE = "~/.orca-remote"  # SSH 호스트 연결이 orcad 실행 파일(orcad-<판>/orcad.js)을 두는 곳
 
 
 def _read(d, name):
@@ -53,19 +57,74 @@ def devices(d):
     return [x for x in v if isinstance(x, dict)] if isinstance(v, list) else []
 
 
-def status(address, dirs=DIRS):
-    """address: 코드에 넣을 이 기기 주소(tailnet IPv4). 런타임 파일의 ws://0.0.0.0:<port> 에서는 포트만 쓴다."""
+def runtime_pid(d):
+    """폴더 d 의 orca-runtime.json 에 적힌 pid 와 그 프로세스가 살아 있는지. (pid 또는 None, bool)."""
+    rt = _read(d, "orca-runtime.json")
+    try:
+        p = int(rt.get("pid"))
+        return p, psutil.pid_exists(p)
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return None, False
+
+
+def is_orcad(pid):
+    """pid 가 살아 있고 명령행에 ~/.orca-remote 아래의 orcad.js 가 있는지(SSH 호스트 연결이 배포한 orcad 인지).
+    Orca 는 orcad 가 죽어도 런타임 파일을 남기므로, 재사용된 pid 를 orcad 로 보지 않으려고 명령행까지 본다."""
+    root = os.path.join(os.path.realpath(os.path.expanduser(REMOTE)), "")
+    try:
+        cmd = psutil.Process(int(pid)).cmdline()  # int(None) 은 TypeError: Process(None) 은 자기 자신이다
+    except (psutil.Error, TypeError, ValueError, OverflowError):
+        return False
+    return any(os.path.basename(a) == "orcad.js" and os.path.realpath(a).startswith(root) for a in cmd)
+
+
+def ssh_host(dirs=SSH_DIRS):
+    """이 기기에 Orca SSH 호스트 연결이 배포한 orcad 가 있으면 {dir(~ 경로), pid, running, clients(그 orcad 에 붙은 기기 이름)}.
+    토큰은 읽어도 내보내지 않는다."""
+    raw = next((p for p in dirs if os.path.exists(os.path.join(os.path.expanduser(p), "orca-runtime.json"))), None)
+    if raw is None:
+        return None
+    d = os.path.expanduser(raw)
+    p = runtime_pid(d)[0]
+    return {"dir": raw, "pid": p, "running": is_orcad(p),
+            "clients": [str(x.get("name") or x.get("deviceId") or "?") for x in devices(d) if x.get("scope") == "runtime"]}
+
+
+def environments(dirs=DESKTOP_DIRS + DIRS):
+    """이 기기 Orca 데스크톱이 아는 환경 [{name, via}]. via: ssh(SSH 호스트 연결, 원격에 orcad 배포)·ssh-tunnel(정식 페어링을
+    SSH 터널로)·pairing(정식 페어링). 사용자 앱이 쓰는 데스크톱 프로필을 먼저 본다. 토큰·키는 읽어 내지 않는다."""
+    d = next((p for p in map(os.path.expanduser, dirs) if os.path.exists(os.path.join(p, "orca-environments.json"))), None)
+    envs = (_read(d, "orca-environments.json") or {}) if d else {}
+    envs = envs.get("environments") if isinstance(envs, dict) else None
+    if not isinstance(envs, list):
+        return []
+    side = _read(d, "orca-environment-sidecar.json")
+    side = side.get("entries") if isinstance(side, dict) else None
+    side = side if isinstance(side, dict) else {}
+    out = []
+    for e in envs:
+        if not isinstance(e, dict):
+            continue
+        s = side.get(e.get("id")) if isinstance(e.get("id"), str) else None
+        s = s if isinstance(s, dict) else {}
+        via = "ssh" if s.get("orcadDeployment") or e.get("connectionDependency") == "ssh-tunnel" else \
+            "ssh-tunnel" if s.get("sshAccess") else "pairing"
+        out.append({"name": str(e.get("name") or e.get("id") or "?"), "via": via})
+    return out
+
+
+def status(address, dirs=DIRS, ssh_dirs=SSH_DIRS, env_dirs=DESKTOP_DIRS + DIRS):
+    """address: 코드에 넣을 이 기기 주소(tailnet IPv4). 런타임 파일의 ws://0.0.0.0:<port> 에서는 포트만 쓴다.
+    ssh_host·environments 는 정식 서버가 없어도 낸다."""
     none = {"desktop": None, "mobile": None}
+    extra = {"ssh_host": ssh_host(ssh_dirs), "environments": environments(env_dirs)}
     d = find_dir(dirs)
     if not d:
-        return {"installed": False, "running": False, "endpoint": None, "codes": none}
+        return {"installed": False, "running": False, "endpoint": None, "codes": none, **extra}
     rt = _read(d, "orca-runtime.json")
     rt = rt if isinstance(rt, dict) else {}
     ws = next((t.get("endpoint") for t in rt.get("transports") or [] if t.get("kind") == "websocket"), None)
-    try:
-        running = psutil.pid_exists(int(rt.get("pid")))
-    except (TypeError, ValueError, OverflowError):
-        running = False
+    running = runtime_pid(d)[1]
     endpoint = None
     if isinstance(ws, str) and re.match(r"^\w+://[^/]*:\d+/?$", ws) and address:
         endpoint = f"{ws.split('://')[0]}://{address}:{ws.rsplit(':', 1)[1].strip('/')}"
@@ -80,4 +139,4 @@ def status(address, dirs=DIRS):
             codes[name] = {"url": pair_url(endpoint, key, dev, scope), "device_id": dev["deviceId"],
                            "pending": dev.get("lastSeenAt") == 0, "name": dev.get("name"),
                            "paired_at": _ts(dev.get("pairedAt")) or None, "last_seen_at": _ts(dev.get("lastSeenAt")) or None}
-    return {"installed": True, "running": running, "endpoint": endpoint, "codes": codes}
+    return {"installed": True, "running": running, "endpoint": endpoint, "codes": codes, **extra}

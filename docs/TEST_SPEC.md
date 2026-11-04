@@ -21,6 +21,8 @@
 | ORCA-11 | WHEN uninstall 하면 THE SYSTEM SHALL 영수증에 기록한 패키지·스킬·서버만 지우고 나머지는 보존한다 | `tests/test_orca_module_install.py` (AI-34), `tests/test_orca_serve.py::Remove`, `tests/test_orca_module_contract.py::Apply`(받아들인 유닛·바뀐 유닛) | GREEN (단위) |
 | ORCA-12 | WHEN Orca 모듈이 jarvis 에 들어가면 THE SYSTEM SHALL ai-setup 의 `--tools orca` 와 `update-ai orca` 가 Orca 를 바꾸지 않고 jarvis 를 안내한다 | ai-setup `tests/test_stages.py::test_orca_desktop_points_to_jarvis_and_changes_nothing`, `tests/test_update_ai.py`(orca 대상 안내·exit 1), bats·Pester(`--tools`/`-Tools` 거부·영수증 보존) | GREEN (ai-setup 단위: a5a3353·2a9d5cc·b2bf4de, `scripts/test.sh` 종료 코드 0. kgolf 사본에서 안내 문구 실측) |
 | ORCA-13 | WHEN `apply` 가 받은 `--plan-id` 가 실행 직전에 다시 세운 계획과 다르면 THE SYSTEM SHALL 아무것도 실행하지 않고 `stale` 과 종료 코드 3 을 돌려준다 | `test_plan_id_is_bound_to_the_device`, `Apply::test_a_plan_id_that_no_longer_matches_runs_nothing_and_is_stale` | GREEN (단위; pi5-s3 실측에서 승인한 plan_id 로 실행) |
+| ORCA-14 | WHEN 이 기기에 Orca SSH 호스트 연결이 배포한 orcad(`~/.orca`)의 런타임 파일이 있으면 THE SYSTEM SHALL `/api/orca` 의 `ssh_host` 에 그 프로필(`~` 경로)·pid·실행 여부(pid 가 살아 있고 명령행에 `~/.orca-remote` 아래 `orcad.js` 가 있을 때만 실행 중)·그 orcad 에 붙은 runtime 기기 이름을 내고(토큰은 내지 않는다), 정식 서버가 없는 기기도 화면이 "Orca 없음" 대신 그 orcad 를 보인다 | `tests/test_orca_ssh.py` | 초안 (단위; 사용자 확인 전) pi5-server2 읽기 실측(2026-11-04): `~/.orca` pid 22347 실행 중, 클라이언트 2 |
+| ORCA-15 | WHEN 이 기기 Orca 에 `orca-environments.json` 이 있으면 THE SYSTEM SHALL `/api/orca` 의 `environments` 에 환경 이름과 연결 방식 `via`(`pairing` 정식 페어링·`ssh-tunnel` 정식 페어링을 SSH 터널로·`ssh` SSH 호스트 연결)를 데스크톱 프로필 우선으로 내고, 토큰·키는 내지 않으며, 형식이 이상하면 빈 목록이다 | `tests/test_orca_ssh.py` | 초안 (단위; 사용자 확인 전, kgolf 실측 전) |
 
 ## AI 구독 사용량
 
@@ -48,19 +50,36 @@
 | BOOT-3 | WHEN Windows 관리자 PowerShell 에서 `install.ps1 -Core <tailnet IP>` 를 실행하면 THE SYSTEM SHALL Python 3.11+ 가 없을 때만 winget 으로 깔고, sha256 을 통과한 최신 릴리스를 없을 때만 풀며, 설정을 없을 때만 BOM 없는 UTF-8 로 만들고, 게이트웨이 예약 작업이 없을 때만 `deploy\install-windows.ps1` 을 실행한 뒤(다시 실행해도 돌고 있는 게이트웨이를 다시 띄우지 않는다) 모듈 plan → apply 를 실행한다. tailnet 이 아닌 core·관리자 아님은 아무것도 쓰기 전에 거절하고, `-DryRun` 은 할 일만 보이며, `irm \| iex` 로 실행해도 셸을 닫지 않는다 | kgolf 실측(Windows PowerShell 5.1, scriptblock 실행) | 부분 (kgolf(5.1) 실측: -DryRun 은 이미 있는 저장소·설정·게이트웨이 작업을 건너뛰고 모듈 단계만 보임, tailnet 밖·자리 범위 밖 core 거절, scriptblock 실행에서 셸 유지, 설정 쓰기는 CRLF·LF 원본 모두 BOM 없는 UTF-8 로 tomllib 이 core 를 읽고 한국어 보존. Pester 는 BOM 없음·파싱만. 새 Windows 기기 전체 실행 미검증) |
 | BOOT-1 | WHEN macOS 에서 `install.sh --core <tailnet IP>` 를 실행하면 THE SYSTEM SHALL sha256 을 통과한 최신 릴리스를 풀고, 설정·LaunchAgent 를 없을 때만 만들어 띄우며, 모듈을 plan 의 plan_id 로 apply 한다. 다시 실행해도 기존 설정을 덮어쓰지 않는다. | `tests/test_install_sh.py` | 단위 GREEN (Mac 도구 부분은 thsvkd-kgolf-macmini 임시 폴더에서 확인: uv venv, 릴리스 sha256·압축 해제, plist lint. 새 Mac 전체 실행 미검증) |
 
+## core 전환
+
+> 2026-11-04 사용자 승인으로 추가했다. 모든 케이스는 임시 폴더의 `JARVIS_CONFIG` 로 검증한다. `tailscale status --json` 조회는 대체하고, 실제 설정·실제 tailscale·실제 기기·SSH 는 쓰지 않는다.
+
+| ID | 케이스 | 테스트 | 상태 |
+| --- | --- | --- | --- |
+| CORE-1 | WHEN `core-trust plan --add` 에 IPv4 `100.64.0.0/10` 정규형(`str(ipaddress.ip_address(x)) == x`)이 아닌 IP(IPv6·루프백·LAN·형식 오류·비정규 표기)가 오거나, tailnet 조회에서 그 IP 의 호스트명을 찾지 못하거나, 결과 목록(`--add`·`--remove`·인자 없음 모두)에 유효한 IPv4 tailnet 항목이 하나도 없으면 THE SYSTEM SHALL 그 사유를 blocked 로 보고하고, 같은 계획의 apply 는 설정 파일을 바꾸지 않고 failed 다. 찾은 호스트명은 plan 출력과 plan_id 에 들어간다 | `tests/test_core_trust.py` | GREEN (단위) |
+| CORE-2 | WHEN 설정 파일이 없거나 심볼릭 링크이거나 읽을 수 없거나(TOML 오류·BOM), 첫 테이블 머리줄(`^\s*\[`) 앞의 `core` 가 여러 줄 배열·중복이거나 같은 줄에 꼬리 주석이 있거나, 그 디렉터리에 쓰기 권한이 없거나, POSIX 에서 실행 사용자가 그 파일의 소유자가 아니거나, 그 프로세스에 `JARVIS_CORE` 가 있으면 THE SYSTEM SHALL 쓰지 않고 막힘 사유를 보고한다 | `tests/test_core_trust.py` | GREEN (단위) |
+| CORE-3 | WHEN 승인한 계획을 apply 하면 THE SYSTEM SHALL 첫 테이블 머리줄 앞의 최상위 `core` 한 줄만 바꾸고(없으면 첫 테이블 앞에 넣고, 파일이 `[infra_units]` 로 끝나도 그 안에 넣지 않으며, 쉼표 문자열이면 한 줄 배열로 다시 쓴다) 넣은 IP 를 맨 앞에 두며, 줄 끝·POSIX mode·다른 줄의 주석·다른 키를 보존하고, 다시 파싱해 `core` 외 값이 같을 때만 원자적으로 바꾼다(검증 실패면 원본을 그대로 두고 failed) | `tests/test_core_trust.py` | GREEN (단위) |
+| CORE-4 | WHEN plan 뒤에 설정 파일이 바뀌었거나(proxy_key 값만 바뀐 경우는 제외) 다른 기기의 plan_id 로 apply 하면 THE SYSTEM SHALL stale(종료 코드 3)로 아무것도 쓰지 않고, 이미 목표 목록과 같으면 current 로 아무것도 쓰지 않는다 | `tests/test_core_trust.py` | GREEN (단위) |
+| CORE-5 | WHEN `core-trust` 가 계획·결과·오류를 출력하면 THE SYSTEM SHALL `proxy_key` 는 설정 여부만 내고 그 값과 `core` 외 설정 값을 표준 출력·표준 오류·예외 메시지 어디에도 내지 않으며, 출력하는 `sha256`·plan_id 는 proxy_key 값이 달라도 같고, 백업 파일을 만들지 않는다 | `tests/test_core_trust.py` | GREEN (단위) |
+| CORE-6 | WHEN core·viewer 가 어떤 HTTP 요청을 보내도 THE SYSTEM SHALL 게이트웨이 설정 파일을 쓰지 않는다(`core-trust` 는 `module.MODULES` 와 서버 라우트에 없다) | `tests/test_core_trust.py` | GREEN (단위; `jarvis/*.py` 소스 정적 검사) |
+| CORE-7 | WHEN 실행 중인 게이트웨이의 설정 파일에서 `core` 목록이 바뀌면 THE SYSTEM SHALL 재시작 없이 다음 설정 확인(`config.reload_if_changed`) 뒤 `config.CORE` 를 새 목록으로 바꾸고, `CONFIG_RESTART_REQUIRED` 에 `CORE` 를 넣지 않는다 | `tests/test_discovery.py::ReloadConfig` | GREEN (단위) |
+| CORE-8 | WHEN `python -m jarvis` 의 첫 인자가 알려진 하위 명령(`update`·`module`·`agentsmd`·`core-trust`·`--version`)이 아니면(오타 포함) THE SYSTEM SHALL 게이트웨이를 기동하지 않고(수집기·복구 스레드·core·서버를 시작하지 않는다) 사용법을 표준 오류에 내고 종료 코드 1 로 끝나며, 인자 없음은 그대로 게이트웨이를 기동하고 알려진 하위 명령은 지금처럼 동작한다 | `tests/test_core_trust.py` | GREEN (단위) |
+
 ## doctor
 
 ai-setup 의 AI-1~AI-6 을 옮긴 것이다. 테스트 본문은 원본과 같고(`tests/test_doctor.py`, pytest 형식을 `pytest_compat` 로 돌린다), 대상만 `jarvis/modules/doctor/doctor.py` 로 바꿨다.
 
 | ID | 케이스 | 테스트 | 상태 |
 | --- | --- | --- | --- |
-| DOCTOR-1 | WHEN doctor 를 실행하면 THE SYSTEM SHALL 홈 아래 어떤 파일도 만들거나 바꾸지 않는다 | `test_doctor_writes_nothing_under_home`, `tests/test_doctor_module.py::test_status_writes_nothing_under_home` | GREEN (단위) |
+| DOCTOR-1 | WHEN doctor 를 실행하거나 doctor 모듈의 status·plan 을 부르면 THE SYSTEM SHALL 홈 아래 어떤 파일도 만들거나 바꾸지 않는다(apply 도 파일을 쓰거나 지우지 않는다, DOCTOR-9) | `test_doctor_writes_nothing_under_home`, `tests/test_doctor_module.py::test_status_writes_nothing_under_home` | GREEN (단위) |
 | DOCTOR-2 | WHEN 카탈로그의 하네스가 PATH 에 있으면 THE SYSTEM SHALL 그 이름과 버전을 보고하고, 없으면 그 플랫폼의 설치 명령을 안내한다 | `test_reports_installed_harness_version_and_install_hint_for_missing` | GREEN (단위) |
 | DOCTOR-3 | WHEN 같은 하네스 실행 파일이 PATH 에 두 개 이상 있으면 THE SYSTEM SHALL 중복 설치로 보고하고 어느 쪽이 우선인지 표시한다 | `test_duplicate_harness_on_path_is_reported_with_the_winner`, `test_same_directory_twice_on_path_is_not_a_duplicate` | GREEN (단위) |
 | DOCTOR-4 | WHEN 영수증이 은퇴로 표시한 훅이 어느 하네스 설정에 아직 연결되어 있으면 THE SYSTEM SHALL 드리프트로 보고한다 | `test_retired_hook_still_wired_in_another_harness_is_drift`, `test_current_hook_is_not_drift`, `test_hook_the_receipt_lists_as_retired_is_drift` | GREEN (단위) |
 | DOCTOR-5 | WHEN 하네스 설정 파일에 토큰·키처럼 보이는 평문 값이 있으면 THE SYSTEM SHALL 파일 위치와 키 이름만 보고하고 값은 출력하지 않는다 | `test_plaintext_secret_reports_location_and_key_but_never_the_value` 외 4건 | GREEN (단위) |
 | DOCTOR-6 | WHEN `~/.agents/skills` 에 lock 파일에 없는 스킬 디렉터리가 있으면 THE SYSTEM SHALL 그 이름을 보고하고 지우지 않는다 | `test_skill_outside_lock_is_reported_and_kept`, `test_a_skill_link_that_cannot_be_followed_is_reported_without_stopping` | GREEN (단위) |
-| DOCTOR-7 | WHEN `python -m jarvis module doctor status --json` 을 실행하면 THE SYSTEM SHALL 도구별 설치 위치·버전·설치 안내와 종류별 발견 항목을 모듈 계약의 JSON 으로 내고, 홈 경로는 `~/` 로 줄이며, plan 은 단계가 없고 apply 는 current(다른 plan_id 면 stale)다 | `tests/test_doctor_module.py` | GREEN (단위. s2 에서 읽기 전용 실행: 9초, 중복 2·시크릿 위치 1·lock 밖 스킬 15) |
+| DOCTOR-7 | WHEN `python -m jarvis module doctor status --json` 을 실행하면 THE SYSTEM SHALL 도구별 설치 위치·버전·설치 안내와 종류별 발견 항목을 모듈 계약의 JSON 으로 내고, 홈 경로는 `~/` 로 줄이며, orca_split(DOCTOR-9)이 아니면 plan 은 단계가 없고 apply 는 current(다른 plan_id 면 stale)다 | `tests/test_doctor_module.py` | GREEN (단위. s2 에서 읽기 전용 실행: 9초, 중복 2·시크릿 위치 1·lock 밖 스킬 15) |
+| DOCTOR-8 | WHEN 정식 Orca 서버(`orca.DIRS` 의 런타임)와 Orca SSH 호스트 연결 orcad(`~/.orca`)가 한 기기에서 함께 살아 있으면 THE SYSTEM SHALL doctor status 에 `orca_split` 발견 항목을 두 프로필(`~` 경로)·두 pid·SSH 클라이언트 이름·안내(정식 페어링 환경에 SSH 터널로 붙거나 클라이언트에서 `orca environment stop`, plan 이 터미널 0 일 때 멈춤, 다시 붙으면 재배포될 수 있음)와 함께 내고 토큰은 내지 않는다 | `tests/test_doctor_module.py::OrcaSplitTest` | 초안 (단위; 사용자 확인 전) |
+| DOCTOR-9 | WHEN `orca_split` 인 기기에서 doctor plan 을 부르면 THE SYSTEM SHALL orcad 의 열린 터미널(`orcad.terminalCensus`)이 0 일 때만 그 프로세스의 pid·시작 시각에 묶인 `stop_ssh_orcad` 단계(risk `config`)를 내고, 아니거나 셀 수 없으면 blocked 로 둔다. apply 는 그 plan_id 일 때만, 프로세스 신원(명령행의 `~/.orca-remote/.../orcad.js`·시작 시각)과 터미널 0 을 다시 확인한 뒤 그 orcad 만 정상 종료 신호로 멈추고(10초 안에 멈추지 않으면 강제 종료하지 않고 failed), blocked 면 아무것도 하지 않고 deferred(종료 코드 2)다. 정식 서버·파일은 바꾸지 않는다 | `tests/test_doctor_module.py::OrcaSplitTest` | 초안 (단위; 사용자 확인 전, 실제 기기 apply 전) pi5-server2 읽기 전용 plan 실측(2026-11-04): 터미널 0, 단계 1 |
 
 ## AI 셋업 화면
 

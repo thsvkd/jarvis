@@ -8,8 +8,17 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from unittest import mock
 
 from jarvis import config, orca, orca_issue, server
+
+
+def setUpModule():
+    # status 가 실제 홈의 ~/.orca·Orca 환경 파일을 읽지 않게 한다(두 함수는 tests/test_orca_ssh.py 가 임시 폴더로 본다)
+    for name, value in (("ssh_host", None), ("environments", [])):
+        p = mock.patch.object(orca, name, return_value=value)
+        p.start()
+        unittest.addModuleCleanup(p.stop)
 
 
 def decode(url):

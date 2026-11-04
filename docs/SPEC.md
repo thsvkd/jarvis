@@ -53,15 +53,27 @@ jarvis 본체는 모듈을 라이브러리로 부른다. 부트스트랩과 시�
 - 새로 쓰는 유닛·LaunchAgent 에는 사용자의 로그인 셸에서 얻은 `PATH`·`SHELL` 을 넣는다(Orca 터미널이 하네스를 찾도록). 쓴 뒤 `daemon-reload` 와 `enable --now` 를 한다. 실행 중인 adopted 유닛에는 아무것도 하지 않는다.
 - systemd 사용자 매니저의 linger 가 꺼져 있으면 plan 에 `config` 단계로 보이고 승인 뒤에만 켠다.
 
+### Orca SSH 호스트 연결 (초안, 사용자 확인 전)
+
+출처: pi5-server2·thsvkd-kgolf 관찰(2026-11-04, Orca 1.4.247). 정식 페어링(위의 서버)과 별개 경로다.
+
+- 클라이언트 Orca 데스크톱이 SSH 호스트를 추가하면 Orca 가 원격 기기에 자기 orcad 를 배포해 띄운다. 실행 파일은 `~/.orca-remote`(`orcad-active.json`, `orcad-<판>/orcad.js`, `runtimes/node-*/bin/node`), 프로필은 `~/.orca`(`orca-runtime.json`: pid·runtimeId·authToken·unix 소켓 `~/.orca/o-<pid>-*.sock`·websocket `ws://127.0.0.1:<port>`, `orcad.lock`, `orca-devices.json`)다. 프로세스는 ssh 세션 범위에서 돌고(ppid 1) `orca-serve` 유닛 밖이라 jarvis 의 Orca 갱신(서버 재시작)과 무관하다.
+- 그래서 한 기기에 정식 서버(`orca.DIRS`)와 SSH 호스트 연결 orcad(`orca.SSH_DIRS` = `~/.orca`)가 따로 돌 수 있다(런타임이 나뉜다). `orcad.terminalCensus` 는 그 orcad 에도 같은 로컬 RPC 로 묻는다(`~/.orca` 의 런타임 파일이 없으면 정식 서버로 넘기지 않고 셀 수 없음으로 본다).
+- Orca 는 orcad 가 죽어도 `~/.orca/orca-runtime.json` 을 남긴다. 그래서 jarvis 는 그 pid 가 살아 있고 명령행에 `~/.orca-remote` 아래 `orcad.js` 가 있을 때만 실행 중으로 본다(pid 재사용을 orcad 로 오인하지 않는다).
+- 클라이언트의 `orca-environments.json`(`environments[]`: id·name·`connectionDependency`·endpoints)과 `orca-environment-sidecar.json`(`entries.<환경 id>`)으로 연결 방식을 가른다: `orcadDeployment` 가 있거나 `connectionDependency` 가 `ssh-tunnel` 이면 SSH 호스트 연결(`ssh`), `sshAccess` 가 있으면 정식 페어링 환경을 SSH 터널로 쓰는 것(`ssh-tunnel`), 그 밖은 정식 페어링(`pairing`). 데스크톱 프로필(`orca.DESKTOP_DIRS`)을 서버 프로필보다 먼저 본다.
+- jarvis 는 이 파일들의 토큰·키(`deviceToken`·`authToken`·`publicKeyB64`)를 내보내지 않고, 이름·pid·연결 방식만 낸다(`/api/orca` 의 `ssh_host`·`environments`, ORCA-14·15).
+
 
 ## doctor 모듈
 
 코드는 `jarvis/modules/doctor/` 다. `doctor.py` 는 ai-setup `res/doctor/doctor.py` 를 옮긴 것으로 단독 실행(사람용 보고, 종료 코드 0·1·2)도 그대로 된다. 하네스·도구 목록은 setup 모듈의 `jarvis/modules/setup/res/catalog.json` 한 벌을 읽는다. 현재 훅 조각은 훅 모듈의 `jarvis/modules/hooks/settings.json` 을 읽는다.
 
-- 읽기 전용이다. 홈 아래 어떤 파일도 만들거나 바꾸지 않는다. 버전 확인은 홈·설정·캐시 위치를 임시 폴더로 돌린 환경에서 한다.
+- 홈 아래 어떤 파일도 만들거나 바꾸거나 지우지 않는다. 버전 확인은 홈·설정·캐시 위치를 임시 폴더로 돌린 환경에서 한다. 바꾸는 것은 아래 `orca_split` 의 orcad 프로세스 정지뿐이다.
 - `status.details` 는 `{tools: [{id, kind: harness/tool, found: [PATH 순서의 실행 파일], version, hint}], findings: [{kind, message}]}` 다. `found` 의 홈 아래 경로는 `~/` 로 줄인다. `hint` 는 없는 항목의 그 플랫폼 설치 명령이다.
-- `findings.kind` 는 `duplicate`(PATH 의 중복 설치, 첫 번째가 우선), `hook_drift`(은퇴한 훅이 하네스 설정에 남음), `secret`(평문 값이 있는 파일 위치와 키 이름. 값은 내보내지 않는다), `skill`(`~/.agents/skills` 의 lock 밖 스킬. 지우지 않는다)이다. 발견 항목이 있으면 `health` 는 `degraded`, 없으면 `ok` 다.
-- 바꾸는 것이 없으므로 `plan` 은 언제나 단계가 없고, `apply` 는 그 plan_id 면 `current`, 아니면 `stale` 이다. `uninstall` 은 지울 것이 없다.
+- `findings.kind` 는 `duplicate`(PATH 의 중복 설치, 첫 번째가 우선), `hook_drift`(은퇴한 훅이 하네스 설정에 남음), `secret`(평문 값이 있는 파일 위치와 키 이름. 값은 내보내지 않는다), `skill`(`~/.agents/skills` 의 lock 밖 스킬. 지우지 않는다), `orca_split`(정식 Orca 서버와 Orca SSH 호스트 연결 orcad 가 함께 살아 있음. 두 프로필·pid·SSH 클라이언트 이름과 안내: 클라이언트는 정식 페어링 환경에 SSH 터널로 붙거나 클라이언트에서 `orca environment stop`. 클라이언트가 다시 SSH 호스트로 붙으면 Orca 가 orcad 를 다시 배포할 수 있다)이다. 발견 항목이 있으면 `health` 는 `degraded`, 없으면 `ok` 다.
+- `orca_split` 이 아니면 `plan` 은 단계가 없고, `apply` 는 그 plan_id 면 `current`, 아니면 `stale` 이다. `uninstall` 은 지울 것이 없다.
+- 예외(DOCTOR-9, 초안): `orca_split` 이면 `plan` 은 그 orcad 의 `orcad.terminalCensus`(`liveSessions`+`inProcessSessions`)가 0 일 때만 `{id: stop_ssh_orcad, risk: config, argv: null, pid, started}` 단계를 낸다(`started` 는 프로세스 시작 시각을 소수 둘째 자리로 반올림한 값이라 plan_id 가 그 프로세스 하나에 묶인다). 터미널이 있거나 셀 수 없으면 `blocked: [{step: stop_ssh_orcad, reason}]` 다. `apply` 는 그 plan_id 일 때만 신원(pid·시작 시각·명령행의 `~/.orca-remote` 아래 `orcad.js`)과 터미널 0 을 다시 확인하고 정상 종료 신호만 보낸다. 10초 안에 멈추지 않으면 강제 종료하지 않고 `failed`, 신원이 다르면 `failed`, 그사이 터미널이 생기면 `deferred` 다. 막힌 단계가 있으면 모듈 계약의 일반 규칙(`failed`)과 달리 아무것도 하지 않고 `deferred`(종료 코드 2)다(열린 터미널이 닫히면 풀리는 보류. 터미널 수를 셀 수 없을 때도 같은 `deferred` 이고, orcad 가 다시 응답하면 풀린다). 정식 서버와 파일은 건드리지 않는다. 클라이언트 기기 쪽은 바꾸지 않고 위 안내만 한다.
+
 
 ## AI 셋업 화면
 
@@ -118,3 +130,67 @@ ai-setup 의 update-ai(`jarvis/modules/setup/res/update/update_ai.py`)를 감싼
 - 설치본 판(`--version`)은 doctor 와 같이 홈·설정·캐시를 임시 폴더로 돌린 환경에서 먼저 읽는다(gemini·opencode 는 `--version` 만 불러도 홈에 쓴다). 그 환경에서 판을 내지 못하는 것(래퍼를 거치는 codex, 설정이 필요한 grok)은 update-ai 와 같은 실제 홈으로 다시 읽는다(판정이 update-ai 와 갈리지 않게). 설치본 판을 모르면 계획하지 않는다. 최신 판과 codex 데몬은 실제 홈으로 읽는다.
 - PATH 는 update-ai.sh 와 같이 사용자 bin·nvm 의 node(높은 판 먼저)·Homebrew 를 앞에 둔다(Windows 는 그대로).
 - uninstall 은 지울 것이 없다(하네스 제거는 setup 의 uninstall).
+
+## core 전환
+
+> 상태: 2026-11-04 사용자 승인으로 추가했다(설계 비평 반영). CLI 구현됨, 단위 GREEN(Windows·실제 기기 미검증). 모듈이 아니라 머리말 범위(모듈 계약) 밖의 로컬 CLI 다.
+
+코드는 `jarvis/core_trust.py` 다. 게이트웨이 설정(`$JARVIS_CONFIG` 또는 `~/.config/jarvis/config.toml`)의 최상위 `core` 목록 한 키만 고친다. `core` 는 셸 권한급 신뢰(`/api/orca`·모듈 apply·업데이트를 부를 수 있는 tailnet IP)라서 바꾸는 권한은 그 기기의 셸 사용자에게만 둔다. 그래서 각 기기에서 로컬로 도는 CLI 로만 있고, HTTP 경로·화면 버튼·`module.MODULES` 등록은 없다.
+
+    python -m jarvis core-trust plan  [--add <IP> | --remove <IP>] --json
+    python -m jarvis core-trust apply (--add <IP> | --remove <IP>) --plan-id <sha256> --json
+
+표준 출력은 JSON 한 개다. 종료 코드는 모듈 계약의 `EXIT` 를 따르고, 인자 오류는 사용법을 표준 오류에 내고 1 이다.
+
+| 동작 | 부작용 | 출력 | 종료 코드 |
+| --- | --- | --- | --- |
+| `plan` | 없음 | `{module: "core-trust", device, path, sha256, mode, proxy_key: set/unset, before, after, target: {ip, host}, steps: [{id: "core", summary, risk: "config", argv: []}], blocked: [{step, reason}], plan_id}` | 0 계획을 세움(막힌 단계 포함), 1 세우지 못함 |
+| `apply` | 설정 파일의 최상위 `core` 한 줄 | `{status: done/current/stale/failed, before, after, steps: [{id, result, message}]}` | 0 done·current, 1 failed(blocked 포함), 3 stale |
+
+- 진입점: `python -m jarvis` 는 인자가 없으면 게이트웨이를 기동하고, 첫 인자가 `update`·`module`·`agentsmd`·`core-trust`·`--version` 이면 그 명령을 돈다. 그 밖의 첫 인자(오타 포함)는 게이트웨이를 기동하지 않고 사용법을 표준 오류에 내고 종료 코드 1 이다. 런처가 받아 둔 릴리스(`versions/<버전>`)로 넘어가므로 실제로 도는 것은 그 릴리스의 코드다. `core-trust` 가 없는 옛 릴리스에서는 이 명령이 게이트웨이를 하나 더 띄우므로, 실행 전에 `python -m jarvis --version` 으로 버전을 확인한다(절차는 `README.md`).
+- 연산
+  - `--add` 는 IP 를 목록 맨 앞에 둔다(이미 있으면 맨 앞으로 옮긴다). 트레이의 core 주소는 `CORE[0]` 이다. IP 는 IPv4 `100.64.0.0/10` 이고 `str(ipaddress.ip_address(x)) == x` 인 정규형만 받는다(서버는 IPv4 로만 bind 하고 `_trusted` 는 문자열이 정확히 같아야 통과시킨다).
+  - `--remove` 는 목록에서 같은 문자열 항목을 뺀다.
+  - 인자가 없는 `plan` 은 지금 상태만 보인다.
+  - 결과가 지금 목록과 같으면 단계가 없고 `apply` 는 `current` 다.
+- 대상 확인: `plan` 은 `config.TAILSCALE_BIN` 의 `tailscale status --json`(`Self` 와 `Peer`)에서 그 IP 를 `TailscaleIPs` 에 가진 노드의 호스트명을 찾아 `target.host` 에 넣는다(plan_id 에 묶인다). 호스트명은 tailnet 에서 유일한 MagicDNS 이름(`DNSName`, 끝의 `.` 제외)이고, 없으면 노드가 스스로 정한 `HostName` 이다. 승인자는 IP 가 아니라 호스트명을 보고 승인한다. `--add` 에서 찾지 못하거나 조회가 실패하면 막힘이다. `--remove` 는 이미 tailnet 에서 사라진 옛 core 를 빼야 할 수 있으므로 찾지 못해도 `host: null` 로 두고 막지 않는다.
+- `plan_id` 는 모듈 계약과 같은 정규화 sha256(`module.seal`)이다. 계획에 `device`·`path`·`sha256`·`before`·`after`·`target` 이 들어가므로 다른 기기에서 받은 승인이나 계획 뒤에 바뀐 파일은 `stale` 이다.
+  - `sha256` 은 키가 `proxy_key` 인 줄(`^\s*["']?proxy_key["']?\s*=`. 값이 여러 줄 문자열이면 그 값이 끝나는 줄까지)을 고정 문자열 `proxy_key=<숨김>` 으로 바꾼 바이트의 해시다. 키의 존재·위치만 반영하고 값은 반영하지 않으므로, 출력된 해시나 plan_id 로 키를 맞춰 볼 수 없다. 계획 뒤 `proxy_key` 값만 바뀐 경우는 `stale` 이 아니고, `apply` 는 지금 파일을 기준으로 `core` 줄만 바꾸므로 바뀐 키를 보존한다.
+- 막힘(쓰지 않음)
+  - 설정 파일이 없음, 심볼릭 링크임(`os.replace` 가 링크를 일반 파일로 바꿔 버린다)
+  - 설정을 읽지 못함(`CONFIG_ERROR`: TOML 오류, BOM 포함)
+  - 이 프로세스에 `JARVIS_CORE` 가 있음(파일보다 환경 변수가 이긴다)
+  - `--add` 의 IP 가 위 정규형 IPv4 tailnet 이 아님(IPv6·루프백·LAN·형식 오류), 또는 tailnet 에서 호스트명을 찾지 못함
+  - 결과 목록에 유효한 IPv4 tailnet 항목(위 정규형)이 하나도 없음(`--remove` 와 인자 없는 `plan` 에도 적용한다). 그런 목록은 빈 목록과 같이 아무도 믿지 않는 상태다.
+  - 첫 테이블 머리줄(`^\s*\[`) 앞의 `core =` 줄이 둘 이상이거나 여러 줄 배열임
+  - 그 `core` 줄에 꼬리 주석(`#`)이 있음. 꼬리 주석은 보존하지 않고 막는다(IP 에는 `#` 이 없으므로 줄에 `#` 이 있으면 주석이다).
+  - tomllib 이 읽은 최상위 `core` 가 그 줄과 맞지 않음
+  - 설정 파일이 있는 디렉터리에 쓰기 권한이 없음(`os.access(dirname, W_OK)`. 임시 파일과 `os.replace` 에 필요한 것은 디렉터리 권한이다)
+  - POSIX 에서 실행 사용자(euid)가 설정 파일 소유자가 아님(`sudo` 로 바꾸면 교체한 파일이 root 소유가 되어 게이트웨이가 읽지 못하고, 재시작하면 빈 신뢰가 된다)
+- 쓰기 순서
+  1. 첫 테이블 머리줄 앞의 `core =` 한 줄만 바꾼다. 없으면 첫 테이블 머리줄 바로 앞에 넣는다(테이블이 없으면 끝).
+     - 파일 끝의 `[infra_units]` 같은 테이블 안으로 들어가지 않게 하려는 것이다.
+     - 값이 쉼표 문자열(`core = "a,b"`, `config.env_list` 가 받는 형태)이면 한 줄 배열(`core = ["a", "b"]`)로 다시 쓴다.
+     - 줄 끝(CRLF/LF)과 다른 줄·다른 줄의 주석은 그대로 둔다. 넣는 줄은 파일의 줄 끝을 따른다.
+  2. 같은 폴더의 임시 파일에 쓴다. POSIX 에서는 원래 mode 를 그대로 준다. Windows 에서는 권한을 상속된 ACL 이 정하므로 mode 보존·출력(`mode`)은 POSIX 에서만 의미가 있고, 원래 파일에 따로 준 ACL 은 교체 뒤 남지 않는다.
+  3. tomllib 으로 다시 읽어 `core` 외 모든 값이 같고 `core` 가 `after` 인지 확인한다.
+  4. 교체 직전에 원본 바이트가 이번 `apply` 가 읽은 것과 같은지 다시 확인한다(이 해시는 출력하지 않는다).
+  5. `os.replace` 로 바꾼다.
+  - 어느 확인이든 실패하면 임시 파일을 지우고 원본을 두며 `failed` 다(임시 파일을 지우지 못하면 그 경로를 메시지에 넣는다). 백업 파일은 만들지 않는다(proxy_key 사본을 늘리지 않는다).
+- 사용자 설정 보존의 예외: `AGENTS.md` 는 사용자 설정을 덮어쓰지 않는다고 정한다. 이 기능은 그 예외로, 사용자가 승인한 plan_id 와 지금 다시 세운 계획이 같을 때만 최상위 `core` 한 줄을 바꾼다. 다른 키·줄은 바꾸지 않는다.
+- 반영: `core` 는 자동 반영 키다(`config._LIVE_KEYS`). 바뀐 파일은 다음 설정 확인(10초) 뒤 재시작 없이 `_trusted` 판정에 쓰인다. `apply` 의 `done` 은 파일 기록까지이고, 반영은 core 쪽에서 확인한다. 설정 파일이 깨지면 실행 중에는 마지막 정상 설정을 유지하지만 재시작하면 `CONFIG_ERROR` 로 빈 신뢰가 된다. 그래서 CLI 는 다시 파싱해 검증된 파일만 교체한다.
+- 비밀: `proxy_key` 는 값 없이 `set`/`unset` 만 출력한다. 그 값은 표준 출력·표준 오류·로그·예외 메시지 어디에도 나가지 않고(TOML 오류는 위치만 낸다), `core` 외의 설정 값도 출력하지 않는다.
+- 신뢰를 바꾸는 HTTP 경로는 없다.
+  - 어떤 HTTP 경로도 게이트웨이 설정 파일을 쓰지 않는다. `core-trust` 는 `module.MODULES` 와 서버 라우트에 없다.
+  - 전환의 확인에는 core 의 `GET /api/devices/modules` 기기별 `status` 를 쓴다.
+
+    | 코드 | 뜻 |
+    | --- | --- |
+    | 200 | 그 기기가 이 core 를 믿음 |
+    | 403 | 믿지 않음 |
+    | 501 | 판단 불가(그 기기 게이트웨이에 `/api/modules` 가 없음, 갱신 필요) |
+    | 502 | 미도달(연결 실패·연속 실패·첫 점검 시간 초과) |
+
+  - 옛 IP 를 빼는 좁히기(`--remove`)는 새 core 에서 200 을 받은 기기에서만 한다. 501·502 를 받은 기기는 미반영으로 남긴다.
+  - 서비스가 읽는 설정 경로는 `/api/snapshot` 의 `config_path` 로 대조한다. 확인에 페어링 코드 경로는 쓰지 않는다.
+- 전환 순서(넓히기 → 확인 → 인그레스 → 좁히기)와 수동 단계(새 core 설정·proxy_key 회전·재시작, pit5 Caddy, 옛 core 정리), 기기별 실행 위치와 python, 최소 버전 확인은 `README.md` 가 소유한다.

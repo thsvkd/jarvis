@@ -156,6 +156,20 @@ class ReloadConfig(unittest.TestCase):
                 self.assertEqual(actual["PORT"], 9300)
                 self.assertIn("PORT", actual["CONFIG_RESTART_REQUIRED"])
 
+    def test_core_change_applies_without_restart(self):
+        """covers: CORE-7"""
+        with tempfile.TemporaryDirectory() as td:
+            p = pathlib.Path(td) / "config.toml"
+            p.write_text('core = ["100.64.0.1"]\n')
+            with patch.dict(os.environ, {"JARVIS_CONFIG": str(p)}):
+                os.environ.pop("JARVIS_CORE", None)
+                ns = runpy.run_path(config.__file__)
+                actual = ns["reload_if_changed"].__globals__
+                p.write_text('core = ["100.100.1.2", "100.64.0.1"]\n')
+                self.assertIn("CORE", ns["reload_if_changed"]())
+                self.assertEqual(actual["CORE"], ["100.100.1.2", "100.64.0.1"])
+                self.assertNotIn("CORE", actual["CONFIG_RESTART_REQUIRED"])
+
 
 class Journal(unittest.TestCase):
     def test_system_and_user_units_with_same_name_are_independent(self):

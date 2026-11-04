@@ -59,10 +59,18 @@
   const fail=o.update&&o.update.state==="failed";
   return html`<p class="${fail?"dev-err":"orca-state"}">${line}</p>`;
  }
+ const VIA={pairing:"정식 페어링","ssh-tunnel":"SSH 터널",ssh:"SSH 호스트"};
+ // Orca SSH 호스트 연결(다른 기기가 SSH 로 배포한 orcad)과 이 기기 데스크톱의 환경. 옛 게이트웨이는 두 키가 없다
+ function links(o){
+  const s=o.ssh_host,envs=o.environments||[];
+  const host=s?html`<p class="orca-state"><span class="badge" data-tone="${s.running?"ok":"warn"}">${s.running?"SSH 호스트 연결 orcad 실행 중":"SSH 호스트 연결 orcad 꺼짐"}</span> <span>${s.dir}${s.clients&&s.clients.length?" · 클라이언트 "+s.clients.join(", "):""}</span></p>`:"";
+  const env=envs.length?html`<p class="orca-state">이 기기 Orca 환경: ${envs.map((e,i)=>html`${i?", ":""}${e.name} <span class="badge">${VIA[e.via]||e.via}</span>`)}</p>`:"";
+  return html`${host}${env}`;
+ }
  function orca(o){
   if(o.error&&!o.supported)return html`<p class="orca-none">${o.error}</p>${upd(o)}`;
-  if(!o.installed)return html`<p class="orca-none">이 기기에는 Orca 가 없습니다.</p>${upd(o)}`;
-  return html`${upd(o)}<p class="orca-state"><span class="badge" data-tone="${o.running?"ok":"warn"}">${o.running?"Orca 실행 중":"Orca 꺼짐"}</span> <span>${o.endpoint||"tailnet 주소를 모릅니다"}</span></p><div class="orca-codes">${code("desktop",o.codes.desktop,o)}${code("mobile",o.codes.mobile,o)}</div>`;
+  if(!o.installed)return html`${o.ssh_host?"":html`<p class="orca-none">이 기기에는 Orca 가 없습니다.</p>`}${links(o)}${upd(o)}`;
+  return html`${upd(o)}<p class="orca-state"><span class="badge" data-tone="${o.running?"ok":"warn"}">${o.running?"Orca 실행 중":"Orca 꺼짐"}</span> <span>${o.endpoint||"tailnet 주소를 모릅니다"}</span></p>${links(o)}<div class="orca-codes">${code("desktop",o.codes.desktop,o)}${code("mobile",o.codes.mobile,o)}</div>`;
  }
  function head(d,now){
   const [tone,state]=!d.reachable?["crit",d.ok_at?"응답 없음":"접속 불가"]:[d.status||"ok",{ok:"정상",warn:"주의",crit:"심각"}[d.status]||"정상"];
