@@ -1,6 +1,6 @@
 """Claude 계정의 모든 규칙을 한 곳에 둔다: 신선도, 만료 경고, 상태 문구, 사용 중 판정, 창·Fable·버킷 이름, 기기 로그인 상태.
 
-바깥 인터페이스는 read(force)(화면의 독립 경로)와 switch(slot)이고, 호환 경로(orca_usage.read)는 live(force)·merge_orca·login 을 쓴다.
+바깥 인터페이스는 read(force)와 switch(slot)이다. 독립 경로와 호환 경로(orca_usage.read)가 같은 read 를 거치고, 호환 경로는 그 뒤에 merge_orca 로 Orca 계정을 보탠다.
 안에 어댑터가 둘 있다.
 - hswap CLI(live, _json): `hswap claude list --json`(cswap 과 같은 schemaVersion 1)의 실값. 토큰 갱신·사용량 조회 간격은 hswap 이 맡는다.
   쓰기는 core 의 '이 계정 사용' 버튼이 부르는 `hswap claude switch <슬롯> --json` 하나다(자격 교체는 hswap 이 한다).
@@ -441,21 +441,22 @@ def _aged(a, why=None):
     return {**a, "note": " ".join(x for x in (a.get("note"), why, age) if x), "attention": a.get("attention") or old}
 
 
-def read(force=False):
-    """독립 경로(화면). None(저장소도 실값도 없고 알릴 것도 없음) 또는 {"error": "..."} 또는 {"accounts": [...], "login": {...}}.
+def read(force=False, install=False):
+    """두 사용량 경로의 공용 읽기. None(저장소도 실값도 없고 알릴 것도 없음) 또는 {"error": "..."} 또는 {"accounts": [...], "login": {...}}.
     login 은 알릴 것이 있을 때만이며 계정 목록과 상관없다: 계정이 없어도 {"accounts": [], "login": {...}}(hswap 오류가 있으면 error 도)를 준다.
     force 이거나, hswap 에 물은 지 신선도 기준이 지났거나, 보일 실값 중 기준보다 오래된 것이 있으면 hswap list 를 실행한다
     (저장소에는 로그인 기한·상태가 없어 만료 경고는 실값에서만 나온다. 예약 실행이 저장소를 늘 새로 써도 경고가 사라지지 않게 한다).
-    그 사이에는 마지막 실값을 그대로 준다. 오래된 저장소 값은 실값이 없을 때만 보이므로 따로 보지 않는다. hswap 이 없거나 실패하면 저장소 값을 대체값으로 쓰고 이유를 붙인다. hswap 을 설치하지 않는다(USAGE-3)."""
+    그 사이에는 마지막 실값을 그대로 준다. 오래된 저장소 값은 실값이 없을 때만 보이므로 따로 보지 않는다. hswap 이 없거나 실패하면 저장소 값을 대체값으로 쓰고 이유를 붙인다.
+    install: 호환 경로만 켠다. 저장소가 없어도 묻고, hswap 이 없으면 설치를 시작한다. 독립 경로는 설치하지 않는다(USAGE-3)."""
     store = _store_read()
     held = _cache  # switch() 가 도중에 비워도 같은 값을 본다
     recent = held[1] if held and time.monotonic() - held[0] < config.CLAUDE_STALE_S else None
     recent = recent if recent and recent.get("accounts") else None
-    if store is None and recent is None and not force:
+    if store is None and recent is None and not force and not install:
         out = None
     else:
         asked = force or recent is None or any(_old(a) for a in recent["accounts"])
-        out = live(force, install=False) if asked else recent
+        out = live(force, install=install) if asked else recent
     rows = (out or {}).get("accounts")
     if rows:
         rows = [{**a, "org": org(a.get("org"), a.get("label"))} for a in _mark_current(rows, store)]
@@ -469,12 +470,13 @@ def read(force=False):
         return {**(out or {}), "accounts": [], "login": state} if state else out
     state = login(rows, (out or {}).get("keychainUnavailable") is True, bool(store and store.get("signed_in")))
     result = {"accounts": [_aged(a, why) for a in rows]}
+    if (out or {}).get("fetched_at"):
+        result["fetched_at"] = out["fetched_at"]
     return {**result, "login": state} if state else result
 
 
 def merge_orca(mine, orca_rows):
-    """호환 경로: hswap 계정 + Orca 에만 있는 관리 계정(같은 이메일의 다른 조직 포함)."""
-    mine = [{**a, "org": org(a["org"], a["label"])} for a in _mark_current(mine, _store_read())]  # hswap 결과는 묶음이라 고치지 않는다
+    """호환 경로: read() 의 계정 + Orca 에만 있는 관리 계정(같은 이메일의 다른 조직 포함)."""
     seen = {(a["label"].lower(), a["org"]) for a in mine}
     emails = {a["label"].lower() for a in mine}
     # Orca 의 '시스템 기본 계정'은 hswap 의 사용 중 계정과 같은 로그인이다(hswap 에 사용 중 계정이 있을 때만 뺀다).

@@ -127,9 +127,10 @@ class ReadTest(unittest.TestCase):
             p = mock.patch.object(m, "read", return_value=None)
             p.start()
             self.addCleanup(p.stop)
-        p = mock.patch.object(orca_usage.claude_accounts, "_keepalive", return_value=None)  # 이 기기의 keepalive.json 을 읽지 않게
-        p.start()
-        self.addCleanup(p.stop)
+        for name in ("_keepalive", "_store_read"):  # 이 기기의 hswap 저장소를 읽지 않게
+            p = mock.patch.object(orca_usage.claude_accounts, name, return_value=None)
+            p.start()
+            self.addCleanup(p.stop)
         for name, kw in (("available", {"return_value": []}), ("refresh_grok", {}),
                          ("fresh", {"return_value": []})):  # 이 기기의 grok·codex 를 부르지 않고 자격 파일도 읽지 않게
             p = mock.patch.object(orca_usage.cli_login, name, **kw)

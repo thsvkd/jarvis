@@ -231,7 +231,7 @@ def read(force=False):
     start = time.monotonic()
     box = {}
     ts = [threading.Thread(target=lambda f=f, k=k: box.update({k: f(force)}), name="jarvis-" + k, daemon=True)
-          for k, f in (("cswap", claude_accounts.live), ("caam", caam_usage.read))]
+          for k, f in (("cswap", lambda force: claude_accounts.read(force, install=True)), ("caam", caam_usage.read))]
     for t in ts:
         t.start()
     body = _orca(force)
@@ -244,13 +244,14 @@ def read(force=False):
         old = next((p for p in body["providers"] if p["id"] == "claude"), None)
         body["providers"] = [{"id": "claude", "name": "Claude", "accounts": claude_accounts.merge_orca(cs["accounts"], (old or {}).get("accounts", []))}] + \
             [p for p in body["providers"] if p["id"] != "claude"]
-        body.setdefault("fetched_at", cs["fetched_at"])  # Orca 를 못 읽은 기기도 수집 시각이 보이게
+        body.setdefault("fetched_at", cs.get("fetched_at") or time.time())  # Orca 를 못 읽은 기기도 수집 시각이 보이게
     elif cs and cs.get("error"):
         body["cswap_error"] = cs["error"]
-    # 독립 경로와 같은 기기 로그인 상태. Orca 의 프로바이더는 보관값과 함께 쓰는 dict 라 새로 만든다
-    claude = next((p for p in body["providers"] if p["id"] == "claude"), None)
-    if claude and (login := claude_accounts.login(claude.get("accounts", []), (cs or {}).get("keychainUnavailable") is True)):
-        body["providers"] = [{**p, "login": login} if p is claude else p for p in body["providers"]]
+    # 독립 경로와 같은 기기 로그인 상태. Orca 의 프로바이더는 보관값과 함께 쓰는 dict 라 새로 만든다. 계정이 없어도 칸을 남긴다
+    if login := (cs or {}).get("login"):
+        if not any(p["id"] == "claude" for p in body["providers"]):
+            body["providers"] = [{"id": "claude", "name": "Claude", "accounts": []}] + body["providers"]
+        body["providers"] = [{**p, "login": login} if p["id"] == "claude" else p for p in body["providers"]]
     if ca and ca.get("accounts"):
         _codex(body, ca)
         body.setdefault("fetched_at", ca["fetched_at"])

@@ -200,8 +200,64 @@ class SameRulesTest(StoreCase):
         a = claude_accounts.account(hswap_row(usage={"scoped": [{"name": "Sonnet 4.6", "pct": 1}, {"name": "sonnetish", "pct": 2}]}))
         self.assertEqual([b["name"] for b in a["buckets"]], ["Sonnet 4.6", "모델별 한도 2"])
 
-    def compat(self):
+    def test_same_old_value_gets_the_same_flag_on_both_paths(self):
+        """covers: USAGE-6"""
+        self.store(time.time() - 60)
+        self.hswap(hswap_row(usageFetchedAt=iso(time.time() - 2 * 3600)))
+        mine = claude_accounts.read(force=True)["accounts"][0]
+        claude_accounts._cache = None
+        theirs = self.compat()["accounts"][0]
+        self.assertTrue(mine["attention"])
+        self.assertIn("2시간 전 값", mine["note"])
+        self.assertEqual((mine["note"], mine["attention"]), (theirs["note"], theirs["attention"]))
+
+    def test_compat_keeps_store_accounts_without_hswap_and_orca(self):
+        """covers: USAGE-6. 차이는 hswap 이 없으면 설치를 시작한다는 것뿐이다"""
+        self.store(time.time() - 9 * 3600)
+        self.ensure.side_effect = None
+        self.ensure.return_value = None
+        a = self.compat()["accounts"][0]
+        self.ensure.assert_called_once_with()
+        self.assertEqual((a["label"], a["source"], a["attention"]), ("a@example.com", "cswap-cache", True))
+        self.assertIn("9시간 전 값", a["note"])
+
+    def test_compat_reports_the_install_error_in_the_note_when_store_answers(self):
+        """covers: USAGE-6"""
+        self.store(time.time() - 60)
+        self.ensure.side_effect = None
+        self.ensure.return_value = "Claude 계정별 사용량을 위해 hswap 을 설치하는 중"
+        self.assertIn("hswap 을 설치하는 중", self.compat()["accounts"][0]["note"])
+
+    def test_compat_adds_orca_accounts_after_the_shared_read(self):
+        """covers: USAGE-6"""
+        self.store(time.time() - 60)
+        self.hswap().side_effect = RuntimeError("locked")
+        orca = {"id": "claude", "name": "Claude", "accounts": [{"label": "orca-only@example.com", "org": None, "active": False},
+                                                               {"label": "a@example.com", "org": None, "active": False}]}
+        rows = self.compat([orca])["accounts"]
+        self.assertEqual([(a["label"], a.get("source")) for a in rows], [("a@example.com", "cswap-cache"), ("orca-only@example.com", None)])
+        self.assertIn("locked", rows[0]["note"])
+
+    def test_compat_keeps_the_provider_for_login_without_accounts(self):
+        """covers: USAGE-7"""
+        self.ensure.side_effect = None
+        self.ensure.return_value = None
+        self.keepalive(ok=False, error={"type": "relogin_required"})
+        claude = self.compat()
+        self.assertEqual((claude["accounts"], claude["login"]["state"]), ([], "relogin"))
+
+    def test_compat_install_error_without_accounts_is_still_reported(self):
+        """covers: USAGE-6"""
+        self.ensure.side_effect = None
+        self.ensure.return_value = "설치 실패"
         with mock.patch.object(orca_usage, "_orca", return_value={"installed": False, "providers": []}), \
+                mock.patch.object(orca_usage.caam_usage, "read", return_value=None), \
+                mock.patch.object(orca_usage.cli_login, "available", return_value=[]), \
+                mock.patch.object(orca_usage.cli_login, "fresh", return_value=[]):
+            self.assertEqual(orca_usage.read()[1]["cswap_error"], "설치 실패")
+
+    def compat(self, orca=()):
+        with mock.patch.object(orca_usage, "_orca", return_value={"installed": False, "providers": list(orca)}), \
                 mock.patch.object(orca_usage.caam_usage, "read", return_value=None), \
                 mock.patch.object(orca_usage.cli_login, "available", return_value=[]), \
                 mock.patch.object(orca_usage.cli_login, "fresh", return_value=[]):
