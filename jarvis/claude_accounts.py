@@ -380,6 +380,10 @@ def _span(s):
     return f"{s / 86400:.0f}일" if s >= 86400 else f"{s // 3600:.0f}시간" if s >= 3600 else f"{max(1, s // 60):.0f}분"
 
 
+def _is_relogin(a):
+    return STATUS["relogin_required"][0] in (a.get("note"), a.get("error"))
+
+
 def login(rows=(), keychain=False, signed_in=False):
     """기기 단위 로그인 상태 {state, text, note, attention, slot, other}. 알릴 것이 없으면 None(keepalive.json 이 없으면 이 기능을 쓰지 않는 기기다).
     순서: 사람이 다시 로그인해야 하는 것 > 키체인 > 만료 임박 > 멈춤 > 이전 계정의 기록 > 그 밖의 실패 > 정상.
@@ -391,14 +395,13 @@ def login(rows=(), keychain=False, signed_in=False):
     k = _keepalive() or {}
     err = k.get("error") if isinstance(k.get("error"), dict) else {}
     kind = err.get("type") if isinstance(err.get("type"), str) else None
-    relogin = STATUS["relogin_required"][0]
     now, checked, expires = time.time(), _sec(k.get("checkedAt")), _sec(k.get("loginExpiresAt"))
     current = next((a.get("slot") for a in rows if a.get("active") and a.get("slot")), None)
     recorded = k.get("activeSlot")
     recorded = str(recorded) if isinstance(recorded, int) and not isinstance(recorded, bool) and recorded > 0 else None
     # 사용 중 슬롯을 모르고 저장되지 않은 로그인도 아니면 맞는지 알 수 없다: 경고는 남기고 슬롯만 권하지 않는다
     other = recorded is not None and bool(current or signed_in) and current != recorded
-    if (kind == "relogin_required" and not other) or any(a.get("active") and relogin in (a.get("note"), a.get("error")) for a in rows):
+    if (kind == "relogin_required" and not other) or any(a.get("active") and _is_relogin(a) for a in rows):
         state, text = "relogin", "재로그인 필요"
     elif kind == "keychain_unavailable" or keychain:
         state, text = "keychain", "키체인 접근 불가: 키체인에 접근할 수 없는 곳에서 실행됨"
@@ -431,6 +434,21 @@ def _mark_current(rows, store):
         return rows
     current = {a.get("slot") for a in store["accounts"] if a.get("active")}
     return [{**a, "active": a.get("slot") in current} for a in rows]
+
+
+def _mark_dead(rows, store):
+    """저장소의 인증 실패(authDeadStrikes)를 슬롯·이메일·조직이 같은 CLI 행에 붙인다. 묶어 둔 행이 그 뒤에 적힌 실패를 가리지 않게 읽을 때마다 본다.
+    사용량 값은 건드리지 않고, 묶음의 dict 도 고치지 않는다."""
+    key = lambda a: (a.get("slot"), a.get("label"), a.get("org"))
+    dead = {key(a) for a in (store or {}).get("accounts", []) if _is_relogin(a)}
+    relogin = STATUS["relogin_required"][0]
+
+    def mark(a):
+        if key(a) not in dead or _is_relogin(a):
+            return a
+        has = a.get("windows") or a.get("buckets")
+        return {**a, "attention": True, **({"note": relogin, "error": None} if has else {"status": "error", "note": None, "error": relogin})}
+    return [mark(a) for a in rows]
 
 
 def _aged(a, why=None):
@@ -484,7 +502,7 @@ def _read(force, install):
             store = _store_read()
     rows = (out or {}).get("accounts")
     if rows:
-        rows = [{**a, "org": org(a.get("org"), a.get("label"))} for a in _mark_current(rows, store)]
+        rows = _mark_dead([{**a, "org": org(a.get("org"), a.get("label"))} for a in _mark_current(rows, store)], store)
         why = None
     elif store:
         rows = store["accounts"]

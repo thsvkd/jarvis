@@ -962,6 +962,107 @@ class DiscoveryTest(StoreCase):
         self.ensure.assert_not_called()
 
 
+class StoreAuthFailureTest(StoreCase):
+    """최근 CLI 행이 그 뒤에 저장소에 적힌 인증 실패를 가리지 않는다. 사용량 값은 CLI 값을 그대로 둔다."""
+
+    RELOGIN = claude_accounts.STATUS["relogin_required"][0]
+
+    def two_slots(self, strikes, b_email="b@example.com", b_org="Org"):
+        self.write("sequence.json", {"sequence": [1, 2], "accounts": {
+            "1": {"email": "a@example.com", "organizationUuid": "o1", "organizationName": "Org"},
+            "2": {"email": b_email, "organizationUuid": "o2", "organizationName": b_org}}})
+        self.write("cache/usage.json", {"schemaVersion": 2, "accounts": {
+            "1": {"email": "a@example.com", "organizationUuid": "o1", "fetchedAt": time.time() - 60, "authDeadStrikes": strikes[0], "lastGood": {"five_hour": {"pct": 99}}},
+            "2": {"email": b_email, "organizationUuid": "o2", "fetchedAt": time.time() - 60, "authDeadStrikes": strikes[1], "lastGood": {"five_hour": {"pct": 99}}}}})
+
+    def rows(self):
+        return [hswap_row(number=1, active=True), hswap_row(number=2, email="b@example.com", active=False)]
+
+    def test_failure_after_a_successful_list_reaches_the_row_and_the_device(self):
+        """covers: USAGE-7. hswap 0.2.1, keepalive 없음: list 성공 뒤 수집기가 사용 중 계정에 authDeadStrikes 를 적으면 바로 경고한다"""
+        self.two_slots((0, 0))
+        run = self.hswap(*self.rows())
+        before = claude_accounts.read()
+        self.assertNotIn("login", before)
+        self.assertFalse(before["accounts"][0]["attention"])
+        self.two_slots((1, 0))
+        out = claude_accounts.read()
+        run.assert_called_once()  # 묶어 둔 값을 쓰는 그 읽기에서 보인다
+        a = out["accounts"][0]
+        self.assertEqual((a["status"], a["note"], a["error"], a["attention"]), ("ok", self.RELOGIN, None, True))
+        self.assertEqual((a["windows"], a["updated_at"], a["source"]), (before["accounts"][0]["windows"], before["accounts"][0]["updated_at"], "cswap"))  # 저장소의 99% 로 바꾸지 않는다
+        self.assertEqual((out["login"]["state"], out["login"]["attention"], out["login"]["slot"]), ("relogin", True, "1"))
+        self.assertFalse(out["accounts"][1]["attention"])
+
+    def test_inactive_account_gets_the_row_warning_only(self):
+        """covers: USAGE-7"""
+        self.two_slots((0, 0))
+        self.hswap(*self.rows())
+        claude_accounts.read()
+        self.two_slots((0, 1))
+        out = claude_accounts.read()
+        self.assertEqual((out["accounts"][1]["note"], out["accounts"][1]["attention"]), (self.RELOGIN, True))
+        self.assertFalse(out["accounts"][0]["attention"])
+        self.assertNotIn("login", out)
+
+    def test_row_without_values_shows_the_failure_as_its_error(self):
+        """covers: USAGE-7"""
+        self.two_slots((1, 0))
+        self.hswap(hswap_row(number=1, active=True, usage=None), hswap_row(number=2, email="b@example.com", active=False))
+        a = claude_accounts.read(force=True)["accounts"][0]
+        self.assertEqual((a["status"], a["error"], a["note"], a["attention"], a["windows"]), ("error", self.RELOGIN, None, True, []))
+
+    def test_only_the_same_slot_email_and_org_match(self):
+        """covers: USAGE-7. 슬롯 번호가 같아도 다른 계정의 실패를 붙이지 않는다"""
+        row = {"number": 2, "active": False}
+        for kw in ({"email": "other@example.com"}, {"email": "b@example.com", "organizationName": "Other Org"}, {"email": "b@example.com", "number": 3}):
+            self.two_slots((0, 1))
+            self.hswap(self.rows()[0], hswap_row(**{**row, **kw}))
+            claude_accounts._cache = None
+            a = claude_accounts.read(force=True)["accounts"][1]
+            self.assertEqual((a["note"], a["attention"]), (None, False), kw)
+
+    def test_hswap_own_relogin_stays_as_it_is(self):
+        """covers: USAGE-7"""
+        row = hswap_row(usageStatus="relogin_required", usage=None, lastGoodUsage={"sevenDay": {"pct": 1}}, lastGoodFetchedAt=iso(time.time() - 60))
+        want = claude_accounts.account(row)
+        for strikes in (0, 1):
+            self.store(time.time() - 60, authDeadStrikes=strikes)
+            self.hswap(row)
+            claude_accounts._cache = None
+            out = claude_accounts.read(force=True)
+            a = out["accounts"][0]
+            self.assertEqual((a["status"], a["note"], a["error"], a["attention"], a["windows"]), (want["status"], want["note"], want["error"], want["attention"], want["windows"]), strikes)
+            self.assertEqual(out["login"]["state"], "relogin")
+
+    def test_cleared_failure_clears_at_once_and_held_rows_are_untouched(self):
+        """covers: USAGE-7. 묶음의 행은 고치지 않으므로 저장소가 고쳐지면 다음 읽기에서 경고가 사라진다"""
+        self.two_slots((0, 0))
+        self.hswap(*self.rows())
+        claude_accounts.read()
+        self.two_slots((1, 0))
+        self.assertEqual(claude_accounts.read()["login"]["state"], "relogin")
+        self.assertEqual((claude_accounts._cache[1]["accounts"][0]["note"], claude_accounts._cache[1]["accounts"][0]["attention"]), (None, False))
+        self.two_slots((0, 0))
+        out = claude_accounts.read()
+        self.assertNotIn("login", out)
+        self.assertFalse(out["accounts"][0]["attention"])
+
+    def test_both_apis_show_it(self):
+        """covers: USAGE-7. 화면이 부르는 전체 경로"""
+        self.two_slots((0, 0))
+        self.hswap(*self.rows())
+        claude_accounts.read()
+        self.two_slots((1, 0))
+        with self.independent_mocks(), mock.patch.object(orca_usage.caam_usage, "read", return_value=None):  # 호환 경로의 caam 은 없으면 설치를 시작한다
+            independent_usage._tasks.clear()
+            self.addCleanup(independent_usage._tasks.clear)
+            mine = next(p for p in independent_usage.read()["providers"] if p["id"] == "claude")
+            theirs = next(p for p in orca_usage.read()[1]["providers"] if p["id"] == "claude")
+        for claude in (mine, theirs):
+            self.assertEqual((claude["login"]["state"], claude["accounts"][0]["attention"], claude["accounts"][0]["note"]), ("relogin", True, self.RELOGIN))
+
+
 class AliasTest(unittest.TestCase):
     def test_old_names_read_and_patch_the_new_module(self):
         """covers: USAGE-6. 옛 이름으로 바꿔 끼운 값이 새 모듈에 그대로 닿고, 끝나면 되돌아간다"""
