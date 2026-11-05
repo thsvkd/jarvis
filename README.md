@@ -366,7 +366,9 @@ Get-Content -Encoding UTF8 $env:LOCALAPPDATA\jarvis\jarvis.log -Tail 20
 ## 실행본 이전 (1.8.0)
 
 1.8.0 부터 실행본은 `~/.local/share/jarvis/app`(Windows `%LOCALAPPDATA%\jarvis\app`)에 둔다. 그 전 설치기가 `~/Workspace/jarvis` 에 푼 실행본(.git 없음)은
-게이트웨이가 새 릴리스로 60초를 버틴 뒤 스스로 옮긴다(업데이트 버튼만 누르면 된다). 계약은 `docs/SPEC.md` 의 "실행본 배치와 이전" 절이다.
+macOS·Linux 는 게이트웨이가 새 릴리스로 60초를 버틴 뒤 스스로 옮긴다(업데이트 버튼만 누르면 된다).
+**Windows 는 업데이트 버튼만으로는 옮겨지지 않는다.** 게이트웨이가 관리자 권한 없이(RunLevel Limited) 돌아 예약 작업을 고칠 수 없으므로,
+관리자 PowerShell 에서 `install.ps1` 을 다시 실행하거나 app·versions 의 python 으로 `python -m jarvis relocate` 를 실행한다. 계약은 `docs/SPEC.md` 의 "실행본 배치와 이전" 절이다.
 
 - `~/Workspace/jarvis` 에 `.git` 이 있으면(개발 체크아웃) 아무것도 하지 않는다. 서비스 등록이 그 폴더를 가리키지 않아도(pm2·수동) 그대로다.
 - 옛 폴더를 app 으로 복사하고 LaunchAgent plist·systemd 유닛·예약 작업 `jarvis` 가 app 을 가리키게 고친다. 원본 파일은 `~/.local/share/jarvis/<파일 이름>.bak-relocate` 에 남는다.
