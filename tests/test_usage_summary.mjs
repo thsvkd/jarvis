@@ -1,4 +1,4 @@
-// covers: USAGE-1, USAGE-3, USAGE-4, USAGE-5. 실행: node tests/test_usage_summary.mjs
+// covers: USAGE-1, USAGE-3, USAGE-4, USAGE-5, USAGE-7. 실행: node tests/test_usage_summary.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
@@ -126,6 +126,51 @@ assert.match(rendered(), /<span class="ul-muted">hswap 0\.2\.1<\/span>/);
 assert.match(rendered(), /hswap 0\.2\.0 \(고정 0\.2\.1\) · hswap 설치 실패\(종료 코드 2\): &lt;in use&gt;/);
 assert.equal((rendered().match(/>hswap /g) || []).length, 2); // 확인 전인 기기(hswap 없음)에는 적지 않는다
 delete devices[0].hswap; delete devices[1].hswap;
+
+// covers: USAGE-7. Claude 칸의 기기 로그인 상태: 정상은 작게, 이상은 주의 색과 안내 버튼. 이상만 '주의 필요'로 센다
+const claudeOf = d => d.providers.find(p => p.id === "claude");
+const hotNow = () => Number(element("ulHotN").textContent);
+const hotBase = hotNow();
+claudeOf(devices[0]).login = { state: "ok", text: "로그인됨, 자동 갱신 5분 전", note: "접근 토큰 3시간 뒤 만료(자동 갱신)", attention: false, slot: "2" };
+click({ prov: "all" });
+assert.match(rendered(), /<p class="ul-age">로그인됨, 자동 갱신 5분 전 · 접근 토큰 3시간 뒤 만료\(자동 갱신\)<\/p>/);
+assert.doesNotMatch(rendered(), /다시 로그인 방법/);
+assert.equal(hotNow(), hotBase);
+for (const [state, text] of [["relogin", "재로그인 필요"], ["expiring", "로그인 만료 임박(2일)"], ["keychain", "키체인 접근 불가"], ["stalled", "자동 갱신 멈춤"], ["failed", "자동 갱신 실패"]]) {
+  claudeOf(devices[0]).login = { state, text, note: null, attention: true, slot: "2" };
+  click({ prov: "all" });
+  assert.ok(rendered().includes(`<p class="ul-err">${text}</p><button type="button" class="seg-action" data-guide="first">다시 로그인 방법</button>`), state);
+  assert.equal(hotNow(), hotBase + 1); // 기기 하나로 센다
+  assert.match(rendered(), new RegExp(`주의 필요 계정</span><b>${hotBase + 1}</b>`));
+}
+// 주의 필터 중에도 로그인 이상 기기는 남고, 정상으로 돌아오면 빠진다. 다른 프로바이더 필터에서는 세지 않는다
+const guideDialog = element("ulDlg");
+guideDialog.showModal = () => { guideDialog.open = true; };
+click({}, "ulHot");
+assert.match(rendered(), /data-guide="first"/);
+click({}, "ulHot");
+click({ prov: "codex" });
+assert.doesNotMatch(rendered(), /data-guide/);
+click({ prov: "all" });
+// 안내 대화상자: GUI 터미널 /login → hswap claude add 순서. keychain 이면 로그인 세션 안내가 앞에 온다. 알면 슬롯을 넣는다
+click({ guide: "first" });
+let guide = element("ulDlgB").innerHTML;
+assert.equal(guideDialog.open, true);
+assert.equal(element("ulDlgT").textContent, "first · Claude 다시 로그인");
+assert.ok(guide.indexOf("/login") < guide.indexOf("hswap claude add --slot 2"));
+assert.doesNotMatch(guide, /로그인 세션에서 실행해야/);
+guideDialog.close(); // 이 가짜 DOM 에서는 close 이벤트 처리기다. 닫으면 다시 그려도 안내가 돌아오지 않는다
+element("ulDlgB").innerHTML = "";
+click({ prov: "all" });
+assert.equal(element("ulDlgB").innerHTML, "");
+claudeOf(devices[0]).login = { state: "keychain", text: "키체인 접근 불가", note: null, attention: true, slot: null };
+click({ guide: "first" });
+guide = element("ulDlgB").innerHTML;
+assert.ok(guide.indexOf("로그인 세션에서 실행해야") < guide.indexOf("/login"));
+assert.match(guide, /<code>hswap claude add<\/code> 로 그 계정을 다시 저장합니다\. 슬롯 번호를 알면 --slot N/);
+delete claudeOf(devices[0]).login;
+click({ prov: "all" });
+assert.equal(hotNow(), hotBase); // 상태가 없으면(keepalive 를 쓰지 않는 기기) 세지 않는다
 
 // 탭과 섹션은 사용량 모으기(기기마다 프로바이더를 불러 수십 초)를 기다리지 않고 core 확인(/api/devices)만으로 뜬다.
 // 셸이 core 로 기억한 탭이면(지도에서 넘어올 때) 어떤 응답보다 먼저 섹션을 연다

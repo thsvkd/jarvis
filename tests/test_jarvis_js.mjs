@@ -187,4 +187,22 @@ assert.doesNotMatch(bentoCss, /(^|\n)#main > \.sec/); // 셋업 페이지(data-t
   assert.deepEqual(back.current(), ["devices"]);
 }
 
+// covers: USAGE-7. 게이트웨이가 준 로그인 문구·슬롯은 사용량 화면과 안내 대화상자에서 이스케이프된다
+{
+  const els = new Map();
+  const el = (id) => els.get(id) || els.set(id, { id, hidden: false, dataset: {}, classList: { toggle() {} }, setAttribute() {}, toggleAttribute() {}, addEventListener(t, fn) { this[t] = fn; }, showModal() {} }).get(id);
+  const evil = "<img src=x onerror=alert(1)>";
+  const devices = [{ id: "d", host: "d", status: 200, mode: "independent", unavailable: [], providers: [
+    { id: "claude", name: "Claude", login: { state: "failed", text: "자동 갱신 실패(" + evil + ")", note: evil, attention: true, slot: evil }, accounts: [] }] }];
+  const c = { window: {}, document: { hidden: false, querySelector: (s) => el(s.slice(1)), querySelectorAll: () => [], addEventListener() {} }, location: { search: "", hash: "" }, URLSearchParams, console,
+    localStorage: { getItem() { return null; }, setItem() {} }, setTimeout() {}, clearTimeout() {}, fetch: async () => ({ ok: true, status: 200, json: async () => ({ devices }) }) };
+  vm.runInNewContext(readFileSync(path, "utf8"), c);
+  vm.runInNewContext(readFileSync(new URL("../static/app/usage.js", import.meta.url), "utf8"), c);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(el("ulBody").innerHTML, /자동 갱신 실패\(&lt;img/);
+  el("usage").click({ target: { closest: () => ({ dataset: { guide: "d" }, id: "", getAttribute: () => null }) } });
+  assert.match(el("ulDlgB").innerHTML, /--slot &lt;img/);
+  assert.doesNotMatch(el("ulBody").innerHTML + el("ulDlgB").innerHTML, /<img/);
+}
+
 console.log("ok");

@@ -10,7 +10,7 @@
  // 셸이 기억한 core 값이 있으면 확인 전에도 섹션을 연다('불러오는 중…'). 게이트웨이면 load 가 404 로 다시 숨긴다
  if(document.querySelector('[data-sh-sec="usage"][data-core]'))sec.hidden=false;
  const MODE_KEY="jarvis.usage.mode";
- const S={devs:null,prov:"all",hot:false,busy:new Set(),dlg:null,login:null,
+ const S={devs:null,prov:"all",hot:false,busy:new Set(),dlg:null,login:null,guide:null,
   mode:(()=>{try{return localStorage.getItem(MODE_KEY)==="full"?"full":"brief";}catch(e){return "brief";}})()};
  const WIN={session:"5시간",weekly:"주간",fable:"Fable 주간",monthly:"월간"};
  const PROVIDER={claude:"Claude",codex:"Codex",grok:"Grok",antigravity:"Antigravity",gemini:"Gemini",kimi:"Kimi",minimax:"MiniMax",zcode:"Z Code",cursor:"Cursor",opencodeGo:"OpenCode Go"};
@@ -46,6 +46,7 @@
  const kind=a=>{const t=(a.failure||"")+" "+(a.error||"");return KINDS.find(k=>k[3].test(t))||["unknown","알 수 없는 오류","사용량을 읽지 못했습니다.",null];};
  const peak=a=>{const v=[...a.windows,...a.buckets].map(cur).filter(u=>u!=null);return isErr(a)||!v.length?null:Math.max(...v);};
  const isHot=a=>isErr(a)||a.attention===true||(peak(a)??0)>=75; // attention: 재로그인 등 사람이 손봐야 다시 읽힌다
+ const loginHot=p=>!!(p.login&&p.login.attention); // 기기 단위 로그인 상태(Claude). 계정이 아니라 기기마다 센다
  // 같은 구독 계정(이메일·조직)은 어느 기기에서 보든 한도가 같다. 이메일이 없는 '기본 계정'은 기기마다 따로 센다.
  const keyOf=(d,p,a,index)=>p.id+":"+(a.label.includes("@")?a.label.toLowerCase()+"\n"+(a.org||""):d.id+":"+index);
  // 여러 기기에 같은 계정이 있으면 사용량을 읽은 쪽, 그중 최근 것을 쓴다(사용 중이 아닌 기기는 아직 안 읽었을 수 있다)
@@ -72,7 +73,8 @@
  const fresh=d=>d.status===200?(d.fresh_logins||[]).filter(id=>!(d.providers||[]).some(p=>p.id===id)):[];
  const filtering=()=>S.prov!=="all"||S.hot;
  // 필터 중에는 사용량을 못 읽은 기기도 '전체'일 때만 보인다(어느 프로바이더인지 모른다)
- const visible=d=>!S.hot&&fresh(d).includes(S.prov)||(ok(d)?(!filtering()||provs(d).some(p=>shown(d,p).length)):S.prov==="all");
+ const visible=d=>!S.hot&&fresh(d).includes(S.prov)||(ok(d)?(!filtering()||provs(d).some(p=>shown(d,p).length||loginHot(p))):S.prov==="all");
+ const hotLogins=()=>S.devs.flatMap(d=>provs(d).filter(loginHot));
  function uniq(filterHot=true){
   const m=new Map();
   for(const d of S.devs)for(const p of provs(d))for(const [i,a] of p.accounts.entries()){
@@ -83,7 +85,7 @@
  function columns(hotOnly){
   const seen=new Map();
   for(const d of S.devs)for(const p of d.status===200?d.providers||[]:[])
-   if(!seen.has(p.id)&&(!hotOnly||p.accounts.some(isHot)))seen.set(p.id,p.name); // 표는 주의 필터 중 빈 열을 뺀다
+   if(!seen.has(p.id)&&(!hotOnly||p.accounts.some(isHot)||loginHot(p)))seen.set(p.id,p.name); // 표는 주의 필터 중 빈 열을 뺀다
   if(!hotOnly)for(const d of S.devs)for(const id of fresh(d))if(!seen.has(id))seen.set(id,PROVIDER[id]||id);
   return [...seen].map(([id,name])=>({id,name}));
  }
@@ -113,6 +115,8 @@
  const useBtn=(a,d)=>a.slot&&!a.active?html`<button type="button" class="seg-action" data-use="${d.id}" data-slot="${a.slot}" data-label="${a.label}" aria-disabled="${String(S.busy.has(d.id))}">이 계정 사용</button>`:"";
  // 인증 실패·조치 필요 계정에는 그 기기에서 다시 로그인할 버튼을 함께 낸다(요약 카드도 상세와 같다)
  const relogIf=(a,d,p)=>(isErr(a)&&kind(a)[0]==="auth"||a.attention)&&(d.logins||[]).includes(p.id)?relog(d,p.id):"";
+ // 기기 단위 로그인 상태 한 줄. 정상이면 작게, 이상이면 주의 색과 안내 버튼(Claude 는 device-code 로그인이 없어 jarvis 가 대신 로그인하지 않는다)
+ const loginLine=(d,p)=>p.login?html`<p class="${p.login.attention?"ul-err":"ul-age"}">${p.login.text}${p.login.note?" · "+p.login.note:""}</p>${p.login.attention?html`<button type="button" class="seg-action" data-guide="${d.id}">다시 로그인 방법</button>`:""}`:"";
  const acct=(a,d,p)=>html`<div class="ul-acct">${head(a)}${body(a)}${useBtn(a,d)}${relogIf(a,d,p)}${a.updated_at?html`<p class="ul-age">${P.fmt.ago(a.updated_at)} 확인</p>`:""}</div>`;
  const badge=d=>{const [t,l]=state(d);return html`<span class="badge" data-tone="${t}">${l}</span>`;};
  function devMeta(d){
@@ -125,11 +129,11 @@
 
  // ---------------------------------------------------------------- 화면
  function view(){
-  const all=uniq(),hot=all.filter(x=>isHot(x.a));
+  const all=uniq(),hot=all.filter(x=>isHot(x.a)),hotN=hot.length+hotLogins().length;
   const bad=S.devs.filter(failed);
   const wins=all.flatMap(({a,p})=>isErr(a)?[]:a.windows.filter(w=>cur(w)>=50&&w.resets_at).map(w=>({a,p,w}))).sort((x,y)=>x.w.resets_at-y.w.resets_at);
   const next=wins.find(o=>o.w.used>=75);
-  const kpi=html`<div class="bento"><div class="tile span-4 m-3 ul-kpi" data-tone="${hot.length?"warn":"ok"}"><span class="ul-wl">주의 필요 계정</span><b>${hot.length}</b><span class="ul-muted">75% 이상 또는 확인 실패 · 같은 계정은 한 번</span></div><div class="tile span-4 m-3 ul-kpi"><span class="ul-wl">다음 리셋(주의 계정)</span><b class="ul-kpi-s">${next?left(next.w.resets_at):"–"}</b><span class="ul-muted">${next?next.a.label+" · "+next.p.name+" "+(WIN[next.w.key]||next.w.key):"주의 계정 없음"}</span></div><div class="tile span-4 m-6 ul-kpi" data-tone="${bad.length?"crit":"ok"}"><span class="ul-wl">읽지 못한 기기</span><b>${bad.length}</b><span class="ul-muted">${bad.map(d=>d.host||d.id).join(" · ")||"없음"}</span></div></div>`;
+  const kpi=html`<div class="bento"><div class="tile span-4 m-3 ul-kpi" data-tone="${hotN?"warn":"ok"}"><span class="ul-wl">주의 필요 계정</span><b>${hotN}</b><span class="ul-muted">75% 이상·확인 실패·로그인 이상 · 같은 계정은 한 번</span></div><div class="tile span-4 m-3 ul-kpi"><span class="ul-wl">다음 리셋(주의 계정)</span><b class="ul-kpi-s">${next?left(next.w.resets_at):"–"}</b><span class="ul-muted">${next?next.a.label+" · "+next.p.name+" "+(WIN[next.w.key]||next.w.key):"주의 계정 없음"}</span></div><div class="tile span-4 m-6 ul-kpi" data-tone="${bad.length?"crit":"ok"}"><span class="ul-wl">읽지 못한 기기</span><b>${bad.length}</b><span class="ul-muted">${bad.map(d=>d.host||d.id).join(" · ")||"없음"}</span></div></div>`;
   const soon=wins.length?html`<div class="tile ul-soon"><h3 class="sub-h">곧 풀리는 한도 (50% 이상)</h3><ol>${wins.slice(0,6).map(({a,p,w})=>html`<li><span class="ul-when" title="${at(w.resets_at)}">${left(w.resets_at)}</span>${dot(p.id)}<span class="ul-email">${a.label}</span><span class="ul-wl">${p.name} ${WIN[w.key]||w.key}</span>${meter(w.used)}<b class="ul-wp" data-tone="${tone(w.used)}">${pct(w.used)}</b></li>`)}</ol></div>`:"";
   const summaryAccounts=uniq(false).filter(({a})=>!S.hot||isHot(a)); // 최신 값을 고른 뒤 주의 필터를 적용한다
   const groups=columns(false).map(p=>({p,accounts:summaryAccounts.filter(x=>x.p.id===p.id)})).filter(g=>g.accounts.length);
@@ -137,13 +141,13 @@
   const rows=S.devs.filter(visible),cols=columns(S.hot).filter(c=>S.prov==="all"||c.id===S.prov);
   if(!rows.length)return html`${kpi}${soon}<div class="tile ul-none"><p>${filtering()?"조건에 맞는 계정이 없습니다.":"사용량을 보여 줄 기기가 없습니다."}</p>${filtering()?html`<button type="button" class="seg-action" data-clear>필터 해제</button>`:""}</div>`;
   const cell=(d,c)=>{
-   const p=provs(d).find(p=>p.id===c.id),list=p?shown(d,p):[];
+   const p=provs(d).find(p=>p.id===c.id),list=p?shown(d,p):[],L=p&&(!S.hot||loginHot(p))?loginLine(d,p):"";
    if(!list.length&&fresh(d).includes(c.id))return html`<td data-label="${c.name}" class="ul-full"><div class="ul-acct"><p class="ul-muted">로그인하지 않았습니다.</p>${relog(d,c.id,false)}</div></td>`;
-   if(!list.length)return html`<td data-label="${c.name}" class="ul-nil">–</td>`;
-   if(S.mode==="full")return html`<td data-label="${c.name}" class="ul-full">${list.map(a=>acct(a,d,p))}</td>`;
+   if(!list.length)return L?html`<td data-label="${c.name}" class="ul-full">${L}</td>`:html`<td data-label="${c.name}" class="ul-nil">–</td>`;
+   if(S.mode==="full")return html`<td data-label="${c.name}" class="ul-full">${L}${list.map(a=>acct(a,d,p))}</td>`;
    // 칸 값은 계정마다 가장 찬 한도의 평균이다(읽지 못한 계정은 빼고 센다)
    const err=list.some(isErr),act=list.some(a=>a.attention),pk=list.map(peak).filter(v=>v!=null),avg=pk.length?pk.reduce((x,y)=>x+y,0)/pk.length:null;
-   return html`<td data-label="${c.name}"><button type="button" class="ul-cell" data-cell="${d.id+":"+c.id}" data-tone="${err||act?"crit":tone(avg)}"><b>${err&&avg==null?kind(list.find(isErr))[1]:pct(avg)}</b><span>${pk.length>1?"평균 · ":""}계정 ${list.length}${err&&avg!=null?" · "+kind(list.find(isErr))[1]+" 포함":""}${act?" · 조치 필요":""}</span></button></td>`;
+   return html`<td data-label="${c.name}"><button type="button" class="ul-cell" data-cell="${d.id+":"+c.id}" data-tone="${err||act?"crit":tone(avg)}"><b>${err&&avg==null?kind(list.find(isErr))[1]:pct(avg)}</b><span>${pk.length>1?"평균 · ":""}계정 ${list.length}${err&&avg!=null?" · "+kind(list.find(isErr))[1]+" 포함":""}${act?" · 조치 필요":""}</span></button>${L}</td>`;
   };
   return html`${kpi}${soon}${summary}<div class="tile ul-mx" data-mode="${S.mode}"><table style="${"--n:"+cols.length}"><thead><tr><th scope="col">기기</th>${cols.map(c=>html`<th scope="col">${dot(c.id)}${c.name}</th>`)}</tr></thead><tbody>${rows.map(d=>html`<tr aria-busy="${String(S.busy.has(d.id))}"><th scope="row"><b>${d.host||d.id}</b> ${badge(d)}${devMeta(d)}${state(d)[2]?html`<span class="ul-muted">${state(d)[2]}</span>`:ok(d)&&!(d.providers||[]).length?html`<span class="ul-muted">${d.mode==="independent"&&(d.unavailable||[]).length?"확인한 사용량이 없습니다.":"로그인한 구독 계정이 없습니다."}</span>`:""}${[["cswap",d.cswap_error],["caam",d.caam_error]].filter(x=>x[1]).map(([n,e])=>html`<span class="ul-muted">${e.includes(n)?"":n+": "}${e}</span>`)}</th>${cols.map(c=>cell(d,c))}</tr>`)}</tbody></table></div>`;
  }
@@ -156,13 +160,20 @@
     :html`<div class="ul-login"><p>아래 주소를 열어 로그인하고 일회용 코드를 넣으세요. 코드는 ${new Date(L.expires_at*1000).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",hour12:false})}까지 유효합니다.</p><p><a href="${L.url}" target="_blank" rel="noopener noreferrer">${L.url}</a></p><p class="ul-code">${L.code}</p><p class="ul-muted">로그인을 마치면 이 창이 저절로 닫히고 사용량을 다시 읽습니다.</p></div>`);
    return;
   }
+  if(S.guide){ // 안내만 한다: 로그인은 그 기기의 화면 세션에서 사람이 한다. 문구에 기기 이름·경로를 넣지 않는다
+   const d=S.devs.find(x=>x.id===S.guide),L=d&&(d.providers||[]).find(x=>x.id==="claude")?.login;
+   $("#ulDlgT").textContent=(d?d.host||d.id:S.guide)+" · Claude 다시 로그인";
+   const add=L&&L.slot?"hswap claude add --slot "+L.slot:"hswap claude add";
+   P.render($("#ulDlgB"),html`<div class="ul-login">${L&&L.state==="keychain"?html`<p class="ul-err">SSH·서비스가 아니라 로그인 세션에서 실행해야 합니다.</p>`:""}<p>1. 그 기기의 로그인된 화면(GUI) 터미널에서 <code>claude</code> 를 실행해 <code>/login</code> 합니다. SSH 나 원격 실행 맥락은 피합니다.</p><p>2. <code>${add}</code> 로 그 계정을 다시 저장합니다.${L&&L.slot?"":" 슬롯 번호를 알면 --slot N 을 덧붙입니다."}</p><p class="ul-muted">Claude 는 device-code 로그인이 없어 jarvis 가 대신 로그인하지 않습니다.</p></div>`);
+   return;
+  }
   if(!S.dlg)return;
   const d=S.devs.find(x=>x.id===S.dlg.dev),p=d&&provs(d).find(x=>x.id===S.dlg.prov);
   if(!p){dlg.close();return;}
   $("#ulDlgT").textContent=(d.host||d.id)+" · "+p.name;
-  P.render($("#ulDlgB"),html`${devMeta(d)}${shown(d,p).map(a=>acct(a,d,p))}`);
+  P.render($("#ulDlgB"),html`${devMeta(d)}${loginLine(d,p)}${shown(d,p).map(a=>acct(a,d,p))}`);
  }
- dlg.addEventListener("close",()=>{S.dlg=null;S.login=null;});
+ dlg.addEventListener("close",()=>{S.dlg=null;S.login=null;S.guide=null;});
  // 바깥(backdrop)을 누르면 닫는다. backdrop 클릭도 대상이 dialog 라서 좌표가 상자 밖인지로 가린다(안쪽 여백 클릭은 닫지 않게)
  dlg.addEventListener("click",e=>{
   const r=dlg.getBoundingClientRect();
@@ -172,7 +183,7 @@
   const ids=columns(false).map(c=>c.id);
   if(S.prov!=="all"&&!ids.includes(S.prov))S.prov="all";
   P.render($("#ulProv"),html`${[{id:"all",name:"전체"},...columns(false)].map(p=>html`<button type="button" data-prov="${p.id}" aria-pressed="${String(S.prov===p.id)}">${p.name}</button>`)}`);
-  const hb=$("#ulHot"),hn=uniq(false).filter(x=>isHot(x.a)).length; // 필터 버튼의 개수: 누른 뒤에도 전체 주의 계정 수를 보인다
+  const hb=$("#ulHot"),hn=uniq(false).filter(x=>isHot(x.a)).length+hotLogins().length; // 필터 버튼의 개수: 누른 뒤에도 전체 주의 계정 수를 보인다
   hb.setAttribute("aria-pressed",String(S.hot));hb.setAttribute("aria-label","주의 필요 계정 "+hn+"개만 보기");$("#ulHotN").textContent=hn;
   document.querySelectorAll("#ulMode [data-mode]").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.mode===S.mode)));
   P.render($("#ulBody"),view());
@@ -259,6 +270,7 @@
   if(t.dataset.mode){S.mode=t.dataset.mode;try{localStorage.setItem(MODE_KEY,S.mode);}catch(err){}draw();return;}
   if(t.id==="ulAll"){load(true);return;}
   if(t.dataset.login){login(t.dataset.login,t.dataset.lp);return;}
+  if(t.dataset.guide){S.guide=t.dataset.guide;dlgDraw();if(!dlg.open)dlg.showModal();return;}
   if(t.dataset.use){use(t.dataset.use,t.dataset.slot,t.dataset.label);return;}
   if(t.dataset.refresh){if(S.login)dlg.close();refreshOne(t.dataset.refresh);return;}
   if(t.dataset.cell){const [dev,prov]=t.dataset.cell.split(":");S.dlg={dev,prov};dlgDraw();if(!dlg.open)dlg.showModal();return;}
