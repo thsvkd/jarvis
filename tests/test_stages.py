@@ -262,6 +262,15 @@ def test_explicit_newline_change_is_planned_but_the_default_keeps_the_recorded_v
     assert not any(action.writes for action in again)
 
 
+def test_probe_finds_jarvis_in_the_app_folder_or_the_old_checkout(monkeypatch, tmp_path):
+    home = _home(monkeypatch, tmp_path)
+    assert stages.probe_world(str(tmp_path))["jarvis_checkout"] is False
+    for rel in (".local/share/jarvis/app", "Workspace/jarvis"):
+        (home / rel).mkdir(parents=True)
+        assert stages.probe_world(str(tmp_path))["jarvis_checkout"] is True
+        shutil.rmtree(home / rel)
+
+
 def test_probe_reads_the_recorded_newline_chord(monkeypatch, tmp_path):
     home = _home(monkeypatch, tmp_path)
     (home / ".claude").mkdir()
@@ -282,7 +291,7 @@ def test_jarvis_herdr_and_setcap_follow_explicit_choice():
     gateway = stages.plan_actions(_full(jarvis_role="gateway"), _empty())
     gateway_blob = stages.render(gateway)
     assert "https://github.com/thsvkd/jarvis.git" in gateway_blob
-    assert "~/Workspace/jarvis" in gateway_blob
+    assert "~/.local/share/jarvis/app" in gateway_blob
     assert "deploy/gateway.toml" in gateway_blob
     assert "jarvis.service" in gateway_blob
     assert "setcap" not in gateway_blob.lower()
@@ -608,9 +617,9 @@ HERDR_UNINSTALL = {
 
 JARVIS_GATEWAY = (
     '{ loginctl enable-linger 2>/dev/null || sudo loginctl enable-linger "$(id -un)"; }'
-    ' && git clone https://github.com/thsvkd/jarvis.git "$HOME/Workspace/jarvis"'
-    ' && install -Dm644 "$HOME/Workspace/jarvis/deploy/gateway.toml" "$HOME/.config/jarvis/config.toml"'
-    ' && install -Dm644 "$HOME/Workspace/jarvis/deploy/jarvis.service"'
+    ' && git clone https://github.com/thsvkd/jarvis.git "$HOME/.local/share/jarvis/app"'
+    ' && install -Dm644 "$HOME/.local/share/jarvis/app/deploy/gateway.toml" "$HOME/.config/jarvis/config.toml"'
+    ' && install -Dm644 "$HOME/.local/share/jarvis/app/deploy/jarvis.service"'
     ' "$HOME/.config/systemd/user/jarvis.service"'
     " && systemctl --user daemon-reload"
     " && systemctl --user enable --now jarvis"

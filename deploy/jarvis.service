@@ -1,4 +1,5 @@
 # systemd 사용자 유닛(Linux 기기의 jarvis). 부팅 때 뜨려면 loginctl enable-linger 가 켜져 있어야 한다.
+# install.sh 가 코드(~/.local/share/jarvis/app)와 함께 설치한다. 손으로 설치하면 app 폴더에서:
 #   install -Dm644 deploy/jarvis.service ~/.config/systemd/user/jarvis.service
 #   systemctl --user daemon-reload && systemctl --user enable --now jarvis
 #   systemctl --user restart jarvis      # 파이썬을 고쳤을 때 · journalctl --user -u jarvis 로그
@@ -6,7 +7,7 @@
 Description=jarvis home server monitor
 
 [Service]
-WorkingDirectory=%h/Workspace/jarvis
+WorkingDirectory=%h/.local/share/jarvis/app
 ExecStart=/usr/bin/python3 -m jarvis
 Environment=PYTHONUNBUFFERED=1
 # SIGTERM·SIGINT 모두 히스토리를 저장하고 끝낸다(pm2 와 같게 SIGINT)

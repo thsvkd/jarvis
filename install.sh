@@ -6,7 +6,8 @@
 #
 # git·Homebrew 가 없는 새 Mac 에서도 돈다: Python 은 uv 로 받은 venv(~/.local/share/jarvis/venv), 코드는 최신 릴리스 묶음.
 # Linux 는 LaunchAgent 대신 systemd 사용자 유닛(deploy/jarvis.service, python 만 venv 로)을 쓴다.
-# 이미 있는 설정·LaunchAgent·유닛·저장소는 덮어쓰지 않는다.
+# 코드는 ~/.local/share/jarvis/app 에 둔다(~/Workspace/jarvis 는 개발 저장소 자리). 1.8.0 이전 배치는 app 으로 옮긴다.
+# 이미 있는 설정·LaunchAgent·유닛·코드는 덮어쓰지 않는다.
 set -eu
 
 CORE=""
@@ -24,7 +25,8 @@ case "$OS" in
 esac
 
 SHARE="$HOME/.local/share/jarvis"
-REPO="$HOME/Workspace/jarvis"
+APP="$SHARE/app"
+OLD="$HOME/Workspace/jarvis"  # 1.8.0 이전 배치
 CONFIG="$HOME/.config/jarvis/config.toml"
 AGENT="$HOME/Library/LaunchAgents/dev.jarvis.plist"
 UNIT="$HOME/.config/systemd/user/jarvis.service"
@@ -47,7 +49,9 @@ if [ "$OS" = Darwin ]; then uv pip install --quiet --python "$PY" psutil pystray
 else uv pip install --quiet --python "$PY" psutil; fi
 
 # 2. 코드: 최신 릴리스 묶음. 이후 갱신은 core 의 jarvis 업데이트 버튼이 한다(versions/).
-if [ ! -d "$REPO" ]; then
+# 개발 체크아웃(~/Workspace/jarvis/.git)으로 이미 등록된 기기는 그대로 둔다(받지도 옮기지도 않는다)
+if [ ! -d "$APP" ] && [ -e "$OLD/.git" ] && { [ -f "$AGENT" ] || [ -f "$UNIT" ]; }; then APP="$OLD"; fi
+if [ ! -d "$APP" ]; then
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
   curl -fsSL "$MANIFEST" -o "$tmp/manifest.json"
@@ -57,8 +61,8 @@ if [ ! -d "$REPO" ]; then
   curl -fsSL "$url" -o "$tmp/jarvis.tar.gz"
   if command -v sha256sum >/dev/null 2>&1; then echo "$sum  $tmp/jarvis.tar.gz" | sha256sum -c - >/dev/null
   else echo "$sum  $tmp/jarvis.tar.gz" | shasum -a 256 -c - >/dev/null; fi
-  mkdir -p "$REPO"
-  tar -xzf "$tmp/jarvis.tar.gz" -C "$REPO" --strip-components 1
+  mkdir -p "$APP"
+  tar -xzf "$tmp/jarvis.tar.gz" -C "$APP" --strip-components 1
 fi
 
 # 3. 설정
@@ -82,13 +86,13 @@ fi
 if [ "$OS" = Darwin ]; then
   if [ ! -f "$AGENT" ]; then
     mkdir -p "$(dirname "$AGENT")"
-    sed -e "s#/opt/homebrew/bin/python3#$PY#" -e "s#/Users/USER#$HOME#g" "$REPO/deploy/jarvis.plist" > "$AGENT"
+    sed -e "s#/opt/homebrew/bin/python3#$PY#" -e "s#/Users/USER#$HOME#g" "$APP/deploy/jarvis.plist" > "$AGENT"
   fi
   launchctl print "gui/$(id -u)/dev.jarvis" >/dev/null 2>&1 || launchctl bootstrap "gui/$(id -u)" "$AGENT"
 else
   if [ ! -f "$UNIT" ]; then
     mkdir -p "$(dirname "$UNIT")"
-    sed -e "s#^ExecStart=/usr/bin/python3 #ExecStart=$PY #" "$REPO/deploy/jarvis.service" > "$UNIT"
+    sed -e "s#^ExecStart=/usr/bin/python3 #ExecStart=$PY #" "$APP/deploy/jarvis.service" > "$UNIT"
   fi
   # 로그아웃해도·부팅 때도 돌게 한다. 막혀 있으면(polkit 없음) 안내만 하고 계속한다
   loginctl enable-linger "$(id -un)" 2>/dev/null || echo "linger 를 켜지 못했습니다: sudo loginctl enable-linger $(id -un)" >&2
@@ -100,8 +104,20 @@ else
   fi
 fi
 
-# 5. 모듈: 계획을 보이고 그 plan_id 로 적용한다
-cd "$REPO"
+# 5. 1.8.0 이전 배치(~/Workspace/jarvis, .git 없음)를 쓰던 등록을 app 으로 옮긴다. 개발 체크아웃이면 relocate 가 아무것도 하지 않는다.
+# 옛 폴더의 코드에는 relocate 가 없을 수 있으므로 방금 받은 app 의 코드로 부른다
+cd "$APP"
+if [ -d "$OLD" ] && [ "$APP" != "$OLD" ]; then
+  state=$("$PY" -m jarvis.relocate --json | "$PY" -c 'import json, sys; r = json.load(sys.stdin); print("이전:", r["state"], r["detail"], file=sys.stderr); print(r["state"])') || state=failed
+  # macOS 는 launchd 가 plist 를 다시 읽어야 app 에서 뜬다. 사용자가 실행한 설치기라 여기서 다시 읽힌 뒤 옛 폴더를 옮긴다
+  if [ "$OS" = Darwin ] && [ "$state" = pending_reload ]; then
+    launchctl bootout "gui/$(id -u)/dev.jarvis" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$AGENT"
+    "$PY" -m jarvis.relocate || true
+  fi
+fi
+
+# 6. 모듈: 계획을 보이고 그 plan_id 로 적용한다
 for m in orca hooks setup; do
   plan=$("$PY" -m jarvis module "$m" plan --json) || { echo "$m: 계획을 세우지 못했습니다" >&2; continue; }
   id=$(printf '%s' "$plan" | "$PY" -c '

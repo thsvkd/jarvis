@@ -533,14 +533,14 @@ def _tailscale_install(platform: str) -> tuple[str, tuple[str, ...]]:
 
 
 def _jarvis_script(config: str) -> str:
-    # README 첫 설치. git 는 ~ 를 펼치지 않으므로 $HOME 을 쓴다.
+    # README 첫 설치. git 는 ~ 를 펼치지 않으므로 $HOME 을 쓴다. 코드는 jarvis 1.8.0 배치(launch.ROOT/app)에 둔다.
     # linger 를 clone 보다 먼저 한다. polkit 이 없거나 SSH 세션이면 본인 linger 도 거절되는데,
     # 그때 체크아웃이 남으면 다음 실행이 "present, not claimed" 로 보고 다시 시도하지 않는다.
     return (
         '{ loginctl enable-linger 2>/dev/null || sudo loginctl enable-linger "$(id -un)"; }'
-        " && git clone https://github.com/thsvkd/jarvis.git \"$HOME/Workspace/jarvis\""
-        f" && install -Dm644 \"$HOME/Workspace/jarvis/{config}\" \"$HOME/.config/jarvis/config.toml\""
-        " && install -Dm644 \"$HOME/Workspace/jarvis/deploy/jarvis.service\""
+        " && git clone https://github.com/thsvkd/jarvis.git \"$HOME/.local/share/jarvis/app\""
+        f" && install -Dm644 \"$HOME/.local/share/jarvis/app/{config}\" \"$HOME/.config/jarvis/config.toml\""
+        " && install -Dm644 \"$HOME/.local/share/jarvis/app/deploy/jarvis.service\""
         " \"$HOME/.config/systemd/user/jarvis.service\""
         " && systemctl --user daemon-reload"
         " && systemctl --user enable --now jarvis"
@@ -575,7 +575,7 @@ def _jarvis(selection, world) -> list[Action]:
                    _linux_package("python3-psutil"), ("flag:psutil_ok",))
         )
     detail = (
-        "clone https://github.com/thsvkd/jarvis.git to ~/Workspace/jarvis; "
+        "clone https://github.com/thsvkd/jarvis.git to ~/.local/share/jarvis/app; "
         f"install {config} to ~/.config/jarvis/config.toml; "
         "install deploy/jarvis.service to ~/.config/systemd/user/jarvis.service and enable"
     )
@@ -1015,7 +1015,8 @@ def probe_world(project_dir: str | None = None) -> dict:
         "python_ok": _python_ok_now(),
         "git": shutil.which("git") is not None,
         "platform": _platform_name(),
-        "jarvis_checkout": (home / "Workspace" / "jarvis").is_dir(),
+        # 1.8.0 배치(app) 또는 옛 배치·개발 체크아웃(~/Workspace/jarvis)
+        "jarvis_checkout": any((home / p).is_dir() for p in (".local/share/jarvis/app", "Workspace/jarvis")),
         "psutil_ok": _psutil_ok_now() if sys.platform.startswith("linux") else True,
         "jarvis_unit_owned": bool(receipt.get("jarvis_unit")),
         "agentsmd_exists": (project / "AGENTS.md").is_file(),

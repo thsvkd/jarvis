@@ -56,9 +56,12 @@ TOKEN_RE = re.compile(r"[A-Za-z0-9._-]+")
 SSH_MIN = "1.7.8"  # 시험한 최저 판
 SSH_ONLY = "SSH 로 닿는 기기는 이 조작을 지원하지 않습니다(그 기기에서 직접)"
 NO_RESTART = "받았지만 재시작하지 못했습니다(그 기기에서 재시작하세요)"
-SSH_EXIT = {90: "install.sh 배치(~/Workspace/jarvis, ~/.local/share/jarvis/venv)가 아닙니다", 91: NO_RESTART}
+SSH_EXIT = {90: "install.sh 배치(~/.local/share/jarvis/app 또는 ~/Workspace/jarvis, ~/.local/share/jarvis/venv)가 아닙니다",
+            91: NO_RESTART}
 # ponytail: install.sh 배치 고정. 수동 설치 기기가 생기면 devices 항목에 python·root 를 더한다
-PRE = ('cd "$HOME/Workspace/jarvis" && P="$HOME/.local/share/jarvis/venv/bin/python" && [ -x "$P" ] || exit 90\n'
+# 코드는 1.8.0 배치(app)를 먼저, 없으면 옛 배치·개발 체크아웃(~/Workspace/jarvis)을 쓴다
+PRE = ('D="$HOME/.local/share/jarvis/app"; [ -f "$D/jarvis/__init__.py" ] || D="$HOME/Workspace/jarvis"\n'
+       '[ -f "$D/jarvis/__init__.py" ] && cd "$D" && P="$HOME/.local/share/jarvis/venv/bin/python" && [ -x "$P" ] || exit 90\n'
        'PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"; export PATH\n'  # deploy/jarvis.plist
        'PYTHONIOENCODING=utf-8; export PYTHONIOENCODING\n')
 VERSION_RE = re.compile(r"^jarvis (\d+\.\d+\.\d+)", re.M)

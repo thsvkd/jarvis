@@ -4,14 +4,16 @@ jarvis 설치기(Windows): 최신 릴리스를 받아 게이트웨이(deploy\ins
 
   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/thsvkd/jarvis/main/install.ps1))) -Core <core 의 tailnet IP>
 
-Python 3.11+ 가 없으면 winget 으로 설치한다. 이미 있는 설정·저장소는 덮어쓰지 않는다. -DryRun 은 할 일만 보이고 아무것도 바꾸지 않는다.
+코드는 %LOCALAPPDATA%\jarvis\app 에 둔다(%USERPROFILE%\Workspace\jarvis 는 개발 저장소 자리). 1.8.0 이전 배치는 app 으로 옮긴다.
+Python 3.11+ 가 없으면 winget 으로 설치한다. 이미 있는 설정·코드는 덮어쓰지 않는다. -DryRun 은 할 일만 보이고 아무것도 바꾸지 않는다.
 #>
 param([string]$Core = "", [switch]$DryRun)
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $false  # 네이티브 명령은 $LASTEXITCODE 로 판정한다
 
 $manifestUrl = if ($env:JARVIS_MANIFEST) { $env:JARVIS_MANIFEST } else { "https://github.com/thsvkd/jarvis/releases/latest/download/manifest.json" }
-$repo = Join-Path $env:USERPROFILE "Workspace\jarvis"
+$repo = Join-Path $env:LOCALAPPDATA "jarvis\app"  # launch.ROOT\app
+$old = Join-Path $env:USERPROFILE "Workspace\jarvis"  # 1.8.0 이전 배치
 $cfg = Join-Path $env:USERPROFILE ".config\jarvis\config.toml"
 
 function Fail([string]$message) {
@@ -49,7 +51,11 @@ if (-not $py) { $steps += "winget install -e --id Python.Python.3.13 --scope use
 if (-not (Test-Path $repo)) { $steps += "release bundle -> $repo (sha256 verified)" }
 if (-not (Test-Path $cfg)) { $steps += "config $cfg (core = $Core)" }
 $task = Get-ScheduledTask -TaskName jarvis -ErrorAction SilentlyContinue
+# 개발 체크아웃(.git)으로 이미 등록된 기기는 그대로 둔다(받지도 옮기지도 않는다)
+if (-not (Test-Path $repo) -and (Test-Path (Join-Path $old ".git")) -and $task) { $repo = $old }
+$relocate = (Test-Path $old) -and ($repo -ne $old)
 if (-not $task) { $steps += "deploy\install-windows.ps1 (firewall rule jarvis-9300, scheduled task jarvis)" }
+if ($relocate) { $steps += "relocate $old -> $repo (python -m jarvis.relocate)" }
 $steps += "modules: orca, hooks, setup (plan -> apply with its plan_id)"
 if ($DryRun) { $steps | ForEach-Object { "would: $_" }; return }
 
@@ -87,10 +93,13 @@ if (-not (Test-Path $cfg)) {
 # 4. 게이트웨이(예약 작업). 이미 있으면 건드리지 않는다(다시 등록하면 돌고 있는 게이트웨이와 적용 작업이 끊긴다)
 if (-not $task) { & (Join-Path $repo "deploy\install-windows.ps1") -Python $py }
 
-# 5. 모듈: 계획을 보이고 그 plan_id 로 적용한다. jarvis 는 JSON 을 UTF-8 로 낸다(5.1 의 기본 콘솔 인코딩은 949 등)
+# 5. 1.8.0 이전 배치(.git 없음)를 쓰던 예약 작업을 app 으로 옮긴다(관리자 셸이라 작업을 고칠 수 있다). 개발 체크아웃이면 아무것도 하지 않는다.
+# 옛 폴더의 코드에는 relocate 가 없을 수 있으므로 app 의 코드로 부른다. 돌고 있는 게이트웨이는 다음 기동부터 app 에서 뜬다
+# 6. 모듈: 계획을 보이고 그 plan_id 로 적용한다. jarvis 는 JSON 을 UTF-8 로 낸다(5.1 의 기본 콘솔 인코딩은 949 등)
 [Console]::OutputEncoding = New-Object Text.UTF8Encoding $false
 Push-Location $repo
 try {
+    if ($relocate) { & { $ErrorActionPreference = "Continue"; & $py -m jarvis.relocate } }
     foreach ($m in "orca", "hooks", "setup") {
         # 5.1 은 Stop 에서 네이티브 stderr(진행 로그)를 종료 오류로 바꾼다. 이 호출만 Continue 로 두고 종료 코드로 판정한다
         $raw = & { $ErrorActionPreference = "Continue"; & $py -m jarvis module $m plan --json 2>$null }

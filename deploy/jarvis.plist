@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  macOS LaunchAgent 예시(로그인한 사용자 세션에서 돈다). REPO·HOME 경로를 이 기기에 맞게 바꾼 뒤:
+  macOS LaunchAgent 예시(로그인한 사용자 세션에서 돈다). install.sh 가 코드(~/.local/share/jarvis/app)와 함께 설치한다.
+  손으로 설치하면 HOME 경로를 이 기기에 맞게 바꾼 뒤:
     sed -e "s#/Users/USER#$HOME#g" deploy/jarvis.plist > ~/Library/LaunchAgents/dev.jarvis.plist
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.jarvis.plist
     launchctl kickstart -k gui/$(id -u)/dev.jarvis      # 코드를 고친 뒤 재시작
@@ -18,7 +19,7 @@
     <string>-m</string>
     <string>jarvis</string>
   </array>
-  <key>WorkingDirectory</key><string>/Users/USER/Workspace/jarvis</string>
+  <key>WorkingDirectory</key><string>/Users/USER/.local/share/jarvis/app</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key><string>/Users/USER/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>

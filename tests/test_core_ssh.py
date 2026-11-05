@@ -123,7 +123,9 @@ class Base(unittest.TestCase):
         self.dir = os.path.join(tmp.name, "rec")
         self.home = os.path.join(tmp.name, "home")
         os.makedirs(self.dir)
-        os.makedirs(os.path.join(self.home, "Workspace", "jarvis"))
+        self.app = os.path.join(self.home, ".local", "share", "jarvis", "app")
+        os.makedirs(os.path.join(self.app, "jarvis"))
+        open(os.path.join(self.app, "jarvis", "__init__.py"), "w").close()
         venv = os.path.join(self.home, ".local", "share", "jarvis", "venv", "bin")
         os.makedirs(venv)
         self.python = os.path.join(venv, "python")
@@ -364,7 +366,7 @@ class Commands(Base):
         self.assertEqual(sorted(p["argv"][3] for p in py), sorted(modules_api.module.MODULES))
         for p in py:
             self.assertEqual(p["argv"][:2] + p["argv"][4:], ["-m", "jarvis", "status", "--json"])
-            self.assertEqual(p["cwd"], os.path.join(self.home, "Workspace", "jarvis"))
+            self.assertEqual(p["cwd"], self.app)
             self.assertEqual(p["enc"], "utf-8")
             self.assertTrue(p["path"].startswith(os.path.join(self.home, ".local", "bin") + ":/opt/homebrew/bin:"))
             self.assertTrue(p["stdin_null"])
@@ -410,9 +412,18 @@ class Commands(Base):
         os.remove(self.python)
         self.polled()
         self.assertEqual(self.mods.plan("kg", "orca"), (502, {"error": core.SSH_EXIT[90]}))
-        os.rmdir(os.path.join(self.home, "Workspace", "jarvis"))
         script(self.python, FAKE_PY)
+        os.remove(os.path.join(self.app, "jarvis", "__init__.py"))  # 코드가 없는 app 은 배치가 아니다
         self.assertEqual(self.mods.plan("kg", "orca"), (502, {"error": core.SSH_EXIT[90]}))
+        old = os.path.join(self.home, "Workspace", "jarvis")  # 옛 배치·개발 체크아웃(kgolf-macmini)
+        os.makedirs(os.path.join(old, "jarvis"))
+        open(os.path.join(old, "jarvis", "__init__.py"), "w").close()
+        self.py({"module orca plan": {"out": json.dumps({"plan_id": PLAN_ID, "steps": []}) + "\n"}})
+        self.assertEqual(self.mods.plan("kg", "orca")[0], 200)
+        self.assertEqual(os.path.realpath(self.py_calls()[-1]["cwd"]), os.path.realpath(old))
+        open(os.path.join(self.app, "jarvis", "__init__.py"), "w").close()  # 둘 다 있으면 app 이 먼저다
+        self.assertEqual(self.mods.plan("kg", "orca")[0], 200)
+        self.assertEqual(os.path.realpath(self.py_calls()[-1]["cwd"]), os.path.realpath(self.app))
 
 
 class Results(Base):
