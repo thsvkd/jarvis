@@ -53,13 +53,29 @@ class InstallTest(unittest.TestCase):
             with open(path, "w") as f:
                 f.write("#!/bin/sh\n" + body + "\n")
             os.chmod(path, 0o755)
+        self.manifest = os.path.join(self.tmp, "manifest.json")
+        self.release()
+        self.log = os.path.join(self.tmp, "log")
+        self.env = {"HOME": self.home, "LOG": self.log, "PATH": bin_dir + ":/usr/bin:/bin",
+                    "JARVIS_MANIFEST": "file://" + self.manifest, "TEST_PY": sys.executable}
+        self.share = os.path.join(self.home, ".local", "share", "jarvis")
+        self.app = os.path.join(self.share, "app")
+        self.old = os.path.join(self.home, "Workspace", "jarvis")
+
+    def release(self, old_templates=False):
+        """가짜 최신 릴리스 묶음과 매니페스트. old_templates: 1.8.0 이전 릴리스처럼 템플릿의 작업 폴더가 ~/Workspace/jarvis."""
         src = os.path.join(self.tmp, "src", "jarvis-9.9.9")
+        shutil.rmtree(src, ignore_errors=True)
         os.makedirs(os.path.join(src, "jarvis"))
         os.makedirs(os.path.join(src, "deploy"))
-        shutil.copy(os.path.join(ROOT, "deploy", "jarvis.plist"), os.path.join(src, "deploy"))
-        shutil.copy(os.path.join(ROOT, "deploy", "jarvis.service"), os.path.join(src, "deploy"))
-        with open(os.path.join(src, "jarvis", "__init__.py"), "w"):
-            pass
+        for name, old in (("jarvis.plist", ("/Users/USER/.local/share/jarvis/app", "/Users/USER/Workspace/jarvis")),
+                          ("jarvis.service", ("%h/.local/share/jarvis/app", "%h/Workspace/jarvis"))):
+            with open(os.path.join(ROOT, "deploy", name)) as f:
+                text = f.read()
+            with open(os.path.join(src, "deploy", name), "w") as f:
+                f.write(text.replace(*old) if old_templates else text)
+        with open(os.path.join(src, "jarvis", "__init__.py"), "w") as f:
+            f.write('__version__ = "9.9.9"\n')
         with open(os.path.join(src, "jarvis", "__main__.py"), "w") as f:
             f.write(FAKE_MAIN)
         for name in ("launch.py", "relocate.py"):  # 설치기가 부르는 실제 이전 코드
@@ -69,15 +85,8 @@ class InstallTest(unittest.TestCase):
             t.add(src, arcname="jarvis-9.9.9")
         with open(tgz, "rb") as f:
             digest = hashlib.sha256(f.read()).hexdigest()
-        self.manifest = os.path.join(self.tmp, "manifest.json")
         with open(self.manifest, "w") as f:
             f.write('{"version": "9.9.9", "url": "file://%s", "sha256": "%s"}' % (tgz, digest))
-        self.log = os.path.join(self.tmp, "log")
-        self.env = {"HOME": self.home, "LOG": self.log, "PATH": bin_dir + ":/usr/bin:/bin",
-                    "JARVIS_MANIFEST": "file://" + self.manifest, "TEST_PY": sys.executable}
-        self.share = os.path.join(self.home, ".local", "share", "jarvis")
-        self.app = os.path.join(self.share, "app")
-        self.old = os.path.join(self.home, "Workspace", "jarvis")
 
     def linux(self):
         with open(os.path.join(self.env["PATH"].split(":")[0], "uname"), "w") as f:
@@ -151,7 +160,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         unit = self.read(".config", "systemd", "user", "jarvis.service")
         self.assertIn(f"ExecStart={self.home}/.local/share/jarvis/venv/bin/python -m jarvis", unit)
-        self.assertIn("WorkingDirectory=%h/.local/share/jarvis/app\n", unit)
+        self.assertIn(f"WorkingDirectory={self.app}\n", unit)
         self.assertTrue(os.path.isfile(os.path.join(self.app, "jarvis", "__main__.py")))
         self.assertNotIn("/usr/bin/python3", unit)
         config = self.read(".config", "jarvis", "config.toml")
@@ -184,10 +193,11 @@ class InstallTest(unittest.TestCase):
             self.assertNotIn("systemctl --user enable --now jarvis", f.read())
 
     def old_layout(self, git=False):
-        """1.8.0 이전 배치: ~/Workspace/jarvis(릴리스 묶음, .git 없음)를 가리키는 등록과 설정이 이미 있다."""
+        """1.8.0 이전 배치: ~/Workspace/jarvis(릴리스 묶음, .git 없음)를 가리키는 등록과 설정이 이미 있다.
+        옛 base 처럼 relocate.py 가 없다."""
         os.makedirs(os.path.join(self.old, "jarvis"))
         os.makedirs(os.path.join(self.old, "deploy"))
-        for name, body in (("__init__.py", ""), ("__main__.py", FAKE_MAIN)):
+        for name, body in (("__init__.py", '__version__ = "1.7.9"\n'), ("__main__.py", FAKE_MAIN)):
             with open(os.path.join(self.old, "jarvis", name), "w") as f:
                 f.write(body)
         if git:
@@ -213,7 +223,9 @@ class InstallTest(unittest.TestCase):
         open(os.path.join(self.home, ".bootstrap-fails-once"), "w").close()  # bootout 직후 bootstrap 이 한 번 실패한다
         r = self.run_install()
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertTrue(os.path.isfile(os.path.join(self.app, "jarvis", "relocate.py")))  # 새 릴리스를 app 에 받았다
+        with open(os.path.join(self.app, "jarvis", "__init__.py")) as f:  # app 은 옛 base 의 사본이다(새 릴리스가 아니다)
+            self.assertEqual(f.read(), '__version__ = "1.7.9"\n')
+        self.assertFalse(os.path.exists(os.path.join(self.app, "jarvis", "relocate.py")))
         with open(agent, "rb") as f:
             self.assertEqual(plistlib.load(f)["WorkingDirectory"], self.app)
         self.assertTrue(os.path.isfile(os.path.join(self.share, "dev.jarvis.plist.bak-relocate")))
@@ -227,6 +239,44 @@ class InstallTest(unittest.TestCase):
         self.assertIn("jarvis module orca apply --json --plan-id abc123", log)
         self.assertIn("pending_reload", r.stderr)
         self.assertIn("cleaned", r.stdout)
+
+    @unittest.skipUnless(sys.platform == "darwin", "relocate 는 실제 플랫폼으로 돈다: macOS 흐름")
+    def test_rerun_after_automatic_relocation_finishes_it_with_new_code(self):
+        """covers: RELOC-10"""
+        agent = self.old_layout()
+        # 게이트웨이가 스스로 옮긴 뒤(app = relocate.py 없는 옛 base, plist = app, launchd 는 아직 옛 plist)
+        shutil.copytree(self.old, self.app)
+        with open(agent, "rb") as f:
+            data = plistlib.load(f)
+        data["WorkingDirectory"] = self.app
+        with open(agent, "wb") as f:
+            plistlib.dump(data, f)
+        r = self.run_install()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("ModuleNotFoundError", r.stderr)
+        self.assertIn("pending_reload", r.stderr)
+        with open(self.log) as f:
+            log = f.read().splitlines()
+        self.assertIn(f"launchctl bootout gui/{os.getuid()}/dev.jarvis", log)
+        self.assertFalse(os.path.exists(self.old))
+        self.assertTrue(os.path.isdir(os.path.join(self.share, "workspace-old")))
+        with open(os.path.join(self.app, "jarvis", "__init__.py")) as f:
+            self.assertIn("1.7.9", f.read())
+        self.assertEqual([n for n in os.listdir(self.share) if n.startswith(".app-tmp-")], [])
+
+    def test_before_the_1_8_release_a_fresh_install_still_points_at_app(self):
+        """covers: BOOT-1, BOOT-2"""
+        self.release(old_templates=True)  # main 의 install.sh 가 1.7.13 릴리스(템플릿 WD = ~/Workspace/jarvis)를 받는다
+        r = self.run_install("--core", "100.115.245.91")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(f"<key>WorkingDirectory</key><string>{self.app}</string>", self.read("Library", "LaunchAgents", "dev.jarvis.plist"))
+        self.assertFalse(os.path.exists(os.path.join(self.home, "Workspace")))
+        shutil.rmtree(self.home)
+        os.makedirs(self.home)
+        self.linux()
+        r = self.run_install("--core", "100.115.245.91")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(f"WorkingDirectory={self.app}\n", self.read(".config", "systemd", "user", "jarvis.service"))
 
     def test_a_dev_checkout_install_is_left_as_it_is(self):
         """covers: BOOT-1, RELOC-8"""

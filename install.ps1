@@ -51,11 +51,13 @@ if (-not $py) { $steps += "winget install -e --id Python.Python.3.13 --scope use
 $task = Get-ScheduledTask -TaskName jarvis -ErrorAction SilentlyContinue
 # 개발 체크아웃(.git)으로 이미 등록된 기기는 그대로 둔다(받지도 옮기지도 않는다)
 if (-not (Test-Path $repo) -and (Test-Path (Join-Path $old ".git")) -and $task) { $repo = $old }
-$relocate = (Test-Path $old) -and ($repo -ne $old)
-if (-not (Test-Path $repo)) { $steps += "release bundle -> $repo (sha256 verified)" }
+# 1.8.0 이전 배치(.git 없는 실행본)로 등록된 기기: 옛 base 를 그대로 app 으로 옮긴다. 새 릴리스를 app 에 풀지 않는다
+# (base 가 바뀌면 런처의 롤백 기준 previous=None → base 가 바뀐다)
+$relocate = $task -and ($repo -ne $old) -and (Test-Path (Join-Path $old "jarvis\__init__.py")) -and -not (Test-Path (Join-Path $old ".git"))
+if ($relocate) { $steps += "relocate $old -> $repo (python -m jarvis.relocate from the latest release in a temp folder)" }
+elseif (-not (Test-Path $repo)) { $steps += "release bundle -> $repo (sha256 verified)" }
 if (-not (Test-Path $cfg)) { $steps += "config $cfg (core = $Core)" }
 if (-not $task) { $steps += "deploy\install-windows.ps1 (firewall rule jarvis-9300, scheduled task jarvis)" }
-if ($relocate) { $steps += "relocate $old -> $repo (python -m jarvis.relocate)" }
 $steps += "modules: orca, hooks, setup (plan -> apply with its plan_id)"
 if ($DryRun) { $steps | ForEach-Object { "would: $_" }; return }
 
@@ -67,22 +69,33 @@ if (-not $py) {
 }
 
 # 2. 코드: 최신 릴리스 묶음(크기가 아니라 sha256 으로 확인). 이후 갱신은 core 의 jarvis 업데이트 버튼이 한다
-if (-not (Test-Path $repo)) {
-    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("jarvis-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
-    New-Item -ItemType Directory $tmp | Out-Null
-    try {
-        $manifest = Invoke-RestMethod $manifestUrl
-        $tgz = Join-Path $tmp "jarvis.tar.gz"
-        Invoke-WebRequest $manifest.url -OutFile $tgz -UseBasicParsing
-        if ((Get-FileHash $tgz -Algorithm SHA256).Hash -ne $manifest.sha256.ToUpper()) { Fail "릴리스 묶음의 sha256 이 매니페스트와 다릅니다" }
+$tmp = Join-Path ([IO.Path]::GetTempPath()) ("jarvis-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
+New-Item -ItemType Directory $tmp | Out-Null
+function Get-Release([string]$dest) {
+    $manifest = Invoke-RestMethod $manifestUrl
+    $tgz = Join-Path $tmp "jarvis.tar.gz"
+    Invoke-WebRequest $manifest.url -OutFile $tgz -UseBasicParsing
+    if ((Get-FileHash $tgz -Algorithm SHA256).Hash -ne $manifest.sha256.ToUpper()) { Fail "릴리스 묶음의 sha256 이 매니페스트와 다릅니다" }
+    New-Item -ItemType Directory $dest -Force | Out-Null
+    tar -xzf $tgz -C $dest --strip-components 1
+    if ($LASTEXITCODE -ne 0) { Fail "릴리스 묶음을 풀지 못했습니다" }
+}
+try {
+    if ($relocate) {
+        # 옛 base 에는 relocate 가 없다. 새 코드(app 에 있으면 그것, 없으면 임시 폴더에 받은 릴리스)로 부른다.
+        # 관리자 셸이라 예약 작업을 고칠 수 있다. 돌고 있는 게이트웨이는 다음 기동부터 app 에서 뜬다
+        $src = $repo
+        if (-not (Test-Path (Join-Path $repo "jarvis\relocate.py"))) { $src = Join-Path $tmp "src"; Get-Release $src }
+        Push-Location $src
+        try { & { $ErrorActionPreference = "Continue"; & $py -m jarvis.relocate } } finally { Pop-Location }
+        if (-not (Test-Path $repo)) { $repo = $old }  # 이전이 실패했으면 아직 옛 배치가 실행본이다
+    } elseif (-not (Test-Path $repo)) {
         # 다 푼 뒤에만 app 이름을 준다(반쯤 푼 app 을 쓰지 않게. 남은 .app-tmp-* 는 relocate 가 치운다)
         $part = Join-Path (Split-Path -Parent $repo) (".app-tmp-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
-        New-Item -ItemType Directory $part -Force | Out-Null
-        tar -xzf $tgz -C $part --strip-components 1
-        if ($LASTEXITCODE -ne 0) { Remove-Item -Recurse -Force $part -ErrorAction SilentlyContinue; Fail "릴리스 묶음을 풀지 못했습니다" }
+        try { Get-Release $part } catch { Remove-Item -Recurse -Force $part -ErrorAction SilentlyContinue; throw }
         Move-Item $part $repo
-    } finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
-}
+    }
+} finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
 
 # 3. 설정: 없을 때만 windows.toml 을 바탕으로 core 를 넣는다
 if (-not (Test-Path $cfg)) {
@@ -93,16 +106,14 @@ if (-not (Test-Path $cfg)) {
     [IO.File]::WriteAllText($cfg, $text, (New-Object Text.UTF8Encoding $false))
 }
 
-# 4. 게이트웨이(예약 작업). 이미 있으면 건드리지 않는다(다시 등록하면 돌고 있는 게이트웨이와 적용 작업이 끊긴다)
+# 4. 게이트웨이(예약 작업). 이미 있으면 건드리지 않는다(다시 등록하면 돌고 있는 게이트웨이와 적용 작업이 끊긴다).
+# install-windows.ps1 은 자기 위치($PSScriptRoot) 기준으로 작업을 만든다: app 의 것을 부른다
 if (-not $task) { & (Join-Path $repo "deploy\install-windows.ps1") -Python $py }
 
-# 5. 1.8.0 이전 배치(.git 없음)를 쓰던 예약 작업을 app 으로 옮긴다(관리자 셸이라 작업을 고칠 수 있다). 개발 체크아웃이면 아무것도 하지 않는다.
-# 옛 폴더의 코드에는 relocate 가 없을 수 있으므로 app 의 코드로 부른다. 돌고 있는 게이트웨이는 다음 기동부터 app 에서 뜬다
-# 6. 모듈: 계획을 보이고 그 plan_id 로 적용한다. jarvis 는 JSON 을 UTF-8 로 낸다(5.1 의 기본 콘솔 인코딩은 949 등)
+# 5. 모듈: 계획을 보이고 그 plan_id 로 적용한다. jarvis 는 JSON 을 UTF-8 로 낸다(5.1 의 기본 콘솔 인코딩은 949 등)
 [Console]::OutputEncoding = New-Object Text.UTF8Encoding $false
 Push-Location $repo
 try {
-    if ($relocate) { & { $ErrorActionPreference = "Continue"; & $py -m jarvis.relocate } }
     foreach ($m in "orca", "hooks", "setup") {
         # 5.1 은 Stop 에서 네이티브 stderr(진행 로그)를 종료 오류로 바꾼다. 이 호출만 Continue 로 두고 종료 코드로 판정한다
         $raw = & { $ErrorActionPreference = "Continue"; & $py -m jarvis module $m plan --json 2>$null }
