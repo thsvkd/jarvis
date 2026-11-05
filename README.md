@@ -1,6 +1,8 @@
 # Jarvis (옛 PIT5 Monitor)
 
-저장소: `~/Workspace/jarvis` (systemd 사용자 유닛 `jarvis` 의 WorkingDirectory).
+개발 저장소: `~/Workspace/jarvis`(git 체크아웃). 설치기(install.sh·install.ps1)가 설치한 실행본은 `~/.local/share/jarvis/app`
+(Windows `%LOCALAPPDATA%\jarvis\app`)이다. 아래의 '저장소'는 서비스가 띄우는 이 폴더(실행본 app 또는 개발 체크아웃)를 말한다.
+1.8.0 이전 설치기가 `~/Workspace/jarvis` 에 푼 실행본은 [실행본 이전](#실행본-이전-180)으로 app 으로 옮긴다.
 원본은 s2 의 이 저장소이고, 운영 기기는 GitHub 릴리스를 받는다(`claude update` 와 같은 방식, `jarvis/self_update.py`·`jarvis/launch.py`).
 - 릴리스: s2 에서 `jarvis/__init__.py` 의 `__version__` 을 올려 커밋한 뒤 `python3 tools/release.py`. 태그 `v<버전>` 과
   소스 묶음·`manifest.json`(버전·주소·SHA256)을 GitHub 릴리스에 올린다.
@@ -165,9 +167,9 @@ core 를 다른 기기로 옮길 때 각 기기 설정의 `core`(그 기기를 �
 
 | 기기 | 폴더 | python(아래 `$PY`) |
 | --- | --- | --- |
-| macOS | `cd ~/Workspace/jarvis` | `~/.local/share/jarvis/venv/bin/python`(install.sh 설치. 수동 설치면 LaunchAgent plist 의 python) |
-| Linux | `cd ~/Workspace/jarvis` | `systemctl --user cat jarvis` 의 `ExecStart` 에 적힌 python |
-| Windows | `cd $env:USERPROFILE\Workspace\jarvis`(`%USERPROFILE%\Workspace\jarvis`) | 예약 작업의 python: `(Get-ScheduledTask jarvis).Actions.Execute` 의 `pythonw.exe` 와 같은 폴더의 `python.exe` |
+| macOS | `cd ~/.local/share/jarvis/app`(개발 체크아웃 기기는 `~/Workspace/jarvis`) | `~/.local/share/jarvis/venv/bin/python`(install.sh 설치. 수동 설치면 LaunchAgent plist 의 python) |
+| Linux | `cd ~/.local/share/jarvis/app`(개발 체크아웃 기기는 `~/Workspace/jarvis`) | `systemctl --user cat jarvis` 의 `ExecStart` 에 적힌 python |
+| Windows | `cd $env:LOCALAPPDATA\jarvis\app`(개발 체크아웃 기기는 `$env:USERPROFILE\Workspace\jarvis`) | 예약 작업의 python: `(Get-ScheduledTask jarvis).Actions.Execute` 의 `pythonw.exe` 와 같은 폴더의 `python.exe` |
 
 각 단계 전에 `$PY -m jarvis --version` 이 **1.7.11 이상**인지 본다. 그보다 옛 릴리스는 `core-trust` 를 모르고 게이트웨이를 하나 더 띄우려 한다.
 
@@ -241,7 +243,7 @@ ssh = "kgolf-macmini-m1"   # core 사용자 ~/.ssh/config 의 Host 별칭
   - core 서비스(LaunchAgent·systemd) 세션에서 passphrase 입력 없이 쓸 수 있는 키(에이전트·키체인)가 있어야 한다. 대화형 셸에서 되더라도 서비스에서는 `Permission denied` 일 수 있다.
 - 대상 기기
   - sshd 가 명령 실행과 TCP 포워딩을 허용한다. 키를 `permitopen` 전용으로 좁히면 조작이 안 된다.
-  - install.sh 배치다: 저장소 `~/Workspace/jarvis`, python `~/.local/share/jarvis/venv/bin/python`. 손으로 설치한 기기는 조작이 502(배치 아님)로 끝난다. 대상은 macOS·Linux 이고 jarvis 1.7.8 이상이다(낮으면 501, 그 기기에서 직접 갱신).
+  - install.sh 배치다: 저장소 `~/.local/share/jarvis/app`(없으면 옛 배치·개발 체크아웃 `~/Workspace/jarvis`), python `~/.local/share/jarvis/venv/bin/python`. 손으로 설치한 기기는 조작이 502(배치 아님)로 끝난다. 대상은 macOS·Linux 이고 jarvis 1.7.8 이상이다(낮으면 501, 그 기기에서 직접 갱신).
   - **jarvis 업데이트 버튼은** 서비스 정의가 `KeepAlive=true`(launchd) 또는 `Restart=always`(systemd)이고, 스냅샷의 `monitor.pid` 가 서비스 관리자가 띄운 pid 일 때만 쓴다. 아니면 kill 뒤 게이트웨이가 꺼진 채 남는다. install.sh 는 이미 있는 plist 를 덮어쓰지 않으므로 그 기기에서 확인한다.
 
         plutil -extract KeepAlive raw -o - ~/Library/LaunchAgents/dev.jarvis.plist     # true
@@ -270,12 +272,13 @@ journalctl --user -u jarvis -n 50        # 수집 실패만 찍힌다(접근 로
 curl -s localhost:9300/api/health
 ```
 
-처음 설치:
+개발 기기(s2 처럼 저장소에서 바로 도는 기기)의 처음 설치. 운영 기기는 `install.sh` 를 쓴다(실행본은 app 에 둔다):
 
 ```sh
 git clone https://github.com/thsvkd/jarvis.git ~/Workspace/jarvis && cd ~/Workspace/jarvis   # public 저장소라 인증이 필요 없다
 install -Dm644 deploy/gateway.toml ~/.config/jarvis/config.toml     # core 는 deploy/s2.toml 형식(지금 core 는 thsvkd-macmini), pit5 는 deploy/pit5.toml
-install -Dm644 deploy/jarvis.service ~/.config/systemd/user/jarvis.service
+mkdir -p ~/.config/systemd/user   # 유닛의 작업 폴더를 app 대신 이 저장소로
+sed 's#^WorkingDirectory=.*#WorkingDirectory=%h/Workspace/jarvis#' deploy/jarvis.service > ~/.config/systemd/user/jarvis.service
 loginctl enable-linger && systemctl --user daemon-reload && systemctl --user enable --now jarvis
 # ss -p 로 root 소유 리스너의 프로세스를 보려면: pi 그룹만 실행할 수 있는 능력 부여 사본(없으면 10초마다 sudo 를 시도한다)
 sudo install -d /usr/local/libexec/jarvis
@@ -320,9 +323,9 @@ s2(Linux)에서 `sys.platform` 을 darwin 으로 바꿔 크래시 없이 스냅�
 curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh -s -- --core 100.107.29.19
 ```
 
-`install.sh` 는 uv 로 Python venv(`~/.local/share/jarvis/venv`)를 만들고, 최신 릴리스 묶음을 sha256 으로 확인해 `~/Workspace/jarvis` 에 푼다.
+`install.sh` 는 uv 로 Python venv(`~/.local/share/jarvis/venv`)를 만들고, 최신 릴리스 묶음을 sha256 으로 확인해 `~/.local/share/jarvis/app` 에 푼다.
 그다음 설정 파일과 LaunchAgent(`dev.jarvis`, Linux 는 systemd 사용자 유닛 `jarvis`)를 만들고, 모듈(Orca·훅·셋업)을 plan 으로 보인 뒤 그 plan_id 로 apply 한다.
-이미 있는 설정·LaunchAgent·유닛·저장소는 덮어쓰지 않으므로 다시 실행해도 된다. Tailscale·Orca·하네스 로그인과 core 의 `devices` 등록은 직접 한다.
+이미 있는 설정·LaunchAgent·유닛·코드는 덮어쓰지 않으므로 다시 실행해도 된다. 옛 배치가 있으면 [실행본 이전](#실행본-이전-180)을 한다. Tailscale·Orca·하네스 로그인과 core 의 `devices` 등록은 직접 한다.
 
 수동 설치:
 
@@ -332,7 +335,7 @@ python3 -m pip install pystray pillow                      # 선택: 메뉴 막�
 brew install macmon                                        # 선택: 온도·GPU·전력
 mkdir -p ~/.config/jarvis && cp deploy/macstudio.toml ~/.config/jarvis/config.toml
 # launchd(LaunchAgent, 로그인 세션에서 돈다)
-sed -e "s#/Users/USER#$HOME#g" deploy/jarvis.plist > ~/Library/LaunchAgents/dev.jarvis.plist
+sed -e "s#/Users/USER/.local/share/jarvis/app#$PWD#" -e "s#/Users/USER#$HOME#g" deploy/jarvis.plist > ~/Library/LaunchAgents/dev.jarvis.plist   # 작업 폴더는 이 저장소
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.jarvis.plist
 launchctl kickstart -k gui/$(id -u)/dev.jarvis            # 코드를 고친 뒤 재시작(메뉴 막대 아이콘의 '재시작'도 같다)
 launchctl bootout gui/$(id -u)/dev.jarvis                 # 잠시 끄기(다음 로그인 또는 bootstrap 까지). 아이콘 메뉴에는 종료가 없다
@@ -344,7 +347,7 @@ launchctl bootout gui/$(id -u)/dev.jarvis                 # 잠시 끄기(다음
 Windows 는 게이트웨이로만 돈다: Orca 데스크톱 앱(`%APPDATA%\orca`)의 페어링 코드와 호스트 자원(CPU·메모리·디스크·네트워크·프로세스).
 서비스 관리자·Docker·Caddy 수집은 없다. SSH 세션에서 띄운 프로세스는 세션이 끝나면 죽으므로 예약 작업(로그온 시)으로 돌린다.
 
-새 기기는 관리자 PowerShell 에서 한 줄로 설치한다. Python 이 없으면 winget 으로 깔고, 최신 릴리스를 sha256 으로 확인해 `%USERPROFILE%\Workspace\jarvis` 에 푼 뒤 아래 `deploy\install-windows.ps1` 과 모듈(Orca·훅·셋업) 적용까지 한다. `-DryRun` 은 할 일만 보인다.
+새 기기는 관리자 PowerShell 에서 한 줄로 설치한다. Python 이 없으면 winget 으로 깔고, 최신 릴리스를 sha256 으로 확인해 `%LOCALAPPDATA%\jarvis\app` 에 푼 뒤 아래 `deploy\install-windows.ps1` 과 모듈(Orca·훅·셋업) 적용까지 한다. `-DryRun` 은 할 일만 보인다.
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/thsvkd/jarvis/main/install.ps1))) -Core 100.107.29.19
@@ -353,12 +356,37 @@ Windows 는 게이트웨이로만 돈다: Orca 데스크톱 앱(`%APPDATA%\orca`
 ```powershell
 # 저장소: git clone https://github.com/thsvkd/jarvis.git (갱신은 core 의 jarvis 업데이트 버튼이 GitHub 릴리스를 받는다)
 winget install -e --id Python.Python.3.13 --scope user          # python 3.11+ (WindowsApps 의 python.exe 는 안내용 껍데기)
-cd $env:USERPROFILE\Workspace\jarvis
+cd $env:USERPROFILE\Workspace\jarvis                           # 손으로 설치하는 저장소(install.ps1 설치본은 $env:LOCALAPPDATA\jarvis\app)
 powershell -ExecutionPolicy Bypass -File deploy\install-windows.ps1 -Python "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe"
 Stop-ScheduledTask jarvis; Start-ScheduledTask jarvis           # 코드 갱신 뒤 재시작(알림 영역 아이콘의 '재시작'도 같다)
 Disable-ScheduledTask jarvis; Stop-ScheduledTask jarvis         # 잠시 끄기(Stop 만 하면 5분 반복 트리거가 다시 켠다). 되돌리기: Enable-ScheduledTask jarvis; Start-ScheduledTask jarvis
 Get-Content -Encoding UTF8 $env:LOCALAPPDATA\jarvis\jarvis.log -Tail 20
 ```
+
+## 실행본 이전 (1.8.0)
+
+1.8.0 부터 실행본은 `~/.local/share/jarvis/app`(Windows `%LOCALAPPDATA%\jarvis\app`)에 둔다. 그 전 설치기가 `~/Workspace/jarvis` 에 푼 실행본(.git 없음)은
+게이트웨이가 새 릴리스로 60초를 버틴 뒤 스스로 옮긴다(업데이트 버튼만 누르면 된다). 계약은 `docs/SPEC.md` 의 "실행본 배치와 이전" 절이다.
+
+- `~/Workspace/jarvis` 에 `.git` 이 있으면(개발 체크아웃) 아무것도 하지 않는다. 서비스 등록이 그 폴더를 가리키지 않아도(pm2·수동) 그대로다.
+- 옛 폴더를 app 으로 복사하고 LaunchAgent plist·systemd 유닛·예약 작업 `jarvis` 가 app 을 가리키게 고친다. 원본 파일은 `<파일>.bak-relocate` 에 남는다.
+- 옛 폴더는 지우지 않고 `~/.local/share/jarvis/workspace-old` 로 옮긴다. 서비스 관리자가 실제로 app 을 쓰고, 옛 폴더에서 도는 프로세스가 없을 때만 옮긴다.
+- **macOS 는 지연 완료다.** launchd 는 plist 를 다시 읽기 전까지(로그인·재부팅·bootout/bootstrap) 옛 폴더에서 띄우므로, 그때까지 옛 폴더를 남긴다(`pending_reload`).
+  jarvis 는 원격 기기가 꺼질 수 있어 스스로 다시 읽히지 않는다. 바로 끝내려면 그 기기에서:
+
+      launchctl bootout gui/$(id -u)/dev.jarvis; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.jarvis.plist
+
+  다음 기동이 60초 뒤 옛 폴더를 옮긴다. `install.sh` 를 다시 실행해도 같은 일을 한다.
+- Linux·Windows 는 재시작을 강제하지 않는다. 다음 기동부터 app 에서 뜬다.
+
+```sh
+$PY -m jarvis relocate --dry-run      # 할 일만 본다
+$PY -m jarvis relocate --json         # 지금 한 번 돈다: {"state": noop|registered|pending_reload|cleaned|failed, "detail", "steps"}
+```
+
+되돌리기: `workspace-old` 를 `~/Workspace/jarvis` 로 옮기고, `<파일>.bak-relocate` 를 원래 이름으로 되돌린다(Linux 는 `systemctl --user daemon-reload`,
+Windows 는 백업 파일 대신 옛 폴더에서 `deploy\install-windows.ps1` 을 다시 실행한다).
+게이트웨이 로그에는 기동마다 `[jarvis] 실행본 이전: <state> <detail>` 한 줄이 남는다.
 
 ## 검증
 

@@ -1,6 +1,6 @@
 # TEST_SPEC
 
-> 상태: 확정(2026-10-30 사용자 확인 K1, ORCA-8 은 사용자 결정으로 고침, Windows 갱신 방식 K4·K10 은 5라운드). 셋업·하네스 갱신·AGENTS.md 절과 BOOT-2·3 은 2026-11-01 사용자가 확정했다. 목록의 추가·수정·삭제는 사용자만 닫는다.
+> 상태: 확정(2026-10-30 사용자 확인 K1, ORCA-8 은 사용자 결정으로 고침, Windows 갱신 방식 K4·K10 은 5라운드). 셋업·하네스 갱신·AGENTS.md 절과 BOOT-2·3 은 2026-11-01 사용자가 확정했다. 실행본 이전 절(RELOC)과 CORE-8 의 `relocate` 는 2026-11-05 손팡님 A안으로 더했다. 목록의 추가·수정·삭제는 사용자만 닫는다.
 > 모든 케이스는 격리된 임시 HOME 과 대체한 명령으로 검증한다. 실제 사용자 홈, 실제 Orca 서비스, 실제 설치기, 실제 페어링은 쓰지 않는다.
 > 테스트는 docstring·주석에 `covers: ORCA-n` 을 적는다. ai-setup 에서 옮긴 테스트는 괄호 안에 원래 ID(AI-n)를 남긴다.
 
@@ -50,6 +50,21 @@
 | BOOT-3 | WHEN Windows 관리자 PowerShell 에서 `install.ps1 -Core <tailnet IP>` 를 실행하면 THE SYSTEM SHALL Python 3.11+ 가 없을 때만 winget 으로 깔고, sha256 을 통과한 최신 릴리스를 없을 때만 풀며, 설정을 없을 때만 BOM 없는 UTF-8 로 만들고, 게이트웨이 예약 작업이 없을 때만 `deploy\install-windows.ps1` 을 실행한 뒤(다시 실행해도 돌고 있는 게이트웨이를 다시 띄우지 않는다) 모듈 plan → apply 를 실행한다. tailnet 이 아닌 core·관리자 아님은 아무것도 쓰기 전에 거절하고, `-DryRun` 은 할 일만 보이며, `irm \| iex` 로 실행해도 셸을 닫지 않는다 | kgolf 실측(Windows PowerShell 5.1, scriptblock 실행) | 부분 (kgolf(5.1) 실측: -DryRun 은 이미 있는 저장소·설정·게이트웨이 작업을 건너뛰고 모듈 단계만 보임, tailnet 밖·자리 범위 밖 core 거절, scriptblock 실행에서 셸 유지, 설정 쓰기는 CRLF·LF 원본 모두 BOM 없는 UTF-8 로 tomllib 이 core 를 읽고 한국어 보존. Pester 는 BOM 없음·파싱만. 새 Windows 기기 전체 실행 미검증) |
 | BOOT-1 | WHEN macOS 에서 `install.sh --core <tailnet IP>` 를 실행하면 THE SYSTEM SHALL sha256 을 통과한 최신 릴리스를 풀고, 설정·LaunchAgent 를 없을 때만 만들어 띄우며, 모듈을 plan 의 plan_id 로 apply 한다. 다시 실행해도 기존 설정을 덮어쓰지 않는다. | `tests/test_install_sh.py` | 단위 GREEN (Mac 도구 부분은 thsvkd-kgolf-macmini 임시 폴더에서 확인: uv venv, 릴리스 sha256·압축 해제, plist lint. 새 Mac 전체 실행 미검증) |
 
+## 실행본 이전
+
+| ID | 케이스 | 테스트 | 상태 |
+| --- | --- | --- | --- |
+| RELOC-1 | WHEN `~/Workspace/jarvis` 가 .git 없는 실행본이고 서비스 등록(plist·유닛·예약 작업)이 그곳을 가리키면 THE SYSTEM SHALL 그 폴더를 `launch.ROOT/app` 으로 복사(`__pycache__` 제외, 심링크 유지)하고 등록이 app 을 가리키게 고친다. plist 는 옛 경로가 든 모든 값, 유닛은 `WorkingDirectory=` 줄만 바꾸고 원본은 `.bak-relocate` 로 한 번만 남기며, Linux 는 daemon-reload 하고 실패하면 유닛을 원래 바이트로 되돌리고 만든 app 을 지운다. 경로는 실제 경로로 비교한다($HOME 이 심링크여도) | `tests/test_relocate.py` | GREEN (단위; 가짜 launchctl·systemctl·powershell) |
+| RELOC-2 | WHEN Windows 에서 `Set-ScheduledTask` 가 거부되면 THE SYSTEM SHALL 예약 작업을 바꾸지 않은 채 이번에 만든 app 을 지우고 failed 와 이유를 낸다 | `tests/test_relocate.py` | GREEN (단위; 실제 Windows·비관리자 토큰 미검증) |
+| RELOC-3 | WHEN 등록이 app 을 가리키면 THE SYSTEM SHALL 서비스 관리자가 로드한 설정도 app 일 때만 옛 폴더를 지우지 않고 `ROOT/workspace-old` 로 옮긴다. macOS 에서 launchd 가 아직 옛 plist 를 쓰면 옛 폴더를 남기고 `pending_reload` 를 내며 bootout·bootstrap·kickstart 를 부르지 않는다 | `tests/test_relocate.py` | GREEN (단위) |
+| RELOC-4 | WHEN 서비스 등록이 없거나 옛 폴더가 아닌 곳을 가리키면(pm2·수동) THE SYSTEM SHALL 아무것도 바꾸지 않는다 | `tests/test_relocate.py` | GREEN (단위) |
+| RELOC-5 | WHEN 이전을 여러 번 돌리거나 지난번 복사가 `ROOT/.app-tmp-*` 로 남았거나 app 이 코드 없이 있으면 THE SYSTEM SHALL 같은 결과를 내고(백업을 덮지 않는다) 남은 임시 폴더를 치운 뒤 다시 복사하며, 코드 없는 app 은 쓰지 않고 등록도 바꾸지 않는다 | `tests/test_relocate.py` | GREEN (단위) |
+| RELOC-6 | WHEN `python -m jarvis relocate --dry-run` 이면 THE SYSTEM SHALL 할 일만 보이고 파일·등록을 바꾸지 않는다 | `tests/test_relocate.py` | GREEN (단위) |
+| RELOC-7 | WHEN 지금 프로세스가 옛 폴더의 코드로 돌거나 다른 프로세스가 옛 폴더를 작업 폴더로 쓰면 THE SYSTEM SHALL 등록만 고치고 옛 폴더는 옮기지 않는다(registered) | `tests/test_relocate.py` | GREEN (단위) |
+| RELOC-8 | WHEN `~/Workspace/jarvis` 에 .git(폴더·파일)이 있으면 THE SYSTEM SHALL 어떤 OS 에서도 파일·등록을 바꾸지 않고 외부 명령을 하나도 부르지 않으며, 설치기는 그 체크아웃으로 등록된 기기에서 릴리스를 받지도 등록을 바꾸지도 않는다 | `tests/test_relocate.py`, `tests/test_install_sh.py` | GREEN (단위) |
+| RELOC-9 | WHEN 게이트웨이가 `HEALTHY_S` 를 넘겨 `launch.confirm()` 을 마치면 THE SYSTEM SHALL relocate 를 한 번 부르고, 실패해도 게이트웨이는 계속 돈다. 옛 배치의 런처가 업데이트 버튼이 받은 새 릴리스로 넘어가면 그 릴리스의 relocate 가 돈다 | `tests/test_relocate.py` | GREEN (단위; macOS 흐름은 macOS 에서만) |
+| RELOC-10 | WHEN 옛 배치가 있는 기기에서 `install.sh` 를 다시 실행하면 THE SYSTEM SHALL 새 릴리스를 app 에 받고 app 의 코드로 relocate 를 부르며, macOS 에서 `pending_reload` 이면 LaunchAgent 를 bootout·bootstrap 한 뒤 다시 불러 옛 폴더를 옮긴다. Linux 는 재시작하지 않는다 | `tests/test_install_sh.py` | 부분 (macOS 단위 GREEN; Linux 케이스는 Linux 에서만 돈다. install.ps1 은 pwsh 가 없어 미검증) |
+
 ## core 전환
 
 > 2026-11-04 사용자 승인으로 추가했다. 모든 케이스는 임시 폴더의 `JARVIS_CONFIG` 로 검증한다. `tailscale status --json` 조회는 대체하고, 실제 설정·실제 tailscale·실제 기기·SSH 는 쓰지 않는다.
@@ -63,7 +78,7 @@
 | CORE-5 | WHEN `core-trust` 가 계획·결과·오류를 출력하면 THE SYSTEM SHALL `proxy_key` 는 설정 여부만 내고 그 값과 `core` 외 설정 값을 표준 출력·표준 오류·예외 메시지 어디에도 내지 않으며, 출력하는 `sha256`·plan_id 는 proxy_key 값이 달라도 같고, 백업 파일을 만들지 않는다 | `tests/test_core_trust.py` | GREEN (단위) |
 | CORE-6 | WHEN core·viewer 가 어떤 HTTP 요청을 보내도 THE SYSTEM SHALL 게이트웨이 설정 파일을 쓰지 않는다(`core-trust` 는 `module.MODULES` 와 서버 라우트에 없다) | `tests/test_core_trust.py` | GREEN (단위; `jarvis/*.py` 소스 정적 검사) |
 | CORE-7 | WHEN 실행 중인 게이트웨이의 설정 파일에서 `core` 목록이 바뀌면 THE SYSTEM SHALL 재시작 없이 다음 설정 확인(`config.reload_if_changed`) 뒤 `config.CORE` 를 새 목록으로 바꾸고, `CONFIG_RESTART_REQUIRED` 에 `CORE` 를 넣지 않는다 | `tests/test_discovery.py::ReloadConfig` | GREEN (단위) |
-| CORE-8 | WHEN `python -m jarvis` 의 첫 인자가 알려진 하위 명령(`update`·`module`·`agentsmd`·`core-trust`·`--version`)이 아니면(오타 포함) THE SYSTEM SHALL 게이트웨이를 기동하지 않고(수집기·복구 스레드·core·서버를 시작하지 않는다) 사용법을 표준 오류에 내고 종료 코드 1 로 끝나며, 인자 없음은 그대로 게이트웨이를 기동하고 알려진 하위 명령은 지금처럼 동작한다 | `tests/test_core_trust.py` | GREEN (단위) |
+| CORE-8 | WHEN `python -m jarvis` 의 첫 인자가 알려진 하위 명령(`update`·`module`·`agentsmd`·`core-trust`·`relocate`·`--version`)이 아니면(오타 포함) THE SYSTEM SHALL 게이트웨이를 기동하지 않고(수집기·복구 스레드·core·서버를 시작하지 않는다) 사용법을 표준 오류에 내고 종료 코드 1 로 끝나며, 인자 없음은 그대로 게이트웨이를 기동하고 알려진 하위 명령은 지금처럼 동작한다 | `tests/test_core_trust.py` | GREEN (단위) |
 
 ## SSH 기기
 

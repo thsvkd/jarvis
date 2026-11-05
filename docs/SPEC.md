@@ -131,6 +131,19 @@ ai-setup 의 update-ai(`jarvis/modules/setup/res/update/update_ai.py`)를 감싼
 - PATH 는 update-ai.sh 와 같이 사용자 bin·nvm 의 node(높은 판 먼저)·Homebrew 를 앞에 둔다(Windows 는 그대로).
 - uninstall 은 지울 것이 없다(하네스 제거는 setup 의 uninstall).
 
+## 실행본 배치와 이전
+
+- 실행본(서비스의 작업 폴더)은 `launch.ROOT/app` 이다: macOS·Linux `~/.local/share/jarvis/app`, Windows `%LOCALAPPDATA%\jarvis\app`. `~/Workspace/jarvis`(Windows `%USERPROFILE%\Workspace\jarvis`)는 개발 저장소 자리다. `versions/`·`current.json` 의 위치와 형식은 그대로다(2026-11-05 손팡님 A안).
+- `jarvis/relocate.py` 하나가 1.8.0 이전 배치(옛 폴더 = `~/Workspace/jarvis`)를 옮긴다. 게이트웨이는 `launch.confirm()` 뒤 한 번(`_confirm`, 건강하게 `HEALTHY_S` 를 넘긴 판에서만), CLI 는 `python -m jarvis relocate [--dry-run] [--json]`, 설치기는 받은 app 의 코드로 `python -m jarvis.relocate` 를 부른다. 경로는 `os.path.realpath`+`normcase` 로 비교한다.
+- 판정(멱등):
+  1. 옛 폴더가 없거나, `.git`(파일·폴더)이 있거나, `jarvis/__init__.py` 가 없으면 아무것도 하지 않는다(noop). `.git` 이면 등록도 읽지 않고 외부 명령도 부르지 않는다.
+  2. 등록: macOS `~/Library/LaunchAgents/dev.jarvis.plist` 의 `WorkingDirectory`, Linux `~/.config/systemd/user/jarvis.service` 의 `WorkingDirectory=`(`%h`·절대 경로), Windows 예약 작업 `jarvis` 의 action 하나(WorkingDirectory 또는 Arguments). 등록이 옛 폴더도 app 도 가리키지 않으면(pm2·수동·없음) noop.
+  3. 등록이 옛 폴더면: app 이 없으면 옛 폴더를 `ROOT/.app-tmp-*` 에 복사(심링크는 링크로, `__pycache__` 제외)한 뒤 `os.replace` 로 app 이름을 준다. `app/jarvis/__init__.py` 가 있으면 다시 쓰고, app 이 있는데 코드가 없으면 failed. 그다음 등록을 고친다: plist 는 옛 경로가 든 모든 값, 유닛은 `WorkingDirectory=` 줄만(다른 바이트는 그대로) 바꾸고 원본을 `<파일>.bak-relocate` 로 한 번만 남긴 뒤 원자적으로 쓴다. Linux 는 `systemctl --user daemon-reload`, Windows 는 `Set-ScheduledTask -Action`(principal·trigger·settings 는 그대로, `CREATE_NO_WINDOW`). 실패하면 등록을 원상태로 두고 이번에 만든 app 을 지운다(failed).
+  4. 옛 폴더 정리: 등록이 app 을 가리키고, 서비스 관리자가 로드한 설정(macOS `launchctl print gui/<uid>/dev.jarvis` 의 `working directory`, Linux `systemctl --user show jarvis -p WorkingDirectory`, Windows 는 등록된 작업)이 app 이며, 지금 프로세스의 코드(`launch.HERE`)가 옛 폴더 아래가 아니고, 옛 폴더를 작업 폴더로 쓰는 다른 프로세스가 없을 때(psutil, 없으면 정리하지 않음)만 옛 폴더를 `ROOT/workspace-old`(있으면 `-<시각>` 접미사)로 옮긴다(cleaned). 지우지 않는다. 옮기지 못하면(다른 파일시스템 등) 그대로 둔다(registered).
+- 지연 완료(macOS): launchd 는 plist 를 다시 읽기 전까지(로그인·재부팅·사용자의 bootout/bootstrap) 옛 폴더에서 띄운다. 그동안은 `pending_reload` 로 옛 폴더를 남긴다(지우면 KeepAlive 재시작이 chdir 에 실패한다). jarvis 는 스스로 bootout/bootstrap 하지 않는다. 다시 읽힌 뒤의 첫 기동이 정리한다. `install.sh` 는 사용자가 실행한 셸이므로 `pending_reload` 이면 `launchctl bootout`·`bootstrap` 으로 다시 읽힌 뒤 relocate 를 한 번 더 부른다.
+- Linux·Windows 는 재시작을 강제하지 않는다. 다음 기동부터 app 에서 뜨고, 게이트웨이가 `versions/` 에서 돌면 그 자리에서 정리까지 한다.
+- 결과: `{"state": "noop"|"registered"|"pending_reload"|"cleaned"|"failed", "detail", "steps"}`. `--dry-run` 은 아무것도 바꾸지 않고 `state: "planned"`(할 일이 있을 때)와 `dry_run: true` 를 낸다. CLI 종료 코드는 failed 면 1, 그 밖은 0 이다.
+
 ## core 전환
 
 > 상태: 2026-11-04 사용자 승인으로 추가했다(설계 비평 반영). CLI 구현됨, 단위 GREEN(Windows·실제 기기 미검증). 모듈이 아니라 머리말 범위(모듈 계약) 밖의 로컬 CLI 다.
@@ -147,7 +160,7 @@ ai-setup 의 update-ai(`jarvis/modules/setup/res/update/update_ai.py`)를 감싼
 | `plan` | 없음 | `{module: "core-trust", device, path, sha256, mode, proxy_key: set/unset, before, after, target: {ip, host}, steps: [{id: "core", summary, risk: "config", argv: []}], blocked: [{step, reason}], plan_id}` | 0 계획을 세움(막힌 단계 포함), 1 세우지 못함 |
 | `apply` | 설정 파일의 최상위 `core` 한 줄 | `{status: done/current/stale/failed, before, after, steps: [{id, result, message}]}` | 0 done·current, 1 failed(blocked 포함), 3 stale |
 
-- 진입점: `python -m jarvis` 는 인자가 없으면 게이트웨이를 기동하고, 첫 인자가 `update`·`module`·`agentsmd`·`core-trust`·`--version` 이면 그 명령을 돈다. 그 밖의 첫 인자(오타 포함)는 게이트웨이를 기동하지 않고 사용법을 표준 오류에 내고 종료 코드 1 이다. 런처가 받아 둔 릴리스(`versions/<버전>`)로 넘어가므로 실제로 도는 것은 그 릴리스의 코드다. `core-trust` 가 없는 옛 릴리스에서는 이 명령이 게이트웨이를 하나 더 띄우므로, 실행 전에 `python -m jarvis --version` 으로 버전을 확인한다(절차는 `README.md`).
+- 진입점: `python -m jarvis` 는 인자가 없으면 게이트웨이를 기동하고, 첫 인자가 `update`·`module`·`agentsmd`·`core-trust`·`relocate`·`--version` 이면 그 명령을 돈다. 그 밖의 첫 인자(오타 포함)는 게이트웨이를 기동하지 않고 사용법을 표준 오류에 내고 종료 코드 1 이다. 런처가 받아 둔 릴리스(`versions/<버전>`)로 넘어가므로 실제로 도는 것은 그 릴리스의 코드다. `core-trust` 가 없는 옛 릴리스에서는 이 명령이 게이트웨이를 하나 더 띄우므로, 실행 전에 `python -m jarvis --version` 으로 버전을 확인한다(절차는 `README.md`).
 - 연산
   - `--add` 는 IP 를 목록 맨 앞에 둔다(이미 있으면 맨 앞으로 옮긴다). 트레이의 core 주소는 `CORE[0]` 이다. IP 는 IPv4 `100.64.0.0/10` 이고 `str(ipaddress.ip_address(x)) == x` 인 정규형만 받는다(서버는 IPv4 로만 bind 하고 `_trusted` 는 문자열이 정확히 같아야 통과시킨다).
   - `--remove` 는 목록에서 같은 문자열 항목을 뺀다.
@@ -212,7 +225,7 @@ tailnet 으로는 닿지 않고 SSH 로만 닿는 기기(예: 다른 tailnet 의
 - 접속 세부(HostName·User·ProxyJump·키)는 그 파일이 소유한다. jarvis 는 그 파일을 읽지도 쓰지도 않는다.
 - 내부 url 은 `ssh://<별칭>` 이다. `GET /api/devices` 의 `url` 도 같고, 화면은 이 스킴을 보고 'SSH 경유' 를 표시한다.
 - 재시작 키이고, 새 환경 변수는 없다.
-- 대상의 배치는 install.sh 규약으로 고정한다. 저장소는 `~/Workspace/jarvis`, python 은 `~/.local/share/jarvis/venv/bin/python` 이고, 대상은 macOS 또는 Linux 여야 한다. 규약과 다른 기기는 조작이 502 로 끝난다.
+- 대상의 배치는 install.sh 규약으로 고정한다. 저장소는 `~/.local/share/jarvis/app`(없으면 옛 배치·개발 체크아웃 `~/Workspace/jarvis`. 둘 다 `jarvis/__init__.py` 가 있어야 한다), python 은 `~/.local/share/jarvis/venv/bin/python` 이고, 대상은 macOS 또는 Linux 여야 한다. 규약과 다른 기기는 조작이 502 로 끝난다.
 
 ### ssh 실행 공통
 
@@ -282,7 +295,7 @@ tailnet 으로는 닿지 않고 SSH 로만 닿는 기기(예: 다른 tailnet 의
 | 결과 | 오류 문구 |
 | --- | --- |
 | 255 | `"<id> 에 닿지 못했습니다: <ssh 표준 오류 마지막 줄>"` |
-| 90 | `"install.sh 배치(~/Workspace/jarvis, ~/.local/share/jarvis/venv)가 아닙니다"` |
+| 90 | `"install.sh 배치(~/.local/share/jarvis/app 또는 ~/Workspace/jarvis, ~/.local/share/jarvis/venv)가 아닙니다"` |
 | 91 | `"받았지만 재시작하지 못했습니다(그 기기에서 재시작하세요)"` |
 | 시간 초과 | `"<n>초 안에 끝나지 않았습니다"` |
 | 그 밖 | 표준 출력에서 `{` 로 시작하는 마지막 줄을 JSON 으로 읽는다. JSON 이 아니면 종료 코드만 `error` 로 낸다 |
