@@ -367,9 +367,25 @@ def _skip(o):
     return None
 
 
+NOT_ADMIN = "관리자 권한이 필요합니다: 관리자 PowerShell 에서 install.ps1 을 다시 실행하거나 python -m jarvis relocate"
+
+
+def _admin():
+    """Windows 관리자 토큰인가. 모르면 False."""
+    try:
+        import ctypes
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
 def run(dry_run=False):
     """한 번 판정하고 할 수 있는 만큼 한다. 옮길 것이 있으면 잠금 안에서만 한다(dry-run 은 읽기만 하므로 잠그지 않는다)."""
     why = _skip(old())
+    # Windows 게이트웨이는 RunLevel Limited 로 돌고, 관리자가 등록한 작업의 Set-ScheduledTask 는 거부된다(0x80070005).
+    # 기동마다 옛 트리를 복사했다 지우지 않게, 관리자가 아니면 PowerShell 도 부르지 않고 아무것도 쓰지 않는다
+    if not why and PLATFORM == "win32" and not _admin():
+        why = NOT_ADMIN
     if why:
         return {"state": "noop", "detail": why, "steps": [], **({"dry_run": True} if dry_run else {})}
     if dry_run:

@@ -17,6 +17,8 @@ sys.path.insert(0, ROOT)
 
 from jarvis import launch, relocate  # noqa: E402
 
+REAL_ADMIN = relocate._admin
+
 # 가짜 서비스 관리자. 로드된 작업 폴더는 $STATE/<종류>-wd 에 둔다
 FAKES = {
     "launchctl": r'''
@@ -433,6 +435,9 @@ class Windows(Base):
 
     def setUp(self):
         super().setUp()
+        p = mock.patch.object(relocate, "_admin", return_value=True)  # 관리자 PowerShell(install.ps1·CLI)
+        p.start()
+        self.addCleanup(p.stop)
         self.task = [{"Execute": "C:/Python313/pythonw.exe", "Arguments": f'"{self.old}/deploy/jarvis-win.pyw"',
                       "WorkingDirectory": self.old}]
         self.put("task.json", json.dumps(self.task))
@@ -489,6 +494,20 @@ class Windows(Base):
         with mock.patch.object(relocate, "TASK", "jarvis-trial"):
             self.assertEqual(relocate.run()["state"], "cleaned")
         self.assertEqual(self.task_now()[0]["Arguments"], f'"{self.app}/deploy/jarvis-win.pyw"')
+
+    def test_without_admin_rights_nothing_is_called_or_written(self):
+        """covers: RELOC-12"""
+        before = os.listdir(self.tmp)
+        with mock.patch.object(relocate, "_admin", return_value=False):
+            for dry in (False, True):
+                r = relocate.run(dry_run=dry)
+                self.assertEqual((r["state"], r["detail"]), ("noop", relocate.NOT_ADMIN))
+        self.assertEqual(self.calls(), [])
+        self.assertFalse(os.path.exists(self.root))  # 잠금 파일·app·백업 모두 없다
+        self.assertEqual(os.listdir(self.tmp), before)
+        self.assertEqual(self.task_now(), self.task)
+        if not hasattr(__import__("ctypes"), "windll"):
+            self.assertFalse(REAL_ADMIN())  # ctypes.windll 이 없으면 관리자가 아니라고 본다
 
     def test_an_unverifiable_change_keeps_the_app_the_task_may_already_use(self):
         """covers: RELOC-2"""
