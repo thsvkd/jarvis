@@ -143,6 +143,16 @@ for (const [state, text] of [["relogin", "재로그인 필요"], ["expiring", "�
   assert.equal(hotNow(), hotBase + 1); // 기기 하나로 센다
   assert.match(rendered(), new RegExp(`주의 필요 계정</span><b>${hotBase + 1}</b>`));
 }
+// 사용 중 계정이 이미 주의면 같은 기기의 로그인 상태를 또 세지 않는다
+// 같은 계정을 다른 기기의 더 새 값으로 세었으면 이 기기의 로그인은 따로 센다
+for (const [i, what] of [[1, "이 기기에만 있는 계정"], [0, "다른 기기 값으로 세는 계정"]]) {
+  const row = claudeOf(devices[0]).accounts[i];
+  Object.assign(row, { active: true, attention: true });
+  click({ prov: "all" });
+  assert.equal(hotNow(), hotBase + 1, what);
+  Object.assign(row, { active: false, attention: undefined });
+}
+click({ prov: "all" });
 // 주의 필터 중에도 로그인 이상 기기는 남고, 정상으로 돌아오면 빠진다. 다른 프로바이더 필터에서는 세지 않는다
 const guideDialog = element("ulDlg");
 guideDialog.showModal = () => { guideDialog.open = true; };

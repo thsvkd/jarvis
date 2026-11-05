@@ -74,13 +74,17 @@
  const filtering=()=>S.prov!=="all"||S.hot;
  // 필터 중에는 사용량을 못 읽은 기기도 '전체'일 때만 보인다(어느 프로바이더인지 모른다)
  const visible=d=>!S.hot&&fresh(d).includes(S.prov)||(ok(d)?(!filtering()||provs(d).some(p=>shown(d,p).length||loginHot(p))):S.prov==="all");
- const hotLogins=()=>S.devs.flatMap(d=>provs(d).filter(loginHot));
- function uniq(filterHot=true){
+  function uniq(filterHot=true){
   const m=new Map();
   for(const d of S.devs)for(const p of provs(d))for(const [i,a] of p.accounts.entries()){
    const k=keyOf(d,p,a,i),o=m.get(k);if(!o||better(a,o.a))m.set(k,{a,p,d});
   }
   return [...m.values()].filter(({a})=>!filterHot||!S.hot||isHot(a));
+ }
+ // 사용 중 계정이 이미 주의로 세였으면 같은 문제를 두 번 세지 않는다. 같은 계정을 다른 기기 값으로 세었으면 이 기기의 로그인은 따로 센다
+ function hotLogins(){
+  const counted=new Set(uniq(false).filter(x=>isHot(x.a)).map(x=>x.a));
+  return S.devs.flatMap(d=>provs(d).filter(p=>loginHot(p)&&!p.accounts.some(a=>a.active&&counted.has(a))));
  }
  function columns(hotOnly){
   const seen=new Map();
