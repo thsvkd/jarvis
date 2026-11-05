@@ -48,8 +48,7 @@ STATUS = {
     "no_saved_usage": ("저장된 사용량이 없습니다.", False),  # 저장소 캐시 어댑터만 쓴다
 }
 _lock = threading.Lock()
-_cache = None  # (monotonic, 결과)
-_built = None  # hswap 에 물을 때의 저장소 모습(_store_shape). 묶음이 어떤 저장소를 보고 만들어졌는지 나타낸다
+_cache = None  # (monotonic, 결과, 물을 때의 저장소 모습 _store_shape). 잠금 안에서 한 값으로 바꾼다. 모습이 지금 저장소와 같을 때만 다시 쓴다
 _discovered = False  # hswap 이 마지막으로 답한 때 계정을 주었다. 저장소를 읽지 못해도 기준이 지나면 다시 묻는 근거다
 _device = None  # (monotonic, 키체인에 닿지 못함). hswap 이 답한 기기 상태. 계정 행과 따로 두어 계정이 없거나 다음 조회가 실패해도 남는다
 _switched = 0  # switch() 가 끝난 횟수. 이것이 바뀌면 그 전에 시작한 읽기의 값은 전환 전 값일 수 있다
@@ -260,11 +259,12 @@ def switch(slot):
         _lock.release()
 
 
-def live(force=False, install=True):
+def live(force=False, install=True, shape=None):
     """hswap CLI 어댑터. None(hswap 없음·계정 없음) 또는 {"accounts": [...], "fetched_at": 초, "ids": {슬롯: 신원 지문}} 또는 {"error": "..."}. ids 는 read() 안에서만 쓴다.
     install 이면 hswap 이 없을 때 ensure() 가 설치를 시작하고 그 진행·실패를 error 로 준다(호환 경로만. 독립 경로는 설치하지 않는다).
     hswap 이 답하면 최상위 keychainUnavailable(0.2.2 의 추가 필드. 없으면 아니라고 본다)을 _device 에 적는다. 실패한 조회는 건드리지 않는다.
-    force 는 jarvis 의 30초 묶음만 건너뛴다(프로바이더 조회 간격은 hswap 이 정한다)."""
+    force 는 jarvis 의 30초 묶음만 건너뛴다(프로바이더 조회 간격은 hswap 이 정한다).
+    shape: 이 호출을 정한 저장소 모습. 잠금을 기다린 뒤든 포기한 뒤든 모습이 같은 결과만 다시 쓴다(hswap 은 한 번에 하나만 도니 옛 답은 새 답보다 먼저 온다)."""
     global _cache, _device, _discovered
     exe = binary()
     if not exe:
@@ -273,11 +273,13 @@ def live(force=False, install=True):
     asked = time.monotonic()
     # 동시에 여러 hswap 을 띄우지 않는다. 앞 요청이 끝나지 않으면(멈춘 hswap) 기다리지 않고 마지막 값을 준다
     if not _lock.acquire(timeout=TIMEOUT_S + 5):
-        return _cache[1] if _cache else {"error": "hswap 이 응답하지 않습니다"}
+        held = _cache
+        return held[1] if held and held[2] == shape else {"error": "hswap 이 응답하지 않습니다"}
     try:
-        # 기다리는 동안 앞 요청이 새로 읽었으면 강제라도 그 값을 쓴다
-        if _cache and (_cache[0] >= asked or (not force and asked - _cache[0] < CACHE_S)):
-            return _cache[1]
+        held = _cache
+        # 기다리는 동안 앞 요청이 같은 저장소를 보고 새로 읽었으면 강제라도 그 값을 쓴다
+        if held and held[2] == shape and (held[0] >= asked or (not force and asked - held[0] < CACHE_S)):
+            return held[1]
         try:
             body = _json(exe, "list")
             raw = [r for r in body.get("accounts") or [] if isinstance(r, dict)]
@@ -288,7 +290,7 @@ def live(force=False, install=True):
                    "ids": {str(r.get("number")): _fingerprint(r.get("email"), r.get("organizationUuid")) for r in raw}} if accounts else None
         except Exception as e:
             out = {"error": scrub_home(str(e))[:200] or type(e).__name__}
-        _cache = (time.monotonic(), out)
+        _cache = (time.monotonic(), out, shape)
         return out
     finally:
         _lock.release()
@@ -490,12 +492,13 @@ def read(force=False, install=False):
     (저장소에는 로그인 기한·상태가 없어 만료 경고는 실값에서만 나온다. 예약 실행이 저장소를 늘 새로 써도 경고가 사라지지 않게 한다).
     그 사이에는 마지막 실값을 그대로 준다. 오래된 저장소 값은 실값이 없을 때만 보이므로 따로 보지 않는다. hswap 이 없거나 실패하면 저장소 값을 대체값으로 쓰고 이유를 붙인다.
     install: 호환 경로만 켠다. 저장소가 없어도 묻고, hswap 이 없으면 설치를 시작한다. 독립 경로는 설치하지 않는다(USAGE-3).
-    읽는 사이 switch() 가 끝나면 전환 전 값을 내지 않고 다시 읽는다. 전환이 쉬지 않고 이어져도 멈추지 않게 횟수는 제한한다."""
+    읽는 사이 switch() 가 끝나거나 저장소 모습이 바뀌면 옛 값을 내지 않고 다시 읽는다(진행 중인 이 읽기를 함께 기다리는 쪽도 옛 값을 받지 않는다). 변경이 쉬지 않고 이어져도 멈추지 않게 횟수는 제한한다."""
     for _ in range(3):
         seen = _switched
-        out = _read(force, install)
-        if seen == _switched:
+        out, settled = _read(force, install)
+        if settled and seen == _switched:
             break
+        force = False  # 강제는 첫 시도로 지켰다. 다시 읽을 때는 같은 모습의 새 결과를 쓴다
     return out
 
 
@@ -506,7 +509,8 @@ def _keychain_down():
 
 
 def _read(force, install):
-    global _built
+    """(결과, 답을 받는 동안 저장소 모습이 그대로였는가)."""
+    settled = True
     store = _store_read()
     held = _cache  # switch() 가 도중에 비워도 같은 값을 본다
     recent = held[1] if held and time.monotonic() - held[0] < config.CLAUDE_STALE_S else None
@@ -518,13 +522,14 @@ def _read(force, install):
         out = None
     else:
         shape = _store_shape(store)
-        changed = recent is not None and shape != _built  # 30초 묶음 안이어도 옛 저장소의 값이므로 다시 묻는다
+        # 묶음의 모습은 hswap 답이 아니라 물을 때의 저장소다: 답이 저장소와 계속 어긋나도 변경 한 번에 한 번만 다시 부른다
+        changed = recent is not None and shape != held[2]
         asked = force or changed or recent is None or any(_old(a) for a in recent["accounts"])
         out = recent
         if asked:
-            _built = shape  # 부르기 전에 잡는다: 호출 중의 변경은 다음 읽기가 알아채고, 답이 저장소와 계속 어긋나도 변경 한 번에 한 번만 부른다
-            out = live(force or changed, install=install)
+            out = live(force, install=install, shape=shape)
             store = _store_read()  # 사용 중 판정은 hswap 이 답한 뒤의 로그인으로 한다(잠금을 기다리는 사이 로그인이 바뀌었을 수 있다)
+            settled = _store_shape(store) == shape
     rows = (out or {}).get("accounts")
     if rows:
         ids = out.get("ids", {})
@@ -536,12 +541,12 @@ def _read(force, install):
         why = reason.rstrip(".") + ". 저장된 값을 보입니다."
     else:
         state = login((), _keychain_down())
-        return {**(out or {}), "accounts": [], "login": state} if state else out
+        return ({**(out or {}), "accounts": [], "login": state} if state else out), settled
     state = login(rows, _keychain_down(), bool(store and store.get("signed_in")))
     result = {"accounts": [_aged(a, why) for a in rows]}
     if (out or {}).get("fetched_at"):
         result["fetched_at"] = out["fetched_at"]
-    return {**result, "login": state} if state else result
+    return ({**result, "login": state} if state else result), settled
 
 
 def merge_orca(mine, orca_rows):

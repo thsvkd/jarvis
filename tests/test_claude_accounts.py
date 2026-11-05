@@ -47,7 +47,7 @@ class StoreCase(unittest.TestCase):
         self.root = tmp.name
         os.mkdir(os.path.join(self.root, "cache"), 0o700)
         for name, kw in (("_root", {"return_value": self.root}), ("_live_identity", {"return_value": ("a@example.com", "o1")}),
-                         ("binary", {"return_value": None}), ("_cache", {"new": None}), ("_device", {"new": None}), ("_discovered", {"new": False}), ("_built", {"new": None}),
+                         ("binary", {"return_value": None}), ("_cache", {"new": None}), ("_device", {"new": None}), ("_discovered", {"new": False}),
                          ("ensure", {"side_effect": AssertionError("독립 경로는 설치하지 않는다")})):
             p = mock.patch.object(claude_accounts, name, **kw)
             setattr(self, name.strip("_"), p.start())
@@ -147,7 +147,7 @@ class FreshnessTest(StoreCase):
         for _ in range(3):
             self.assertIn("로그인 만료", claude_accounts.read()["accounts"][0]["note"])
         self.assertEqual(run.call_count, 1)
-        claude_accounts._cache = (time.monotonic() - claude_accounts.config.CLAUDE_STALE_S - 1, claude_accounts._cache[1])
+        claude_accounts._cache = (time.monotonic() - claude_accounts.config.CLAUDE_STALE_S - 1, *claude_accounts._cache[1:])
         claude_accounts.read()
         self.assertEqual(run.call_count, 2)
 
@@ -160,7 +160,7 @@ class FreshnessTest(StoreCase):
             claude_accounts.read()
         run.return_value = {"accounts": [hswap_row(usageFetchedAt=iso(now + 300))]}
         held = claude_accounts._cache
-        claude_accounts._cache = (held[0] - 31, held[1])  # 30초 묶음이 지났다
+        claude_accounts._cache = (held[0] - 31, *held[1:])  # 30초 묶음이 지났다
         with mock.patch.object(claude_accounts.time, "time", return_value=now + 320):
             a = claude_accounts.read()["accounts"][0]
         self.assertEqual(run.call_count, 2)
@@ -197,7 +197,8 @@ class FreshnessTest(StoreCase):
         self.store(time.time() - 9 * 3600)
         with mock.patch.object(claude_accounts, "live", return_value=None) as live:
             self.assertEqual(independent_usage._claude(True)["accounts"][0]["source"], "cswap-cache")
-        live.assert_called_once_with(True, install=False)
+        live.assert_called_once()
+        self.assertEqual((live.call_args.args, live.call_args.kwargs["install"]), ((True,), False))
 
 
 class SameRulesTest(StoreCase):
@@ -706,7 +707,7 @@ class NoAccountsTest(StoreCase):
         claude_accounts.read(force=True)
         def age():
             ago = time.monotonic() - claude_accounts.config.CLAUDE_STALE_S - 1
-            claude_accounts._device, claude_accounts._cache = (ago, claude_accounts._device[1]), (ago, claude_accounts._cache[1])
+            claude_accounts._device, claude_accounts._cache = (ago, claude_accounts._device[1]), (ago, *claude_accounts._cache[1:])
         age()
         self.assertEqual(claude_accounts.read()["login"]["state"], "keychain")  # 아직 그렇다고 답한다
         self.assertEqual(run.call_count, 2)
@@ -723,7 +724,7 @@ class NoAccountsTest(StoreCase):
         run = self.hswap(keychainUnavailable=True)
         claude_accounts.read(force=True)
         ago = time.monotonic() - claude_accounts.config.CLAUDE_STALE_S - 1
-        claude_accounts._device, claude_accounts._cache = (ago, True), (ago, None)
+        claude_accounts._device, claude_accounts._cache = (ago, True), (ago, None, None)
         run.side_effect = RuntimeError("locked")
         self.assertEqual(claude_accounts.read(), {"error": "locked"})
 
@@ -915,7 +916,7 @@ class DiscoveryTest(StoreCase):
         self.assertIsNone(claude_accounts._store_read())
 
     def age(self):
-        claude_accounts._cache = (time.monotonic() - claude_accounts.config.CLAUDE_STALE_S - 1, claude_accounts._cache[1])
+        claude_accounts._cache = (time.monotonic() - claude_accounts.config.CLAUDE_STALE_S - 1, *claude_accounts._cache[1:])
 
     def test_accounts_found_through_the_cli_do_not_vanish_after_the_threshold(self):
         """covers: USAGE-6"""
@@ -1256,20 +1257,131 @@ class StoreShapeTest(StoreCase):
         self.assertEqual([a["active"] for a in claude_accounts.read()["accounts"]], [False, True])
         self.assertEqual(run.call_count, 2)
 
-    def test_change_during_the_call_is_seen_by_the_next_read(self):
-        """covers: USAGE-6. 기록은 hswap 을 부르기 전에 잡으므로 호출 중의 변경을 놓치지 않는다"""
+    def test_change_during_the_call_is_seen_by_the_same_read(self):
+        """covers: USAGE-6. 호출 중에 저장소가 바뀌면 그 답을 내지 않고 바로 다시 묻는다"""
         self.slots((1, self.A, 0))
-        answer = {"accounts": [self.row(1, self.A, active=True)]}
-        run = self.hswap(self.row(1, self.A, active=True))
+        run = self.hswap()
+        answers = [{"accounts": [self.row(1, self.A, active=True)]}, {"accounts": [self.row(1, self.A, active=True), self.row(2, self.B)]}]
 
         def store_changes_meanwhile(*args, **kw):
             self.slots((1, self.A, 0), (2, self.B, 0))
-            return answer
+            return answers.pop(0)
         run.side_effect = store_changes_meanwhile
-        self.assertEqual(len(claude_accounts.read()["accounts"]), 1)
-        run.side_effect = None
-        run.return_value = {"accounts": [self.row(1, self.A, active=True), self.row(2, self.B)]}
         self.assertEqual(len(claude_accounts.read()["accounts"]), 2)
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(len(claude_accounts.read()["accounts"]), 2)
+        self.assertEqual(run.call_count, 2)
+
+    def hold_first_list(self):
+        """다음 list 를 gate 가 열릴 때까지 붙잡고 옛 답(A 만)을 준다. 그 뒤의 list 는 새 답(B 사용 중)을 준다."""
+        self.entered, self.gate, self.holding = threading.Event(), threading.Event(), True
+        self.addCleanup(self.gate.set)
+        run = self.hswap()
+
+        def answer(*args, **kw):
+            if self.holding:
+                self.holding = False
+                self.entered.set()
+                self.gate.wait(10)
+                return {"accounts": [self.row(1, self.A, active=True)]}
+            return {"accounts": [self.row(1, self.A), self.row(2, self.B, active=True)]}
+        run.side_effect = answer
+        return run
+
+    def change_store_to_b(self):
+        self.slots((1, self.A, 0), (2, self.B, 1))
+        self.live_identity.return_value = self.B
+
+    def assert_b_is_current(self, out):
+        self.assertEqual([(a["slot"], a["active"]) for a in out["accounts"]], [("1", False), ("2", True)])
+        self.assertEqual((out["accounts"][1]["note"], out["accounts"][1]["attention"]), (self.RELOGIN, True))
+        self.assertEqual((out["login"]["state"], out["login"]["slot"]), ("relogin", "2"))
+
+    def assert_cache_matches_the_store(self):
+        self.assertEqual(claude_accounts._cache[2], claude_accounts._store_shape(claude_accounts._store_read()))
+        self.assertEqual([a["slot"] for a in claude_accounts._cache[1]["accounts"]], ["1", "2"])
+
+    def test_reader_does_not_coalesce_onto_a_call_from_an_older_store(self):
+        """covers: USAGE-6, USAGE-7. A 의 호출이 진행 중일 때 저장소가 바뀌고 B 가 읽으면, B 는 A 의 답을 다시 쓰지 않고 새 호출을 한다"""
+        self.slots((1, self.A, 0))
+        run = self.hold_first_list()
+        real, b_waits = claude_accounts._lock, threading.Event()
+
+        class SpyLock:  # B 가 잠금을 기다리기 시작한 때를 안다
+            def acquire(self, timeout=-1):
+                if threading.current_thread().name == "reader-b":
+                    b_waits.set()
+                return real.acquire(timeout=timeout)
+
+            def release(self):
+                real.release()
+        box = {}
+        with mock.patch.object(claude_accounts, "_lock", SpyLock()):
+            a = threading.Thread(target=lambda: box.update(a=claude_accounts.read(force=True)), name="reader-a")
+            a.start()
+            self.assertTrue(self.entered.wait(5))
+            self.change_store_to_b()
+            b = threading.Thread(target=lambda: box.update(b=claude_accounts.read()), name="reader-b")
+            b.start()
+            self.assertTrue(b_waits.wait(5))
+            self.gate.set()  # A 의 옛 답이 B 가 잠금을 기다리는 중에 도착한다
+            a.join(10)
+            b.join(10)
+        self.assertFalse(a.is_alive() or b.is_alive())
+        self.assertEqual(run.call_count, 2)
+        self.assert_b_is_current(box["b"])
+        self.assert_b_is_current(box["a"])  # A 도 옛 답을 내지 않는다
+        self.assert_cache_matches_the_store()  # 늦게 온 옛 답이 새 결과를 덮지 않았다
+        self.assert_b_is_current(claude_accounts.read())  # 다음 보통 읽기도 B 이고 다시 부르지 않는다
+        self.assertEqual(run.call_count, 2)
+
+    def test_old_answer_after_the_lock_wait_gave_up_is_not_taken_as_current(self):
+        """covers: USAGE-6, USAGE-7. A 가 멈춰 B 가 잠금을 포기해도 옛 묶음을 쓰지 않고 저장소를 보이며, A 의 옛 답이 나중에 와도 유효로 치지 않는다"""
+        self.slots((1, self.A, 0))
+        run = self.hold_first_list()
+        self.holding = False
+        run.side_effect, later = (lambda *a, **k: {"accounts": [self.row(1, self.A, active=True)]}), run.side_effect
+        claude_accounts.read()  # 지금 저장소의 값을 묶어 둔다
+        self.holding = True
+        run.side_effect = later
+        box = {}
+        a = threading.Thread(target=lambda: box.update(a=claude_accounts.read(force=True)), name="reader-a")
+        a.start()
+        self.assertTrue(self.entered.wait(5))
+        self.change_store_to_b()
+        with mock.patch.object(claude_accounts, "TIMEOUT_S", -4.9):  # 잠금을 0.1초만 기다린다
+            out = claude_accounts.read()
+        self.assertEqual([(r["slot"], r["active"], r["source"]) for r in out["accounts"]], [("1", False, "cswap-cache"), ("2", True, "cswap-cache")])
+        self.assertIn("hswap 이 응답하지 않습니다", out["accounts"][0]["note"])
+        self.assertEqual(out["login"]["state"], "relogin")
+        self.gate.set()
+        a.join(10)
+        self.assertFalse(a.is_alive())
+        self.assert_b_is_current(box["a"])
+        self.assert_cache_matches_the_store()
+        self.assert_b_is_current(claude_accounts.read())
+
+    def test_page_reader_sharing_a_running_job_gets_current_values(self):
+        """covers: USAGE-6, USAGE-7. 독립 경로는 진행 중인 Claude 작업을 함께 기다린다: 그 작업도 옛 답을 내지 않는다"""
+        self.slots((1, self.A, 0))
+        run = self.hold_first_list()
+        box = {}
+        with self.independent_mocks():
+            independent_usage._tasks.clear()
+            self.addCleanup(independent_usage._tasks.clear)
+            pick = lambda body: next(p for p in body["providers"] if p["id"] == "claude")
+            a = threading.Thread(target=lambda: box.update(a=pick(independent_usage.read())))
+            a.start()
+            self.assertTrue(self.entered.wait(5))
+            self.change_store_to_b()
+            b = threading.Thread(target=lambda: box.update(b=pick(independent_usage.read())))
+            b.start()
+            self.gate.set()
+            a.join(20)
+            b.join(20)
+        self.assertFalse(a.is_alive() or b.is_alive())
+        for page in (box["a"], box["b"]):
+            self.assertEqual((page["login"]["state"], [r["active"] for r in page["accounts"]]), ("relogin", [False, True]))
         self.assertEqual(run.call_count, 2)
 
     def test_one_change_reruns_once_even_if_hswap_keeps_disagreeing(self):
