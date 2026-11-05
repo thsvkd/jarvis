@@ -46,6 +46,7 @@ STATUS = {
 }
 _lock = threading.Lock()
 _cache = None  # (monotonic, 결과)
+_device = None  # (monotonic, 키체인에 닿지 못함). hswap 이 답한 기기 상태. 계정 행과 따로 두어 계정이 없거나 다음 조회가 실패해도 남는다
 _switched = 0  # switch() 가 끝난 횟수. 이것이 바뀌면 그 전에 시작한 읽기의 값은 전환 전 값일 수 있다
 # 자동 설치·올리기: 검증한 버전으로 고정한다(서비스가 최신판을 저절로 받아 실행하지 않게). PyPI 배포본이 그 태그의 소스와 같은지
 # 대조한 뒤 여기 버전을 올려 릴리스하면, 게이트웨이(maintain)가 이보다 낮은 hswap 을 이 버전으로 올린다
@@ -252,9 +253,9 @@ def switch(slot):
 def live(force=False, install=True):
     """hswap CLI 어댑터. None(hswap 없음·계정 없음) 또는 {"accounts": [...], "fetched_at": 초} 또는 {"error": "..."}.
     install 이면 hswap 이 없을 때 ensure() 가 설치를 시작하고 그 진행·실패를 error 로 준다(호환 경로만. 독립 경로는 설치하지 않는다).
-    hswap 이 키체인에 닿지 못한다고 보고하면 keychainUnavailable 을 붙인다(0.2.2 의 추가 필드. 없으면 무시한다).
+    hswap 이 답하면 최상위 keychainUnavailable(0.2.2 의 추가 필드. 없으면 아니라고 본다)을 _device 에 적는다. 실패한 조회는 건드리지 않는다.
     force 는 jarvis 의 30초 묶음만 건너뛴다(프로바이더 조회 간격은 hswap 이 정한다)."""
-    global _cache
+    global _cache, _device
     exe = binary()
     if not exe:
         msg = ensure() if install else None
@@ -270,10 +271,8 @@ def live(force=False, install=True):
         try:
             body = _json(exe, "list")
             accounts = [account(r) for r in body.get("accounts") or [] if isinstance(r, dict)]
-            keychain = body.get("keychainUnavailable") is True  # 계정이 없어도 기기 상태로 보인다
-            out = {"accounts": accounts, "fetched_at": time.time()} if accounts or keychain else None
-            if keychain:
-                out["keychainUnavailable"] = True
+            _device = (time.monotonic(), body.get("keychainUnavailable") is True)
+            out = {"accounts": accounts, "fetched_at": time.time()} if accounts else None
         except Exception as e:
             out = {"error": scrub_home(str(e))[:200] or type(e).__name__}
         _cache = (time.monotonic(), out)
@@ -459,12 +458,21 @@ def read(force=False, install=False):
     return out
 
 
+def _keychain_down():
+    """hswap 이 신선도 기준 안에 키체인에 닿지 못한다고 답했는가. 다시 확인하지 못한 옛 답은 쓰지 않는다."""
+    d = _device
+    return bool(d and d[1] and time.monotonic() - d[0] < config.CLAUDE_STALE_S)
+
+
 def _read(force, install):
     store = _store_read()
     held = _cache  # switch() 가 도중에 비워도 같은 값을 본다
     recent = held[1] if held and time.monotonic() - held[0] < config.CLAUDE_STALE_S else None
     recent = recent if recent and recent.get("accounts") else None
-    if store is None and recent is None and not force and not install:
+    device = _device
+    # 계정도 저장소도 없는 기기는 묻지 않지만, 경고가 있던 기기는 기준이 지나면 다시 묻는다
+    recheck = bool(device and device[1]) and not _keychain_down()
+    if store is None and recent is None and not force and not install and not recheck:
         out = None
     else:
         asked = force or recent is None or any(_old(a) for a in recent["accounts"])
@@ -480,9 +488,9 @@ def _read(force, install):
         reason = (out or {}).get("error") or ("hswap 이 없습니다" if not binary() else "hswap 이 계정을 주지 않았습니다")
         why = reason.rstrip(".") + ". 저장된 값을 보입니다."
     else:
-        state = login((), (out or {}).get("keychainUnavailable") is True)
+        state = login((), _keychain_down())
         return {**(out or {}), "accounts": [], "login": state} if state else out
-    state = login(rows, (out or {}).get("keychainUnavailable") is True, bool(store and store.get("signed_in")))
+    state = login(rows, _keychain_down(), bool(store and store.get("signed_in")))
     result = {"accounts": [_aged(a, why) for a in rows]}
     if (out or {}).get("fetched_at"):
         result["fetched_at"] = out["fetched_at"]

@@ -29,7 +29,7 @@ class StoreCase(unittest.TestCase):
         self.root = tmp.name
         os.mkdir(os.path.join(self.root, "cache"), 0o700)
         for name, kw in (("_root", {"return_value": self.root}), ("_live_identity", {"return_value": ("a@example.com", "o1")}),
-                         ("binary", {"return_value": None}), ("_cache", {"new": None}),
+                         ("binary", {"return_value": None}), ("_cache", {"new": None}), ("_device", {"new": None}),
                          ("ensure", {"side_effect": AssertionError("독립 경로는 설치하지 않는다")})):
             p = mock.patch.object(claude_accounts, name, **kw)
             setattr(self, name.strip("_"), p.start())
@@ -324,14 +324,14 @@ class LoginStateTest(StoreCase):
         s = claude_accounts.read(force=True)["login"]
         self.assertEqual((s["state"], s["attention"]), ("keychain", True))
         self.assertIn("키체인에 접근할 수 없는 곳에서 실행됨", s["text"])
-        self.assertTrue(claude_accounts._cache[1]["keychainUnavailable"])
+        self.assertTrue(claude_accounts._device[1])
 
     def test_keychain_field_is_ignored_when_absent(self):
         """covers: USAGE-7"""
         self.hswap(hswap_row())
         out = claude_accounts.read(force=True)
         self.assertNotIn("login", out)
-        self.assertNotIn("keychainUnavailable", claude_accounts._cache[1])
+        self.assertFalse(claude_accounts._device[1])
 
     def test_stalled(self):
         """covers: USAGE-7"""
@@ -518,11 +518,98 @@ class NoAccountsTest(StoreCase):
         out = claude_accounts.read(force=True)
         self.assertEqual((out["accounts"], out["login"]["state"]), ([], "keychain"))
 
+    def test_keychain_warning_survives_ordinary_reads_after_a_refresh(self):
+        """covers: USAGE-7. 저장소도 keepalive 도 없는 기기: 새로고침 뒤의 보통 읽기에서 경고와 복구 버튼이 사라지지 않고, 그 사이 hswap 을 다시 부르지 않는다"""
+        run = self.hswap(keychainUnavailable=True)
+        self.assertEqual(claude_accounts.read(force=True)["login"]["state"], "keychain")
+        for _ in range(3):
+            out = claude_accounts.read()
+            self.assertEqual((out["accounts"], out["login"]["state"], out["login"]["attention"]), ([], "keychain", True))
+        run.assert_called_once()
+
+    def test_keychain_state_is_asked_again_after_the_threshold(self):
+        """covers: USAGE-7"""
+        run = self.hswap(keychainUnavailable=True)
+        claude_accounts.read(force=True)
+        def age():
+            ago = time.monotonic() - claude_accounts.config.CLAUDE_STALE_S - 1
+            claude_accounts._device, claude_accounts._cache = (ago, claude_accounts._device[1]), (ago, claude_accounts._cache[1])
+        age()
+        self.assertEqual(claude_accounts.read()["login"]["state"], "keychain")  # 아직 그렇다고 답한다
+        self.assertEqual(run.call_count, 2)
+        age()
+        run.return_value = {"accounts": []}  # 이제 닿는다: 경고가 사라지고 더는 묻지 않는다
+        self.assertIsNone(claude_accounts.read())
+        self.assertEqual(run.call_count, 3)
+        claude_accounts._cache = None
+        self.assertIsNone(claude_accounts.read())
+        self.assertEqual(run.call_count, 3)
+
+    def test_keychain_state_is_not_kept_past_the_threshold_when_hswap_fails(self):
+        """covers: USAGE-7. 다시 확인하지 못한 상태를 지금 사실처럼 보이지 않고 hswap 오류를 보인다"""
+        run = self.hswap(keychainUnavailable=True)
+        claude_accounts.read(force=True)
+        ago = time.monotonic() - claude_accounts.config.CLAUDE_STALE_S - 1
+        claude_accounts._device, claude_accounts._cache = (ago, True), (ago, None)
+        run.side_effect = RuntimeError("locked")
+        self.assertEqual(claude_accounts.read(), {"error": "locked"})
+
+    def test_hswap_failure_inside_the_threshold_keeps_the_device_state(self):
+        """covers: USAGE-7. 기기 상태는 계정 행과 따로 둔다: 실패한 조회가 지우지 않는다"""
+        run = self.hswap(keychainUnavailable=True)
+        claude_accounts.read(force=True)
+        run.side_effect = RuntimeError("locked")
+        out = claude_accounts.read(force=True)
+        self.assertEqual((out["accounts"], out["error"], out["login"]["state"]), ([], "locked", "keychain"))
+        self.assertEqual(claude_accounts.read()["login"]["state"], "keychain")
+
+    def test_keychain_warning_holds_over_held_rows_and_store_rows(self):
+        """covers: USAGE-7"""
+        run = self.hswap(hswap_row(), keychainUnavailable=True)
+        claude_accounts.read(force=True)
+        self.assertEqual(claude_accounts.read()["login"]["state"], "keychain")
+        self.store(time.time() - 60)
+        run.return_value = {"accounts": [], "keychainUnavailable": True}
+        claude_accounts._cache = None
+        out = claude_accounts.read()
+        self.assertEqual((out["accounts"][0]["source"], out["login"]["state"]), ("cswap-cache", "keychain"))
+
     def test_nothing_to_say_stays_none(self):
         """covers: USAGE-7"""
         self.assertIsNone(claude_accounts.read())
         self.keepalive()
         self.assertEqual(claude_accounts.read(), {"accounts": [], "login": claude_accounts.login()})
+
+    def test_independent_keeps_the_keychain_warning_after_a_refresh(self):
+        """covers: USAGE-7. 화면 경로: 새로고침 다음의 보통 조회에도 Claude 칸의 경고가 남는다"""
+        self.hswap(keychainUnavailable=True)
+        with self.independent_mocks():
+            independent_usage._tasks.clear()
+            self.addCleanup(independent_usage._tasks.clear)
+            for force in (True, False, False):
+                claude = next(p for p in independent_usage.read(force=force)["providers"] if p["id"] == "claude")
+                self.assertEqual((claude["accounts"], claude["login"]["state"]), ([], "keychain"), force)
+
+    def independent_mocks(self):
+        empty = {"status": "unavailable", "accounts": []}
+        patches = [mock.patch.object(independent_usage, "_caam", side_effect=RuntimeError("없음")),
+                   mock.patch.object(independent_usage, "_opencode", return_value=empty),
+                   mock.patch.object(independent_usage.codex_native_usage, "read", return_value=[]),
+                   *[mock.patch.object(m, "read", return_value=empty) for m in (independent_usage.antigravity_usage, independent_usage.kimi_usage,
+                                                                               independent_usage.zcode_usage, independent_usage.gemini_usage, independent_usage.minimax_usage)],
+                   mock.patch.object(independent_usage.orca_usage, "_orca", return_value={"providers": []}),
+                   mock.patch.object(independent_usage.cli_login, "available", return_value=[]),
+                   mock.patch.object(independent_usage.cli_login, "fresh", return_value=[])]
+
+        class Together:
+            def __enter__(self):
+                for p in patches:
+                    p.start()
+
+            def __exit__(self, *exc):
+                for p in patches:
+                    p.stop()
+        return Together()
 
     def test_independent_keeps_the_provider_for_login(self):
         """covers: USAGE-7. 계정이 없어 확인 불가로 남더라도 칸은 남아 복구 안내를 보인다"""
