@@ -56,24 +56,36 @@ def app():
     return os.path.join(launch.ROOT, "app")
 
 
+def _plain(p):
+    """절대 경로의 정규형(문자열). 예외를 내지 않는다."""
+    try:
+        return os.path.normcase(os.path.abspath(p))
+    except (TypeError, ValueError):
+        return os.path.normcase(str(p))
+
+
 def _key(p):
-    return os.path.normcase(os.path.realpath(p))
+    """실제 경로의 정규형. 못 구하면(Windows 의 신뢰할 수 없는 탑재 지점 WinError 448 등) 절대 경로로 떨어진다."""
+    try:
+        return os.path.normcase(os.path.realpath(p))
+    except (OSError, ValueError):
+        return _plain(p)
 
 
 def same(a, b):
     """같은 폴더인가. $HOME 이 심링크(/home/x = /Users/x)이거나 대소문자만 다른 이름(macOS)일 수 있어 문자열로 비교하지 않는다.
-    둘 다 있으면 파일시스템 정체(samefile), 아니면 실제 경로로 본다."""
+    둘 다 있으면 파일시스템 정체(samefile), 아니면 실제 경로, 그것도 안 되면 절대 경로로 본다. 예외를 내지 않는다."""
     if not a or not b:
         return False
     try:
         return os.path.samefile(a, b)
-    except OSError:
+    except (OSError, ValueError):
         return _key(a) == _key(b)
 
 
 def under(p, d):
-    """p 가 d 이거나 d 아래인가. p 의 조상을 거슬러 올라가며 same 으로 본다."""
-    p = os.path.abspath(p)
+    """p 가 d 이거나 d 아래인가. p 의 조상을 거슬러 올라가며 same 으로 본다. 예외를 내지 않는다."""
+    p = _plain(p)
     while True:
         if same(p, d):
             return True
@@ -262,10 +274,21 @@ def _users(d):
     mine = {os.getpid()} | {q.pid for q in psutil.Process().parents()}
     found = []
     for p in psutil.process_iter(["pid", "cwd", "cmdline"]):
-        paths = [p.info.get("cwd")] + [a for a in p.info.get("cmdline") or [] if os.path.isabs(a)]
-        if p.info["pid"] not in mine and any(x and under(x, d) for x in paths):
+        if p.info["pid"] in mine:
+            continue
+        paths = [x for x in [p.info.get("cwd"), *(p.info.get("cmdline") or [])] if isinstance(x, str) and os.path.isabs(x)]
+        try:
+            busy = any(under(x, d) for x in paths)
+        except Exception:  # 판정할 수 없으면 보수적으로: 문자열로 옛 폴더 아래면 사용 중
+            busy = any(_text_under(x, d) for x in paths)
+        if busy:
             found.append(p.info["pid"])
     return found
+
+
+def _text_under(p, d):
+    p = _plain(p)
+    return any(p == x or p.startswith(x.rstrip(os.sep) + os.sep) for x in {_plain(d), _key(d)})
 
 
 def _mentions(reg, o):

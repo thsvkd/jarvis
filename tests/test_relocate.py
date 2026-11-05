@@ -370,6 +370,57 @@ class Linux(Base):
             p.kill()
             p.wait()
 
+    def untrusted(self, arg):
+        """명령줄에 arg 가 있는 프로세스를 띄우고, 'untrusted' 가 든 경로는 samefile·realpath 가 WinError 448 처럼 실패하게 한다."""
+        real_samefile, real_realpath = os.path.samefile, os.path.realpath
+
+        def boom(f):
+            def g(*a, **k):
+                if any("untrusted" in str(x) for x in a):
+                    raise OSError(448, "경로에 신뢰할 수 없는 탑재 지점이 포함되어 있습니다")
+                return f(*a, **k)
+            return g
+
+        p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", arg], cwd=self.tmp)
+        self.addCleanup(p.wait)
+        self.addCleanup(p.kill)
+        for _ in range(50):
+            if any(arg in (q.cmdline() or []) for q in __import__("psutil").process_iter()
+                   if q.pid == p.pid):
+                break
+            time.sleep(0.05)
+        with mock.patch.object(os.path, "samefile", boom(real_samefile)), \
+                mock.patch.object(os.path, "realpath", boom(real_realpath)):
+            return relocate.run(), p.pid
+
+    def test_paths_that_cannot_be_resolved_do_not_crash_and_elsewhere_is_not_a_user(self):
+        """covers: RELOC-7"""
+        r, _ = self.untrusted(os.path.join(self.tmp, "untrusted", "x64"))
+        self.assertEqual(r["state"], "cleaned", r)
+
+    def test_an_unresolvable_path_inside_the_old_folder_keeps_it(self):
+        """covers: RELOC-7"""
+        r, pid = self.untrusted(os.path.join(relocate.old(), "untrusted", "x64"))
+        self.assertEqual(r["state"], "registered", r)
+        self.assertIn(str(pid), r["detail"])
+        self.assertTrue(os.path.isdir(self.old))
+
+    def test_a_process_that_cannot_be_judged_falls_back_to_a_string_check(self):
+        """covers: RELOC-7"""
+        arg = os.path.join(relocate.old(), "jarvis")
+        p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", arg], cwd=self.tmp)
+        try:
+            with mock.patch.object(relocate, "under", side_effect=RuntimeError("판정 불가")):
+                for _ in range(50):
+                    users = relocate._users(relocate.old())
+                    if p.pid in users:
+                        break
+                    time.sleep(0.05)
+            self.assertIn(p.pid, users)
+        finally:
+            p.kill()
+            p.wait()
+
     def test_an_absolute_working_directory_is_recognized_too(self):
         """covers: RELOC-1"""
         with open(self.unit, "w") as f:
