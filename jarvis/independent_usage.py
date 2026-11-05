@@ -110,7 +110,8 @@ def read(force=False):
         except Exception:
             pass
         if extra.get(name):
-            accounts = _merge(accounts, extra[name])
+            # Claude 는 이메일과 조직으로 계정을 가른다(호환 경로와 같은 규칙). 이메일만 보면 같은 이메일의 다른 조직과 그 경고를 잃는다
+            accounts = (claude_accounts.merge_orca if name == "claude" else _merge)(accounts, extra[name])
         if failed and not extra.get(name) or not accounts:
             unavailable.append(name)
         if accounts or login:  # 계정이 없어도 기기 로그인 상태의 경고·복구 안내를 보일 칸은 남긴다

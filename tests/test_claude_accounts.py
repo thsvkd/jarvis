@@ -279,6 +279,53 @@ class SameRulesTest(StoreCase):
                 mock.patch.object(orca_usage.cli_login, "fresh", return_value=[]):
             self.assertEqual(orca_usage.read()[1]["cswap_error"], "설치 실패")
 
+    def rows_on_both_paths(self, orca):
+        """같은 가짜 hswap·Orca 를 두 경로의 전체 흐름에 태워 Claude 행을 준다."""
+        claude_accounts._cache = None
+        with self.independent_mocks(orca):
+            independent_usage._tasks.clear()
+            self.addCleanup(independent_usage._tasks.clear)
+            mine = next(p for p in independent_usage.read(force=True)["providers"] if p["id"] == "claude")["accounts"]
+        claude_accounts._cache = None
+        return mine, self.compat(orca)["accounts"]
+
+    def assert_same_on_both_paths(self, orca, labels, hot):
+        mine, theirs = self.rows_on_both_paths(orca)
+        pick = lambda rows: [{k: a.get(k) for k in ("label", "org", "active", "status", "attention", "error", "note", "source")} for a in rows]
+        self.assertEqual(pick(mine), pick(theirs))
+        self.assertEqual([(a["label"], a["org"]) for a in mine], labels)
+        count = lambda rows: sum(1 for a in rows if a.get("attention") or a.get("status") == "error")  # 화면 isHot 의 사람 손이 필요한 조건
+        self.assertEqual((count(mine), count(theirs)), (hot, hot))
+
+    def test_same_email_in_another_org_stays_on_both_paths(self):
+        """covers: USAGE-6. Org A 의 hswap 계정이 같은 이메일의 Org B 계정과 그 재로그인 경고를 가리지 않는다"""
+        self.hswap(hswap_row(organizationName="Org A"))
+        org_b = {"label": "a@example.com", "org": "Org B", "active": False, "status": "error", "error": "다시 로그인하세요", "attention": True,
+                 "failure": "auth", "windows": [], "buckets": []}
+        self.assert_same_on_both_paths([{"id": "claude", "name": "Claude", "accounts": [org_b]}],
+                                       [("a@example.com", "Org A"), ("a@example.com", "Org B")], 1)
+
+    def test_orca_rules_match_on_both_paths(self):
+        """covers: USAGE-6"""
+        plain = lambda label, org=None, active=False: {"label": label, "org": org, "active": active, "status": "ok", "windows": [], "buckets": []}
+        orca = [{"id": "claude", "name": "Claude", "accounts": [plain("시스템 기본 계정", active=True), plain("only@example.com"), plain("A@example.com")]}]
+        # 사용 중 계정이 있으면 시스템 기본 계정은 같은 로그인이고, 조직 모르는 같은 이메일도 같은 로그인이다
+        self.hswap(hswap_row())
+        self.assert_same_on_both_paths(orca, [("a@example.com", "Org"), ("only@example.com", None)], 0)
+        # 사용 중 계정이 없으면 시스템 기본 계정을 남긴다
+        self.hswap(hswap_row(active=False))
+        self.assert_same_on_both_paths(orca, [("a@example.com", "Org"), ("시스템 기본 계정", None), ("only@example.com", None)], 0)
+        # hswap 이 계정을 주지 않으면 Orca 값만 남는다
+        self.hswap()
+        self.assert_same_on_both_paths(orca, [("시스템 기본 계정", None), ("only@example.com", None), ("A@example.com", None)], 0)
+
+    def test_store_fallback_merges_the_same_on_both_paths(self):
+        """covers: USAGE-6"""
+        self.store(time.time() - 9 * 3600)
+        self.hswap().side_effect = RuntimeError("locked")
+        orca = [{"id": "claude", "name": "Claude", "accounts": [{"label": "a@example.com", "org": "Org B", "active": False, "status": "ok", "windows": [], "buckets": []}]}]
+        self.assert_same_on_both_paths(orca, [("a@example.com", "Org"), ("a@example.com", "Org B")], 1)
+
     def compat(self, orca=()):
         with mock.patch.object(orca_usage, "_orca", return_value={"installed": False, "providers": list(orca)}), \
                 mock.patch.object(orca_usage.caam_usage, "read", return_value=None), \

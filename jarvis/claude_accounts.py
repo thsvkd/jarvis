@@ -1,6 +1,6 @@
 """Claude 계정의 모든 규칙을 한 곳에 둔다: 신선도, 만료 경고, 상태 문구, 사용 중 판정, 창·Fable·버킷 이름, 기기 로그인 상태.
 
-바깥 인터페이스는 read(force)와 switch(slot)이다. 독립 경로와 호환 경로(orca_usage.read)가 같은 read 를 거치고, 호환 경로는 그 뒤에 merge_orca 로 Orca 계정을 보탠다.
+바깥 인터페이스는 read(force)와 switch(slot)이다. 독립 경로와 호환 경로(orca_usage.read)가 같은 read 를 거치고, 그 뒤에 같은 merge_orca 로 Orca 계정을 보탠다.
 안에 어댑터가 둘 있다.
 - hswap CLI(live, _json): `hswap claude list --json`(cswap 과 같은 schemaVersion 1)의 실값. 토큰 갱신·사용량 조회 간격은 hswap 이 맡는다.
   쓰기는 core 의 '이 계정 사용' 버튼이 부르는 `hswap claude switch <슬롯> --json` 하나다(자격 교체는 hswap 이 한다).
@@ -501,14 +501,14 @@ def _read(force, install):
 
 
 def merge_orca(mine, orca_rows):
-    """호환 경로: read() 의 계정 + Orca 에만 있는 관리 계정(같은 이메일의 다른 조직 포함)."""
-    seen = {(a["label"].lower(), a["org"]) for a in mine}
+    """두 경로의 공용 병합: read() 의 계정 + Orca 에만 있는 관리 계정(같은 이메일의 다른 조직 포함)."""
+    seen = {(a["label"].lower(), a.get("org")) for a in mine}
     emails = {a["label"].lower() for a in mine}
     # Orca 의 '시스템 기본 계정'은 hswap 의 사용 중 계정과 같은 로그인이다(hswap 에 사용 중 계정이 있을 때만 뺀다).
     # 조직을 모르는 Orca 줄(시스템 기본 계정이 조직 이름을 못 빌린 경우)은 같은 이메일이면 같은 로그인으로 본다
     extra = [a for a in orca_rows if (a["label"].lower(), a.get("org")) not in seen
              and not (a.get("org") is None and a["label"].lower() in emails)
-             and not (a["label"] == "시스템 기본 계정" and any(m["active"] for m in mine))]
+             and not (a["label"] == "시스템 기본 계정" and any(m.get("active") for m in mine))]
     return mine + extra
 
 
