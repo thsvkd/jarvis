@@ -385,9 +385,10 @@ def _relocate(dry_run):
         if not err and not (now and same(now["dir"], a)):
             err = "고친 서비스 등록이 app 을 가리키지 않습니다"
         if err:
-            # 등록이 이미 바뀌었을 수 있다(시간 초과·확인 실패). 등록과 로드된 설정이 모두 옛 폴더일 때만 app 을 지운다
+            # 등록이 이미 바뀌었을 수 있다(시간 초과 뒤 받아들여짐 등). 다시 읽은 등록과 서비스 관리자가 로드한 작업 폴더가
+            # 모두 옛 폴더임을 확인했을 때만 app 을 지운다. 확인하지 못하면(None·조회 실패) 남긴다
             back = registered()
-            if created and back and same(back["dir"], o) and not same(_loaded(back), a):
+            if created and back and same(back["dir"], o) and same(_loaded(back), o):
                 _discard(a)
             return done("failed", err)
         reg = now

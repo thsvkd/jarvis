@@ -33,7 +33,11 @@ if "daemon-reload" in sys.argv:
     unit = open(os.path.join(os.environ["HOME"], ".config/systemd/user/jarvis.service")).read()
     wd = [l.split("=", 1)[1] for l in unit.splitlines() if l.startswith("WorkingDirectory=")][0]
     put("systemd-wd", wd.replace("%h", os.environ["HOME"]))
+    if state("reload-times-out") is not None:  # systemd 는 받아들였지만 클라이언트는 시간 초과로 실패를 본다
+        sys.exit(1)
 elif "show" in sys.argv:
+    if state("show-fails") is not None:
+        sys.exit(1)
     print(state("systemd-wd") or "")
 ''',
     "powershell": r'''
@@ -295,6 +299,16 @@ class Linux(Base):
             p.kill()
             p.wait()
         self.assertEqual(relocate.run()["state"], "cleaned")
+
+    def test_an_accepted_reload_that_timed_out_and_cannot_be_checked_keeps_app(self):
+        """covers: RELOC-1"""
+        self.put("reload-times-out", "1")
+        self.put("show-fails", "1")
+        r = relocate.run()
+        self.assertEqual(r["state"], "failed", r)
+        self.assertEqual(self.read_unit(), self.UNIT)  # 파일은 되돌렸지만
+        self.assertTrue(os.path.isfile(os.path.join(self.app, "jarvis", "__init__.py")))  # systemd 가 쓸 수 있는 app 은 남긴다
+        self.assertTrue(os.path.isdir(self.old))
 
     def test_a_failed_daemon_reload_keeps_an_app_it_did_not_create(self):
         """covers: RELOC-1, RELOC-5"""
