@@ -194,6 +194,16 @@ assert.match(guide, /\/login/);
 assert.match(guide, /새 슬롯에 저장합니다/);
 assert.doesNotMatch(guide, /--slot/);
 guideDialog.close();
+// covers: USAGE-7. 자격 부재는 add 만으로 고칠 수 없다: 슬롯을 모르든, 기록이 다른 슬롯이든 /login 단계로 시작한다
+for (const other of [false, true]) {
+  claudeOf(devices[0]).login = { state: "failed", text: "자동 갱신 실패(자격 증명 없음)", note: null, attention: true, slot: null, other };
+  click({ guide: "first" });
+  guide = element("ulDlgB").innerHTML;
+  assert.match(guide, /^<div class="ul-login"><p>1\. [^<]*<code>claude<\/code>[^<]*<code>\/login<\/code>/, String(other));
+  assert.ok(guide.indexOf("/login") < guide.indexOf("<code>hswap claude add</code>"));
+  assert.doesNotMatch(guide, /--slot \d/);
+  guideDialog.close();
+}
 delete claudeOf(devices[0]).login;
 click({ prov: "all" });
 assert.equal(hotNow(), hotBase); // 상태가 없으면(keepalive 를 쓰지 않는 기기) 세지 않는다

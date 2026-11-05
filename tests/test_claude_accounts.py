@@ -439,6 +439,57 @@ class LoginStateTest(StoreCase):
             self.assertEqual((s["state"], s["attention"], s["slot"], s["note"], s["other"]), ("other_account", True, None, None, True), kw)
             self.assertEqual(s["text"], "자동 갱신 기록이 이전 계정의 것입니다")
 
+    def unknown_slot_records(self, **kw):
+        """activeSlot 이 없거나 슬롯 번호로 쓸 수 없는 기록들."""
+        base = {"schemaVersion": 1, "checkedAt": time.time() - 60, **kw}
+        yield "빠짐", base
+        for bad in (None, "1", True, 0, -1, 1.0):
+            yield repr(bad), {**base, "activeSlot": bad}
+
+    def test_missing_credential_with_identity_left_keeps_its_failure(self):
+        """covers: USAGE-7. 자격은 사라졌는데 .claude.json 에 신원이 남은 경우: 슬롯을 모르는 것이지 다른 계정이라는 증거가 아니다"""
+        self.store(time.time() - 60)
+        self.hswap(hswap_row())
+        for name, record in self.unknown_slot_records(ok=False, error={"type": "no_credentials", "message": "m"}):
+            self.write("cache/keepalive.json", record)
+            for got in (claude_accounts.login([{"active": True, "slot": "1"}], signed_in=True), claude_accounts.read()["login"]):
+                self.assertEqual((got["state"], got["text"], got["attention"], got["slot"], got["other"]),
+                                 ("failed", "자동 갱신 실패(자격 증명 없음)", True, None, False), name)
+
+    def test_unknown_slot_keeps_every_state_and_only_drops_the_slot(self):
+        """covers: USAGE-7"""
+        now = time.time()
+        for kw, want in (({"ok": False, "error": {"type": "relogin_required"}}, "relogin"),
+                         ({"ok": False, "error": {"type": "refresh_failed"}}, "failed"),
+                         ({"ok": False, "error": {"type": "keychain_unavailable"}}, "keychain"),
+                         ({"ok": True, "loginExpiresAt": iso(now + 86400)}, "expiring"),
+                         ({"ok": True, "checkedAt": now - 9 * 3600}, "stalled"),
+                         ({"ok": True}, "ok")):
+            for name, record in self.unknown_slot_records(**kw):
+                self.write("cache/keepalive.json", record)
+                s = claude_accounts.login([{"active": True, "slot": "1"}], signed_in=True)
+                self.assertEqual((s["state"], s["slot"], s["other"]), (want, None, False), (want, name))
+
+    def test_only_a_differing_slot_number_means_another_account(self):
+        """covers: USAGE-7"""
+        self.keepalive(activeSlot=2, ok=False, error={"type": "refresh_failed"})
+        self.assertEqual(claude_accounts.login([{"active": True, "slot": "1"}], signed_in=True)["state"], "other_account")
+        self.keepalive(activeSlot=1, ok=False, error={"type": "refresh_failed"})
+        s = claude_accounts.login([{"active": True, "slot": "1"}], signed_in=True)
+        self.assertEqual((s["state"], s["slot"], s["other"]), ("failed", "1", False))
+
+    def test_missing_credential_is_never_hidden_as_another_accounts_record(self):
+        """covers: USAGE-7. 자격 부재는 add 만으로 고칠 수 없다: 슬롯이 달라도 /login 안내로 이어질 상태를 지킨다"""
+        self.keepalive(activeSlot=2, ok=False, error={"type": "no_credentials", "message": "m"})
+        s = claude_accounts.login([{"active": True, "slot": "1"}], signed_in=True)
+        self.assertEqual((s["state"], s["text"], s["slot"], s["other"]), ("failed", "자동 갱신 실패(자격 증명 없음)", None, True))
+
+    def test_row_slot_is_kept_when_there_is_no_record_at_all(self):
+        """covers: USAGE-7. 파일이 없으면 슬롯을 흐리게 할 기록도 없다: 재로그인 판정의 사용 중 슬롯을 그대로 준다"""
+        relogin = claude_accounts.STATUS["relogin_required"][0]
+        s = claude_accounts.login([{"active": True, "slot": "3", "note": relogin}], signed_in=True)
+        self.assertEqual((s["state"], s["slot"], s["other"]), ("relogin", "3", False))
+
     def test_device_failures_stay_visible_over_another_accounts_record(self):
         """covers: USAGE-7. 키체인·멈춤은 계정이 아니라 기기의 문제다. 슬롯은 여전히 빼고 새 슬롯 안내를 쓴다"""
         for kw, want in (({"ok": False, "error": {"type": "keychain_unavailable"}}, "keychain"), ({"checkedAt": time.time() - 9 * 3600}, "stalled")):

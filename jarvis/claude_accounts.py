@@ -383,17 +383,19 @@ def login(rows=(), keychain=False, signed_in=False):
     순서: 사람이 다시 로그인해야 하는 것 > 키체인 > 만료 임박 > 멈춤 > 이전 계정의 기록 > 그 밖의 실패 > 정상.
     rows: 사용 중 계정의 재로그인 판정(저장소의 authDeadStrikes 와 hswap 의 relogin_required 가 같은 문구가 된다)과 사용 중 슬롯.
     keychain: hswap 의 keychainUnavailable. signed_in: 로그인을 읽었다(rows 에 active 가 없으면 저장되지 않은 로그인이다).
-    other: keepalive 기록이 지금 로그인의 것이 아니다. 만료·오류·접근 토큰은 그 계정의 사실이라 쓰지 않고, 키체인·멈춤은 기기의 사실이라 그대로 쓴다.
-    슬롯은 맞다고 확인될 때만 준다(다른 계정의 슬롯에 add 하면 저장 로그인을 덮을 수 있다)."""
+    other: keepalive 기록의 activeSlot 이 지금 로그인의 슬롯과 다르다고 확인됐다. 만료·오류·접근 토큰은 그 계정의 사실이라 쓰지 않고, 키체인·멈춤·자격 부재는 기기의 사실이라 그대로 쓴다.
+    activeSlot 이 없으면 슬롯을 모르는 것이지 다른 계정이라는 증거가 아니다: 판정은 그대로 두고 slot 만 뺀다.
+    슬롯은 맞다고 확인될 때만 준다(다른 계정의 슬롯에 add 하면 저장 로그인을 덮을 수 있다). 파일이 없으면 기록과 비교할 것이 없어 사용 중 슬롯을 준다."""
     k = _keepalive() or {}
     err = k.get("error") if isinstance(k.get("error"), dict) else {}
     kind = err.get("type") if isinstance(err.get("type"), str) else None
     relogin = STATUS["relogin_required"][0]
     now, checked, expires = time.time(), _sec(k.get("checkedAt")), _sec(k.get("loginExpiresAt"))
     current = next((a.get("slot") for a in rows if a.get("active") and a.get("slot")), None)
-    recorded = k.get("activeSlot") if isinstance(k.get("activeSlot"), int) and not isinstance(k.get("activeSlot"), bool) else None
+    recorded = k.get("activeSlot")
+    recorded = str(recorded) if isinstance(recorded, int) and not isinstance(recorded, bool) and recorded > 0 else None
     # 사용 중 슬롯을 모르고 저장되지 않은 로그인도 아니면 맞는지 알 수 없다: 경고는 남기고 슬롯만 권하지 않는다
-    other = bool(k) and bool(current or signed_in) and current != (None if recorded is None else str(recorded))
+    other = recorded is not None and bool(current or signed_in) and current != recorded
     if (kind == "relogin_required" and not other) or any(a.get("active") and relogin in (a.get("note"), a.get("error")) for a in rows):
         state, text = "relogin", "재로그인 필요"
     elif kind == "keychain_unavailable" or keychain:
@@ -404,14 +406,14 @@ def login(rows=(), keychain=False, signed_in=False):
         state, text = "expiring", f"로그인 만료 임박({_span(expires - now)})" if expires > now else "로그인 기한이 지났습니다"
     elif checked is None or now - checked > config.CLAUDE_KEEPALIVE_STALE_S:
         state, text = "stalled", "자동 갱신 멈춤" + (f"(마지막 {_span(now - checked)} 전)" if checked else "")
-    elif other:
+    elif other and kind != "no_credentials":  # 자격 부재는 add 로 고칠 수 없어 /login 안내로 이어지는 실패로 둔다
         state, text = "other_account", "자동 갱신 기록이 이전 계정의 것입니다"
     elif k.get("ok") is not True:
         state, text = "failed", f"자동 갱신 실패({KEEPALIVE_ERRORS.get(kind, '알 수 없는 오류')})"
     else:
         state, text = "ok", f"로그인됨, 자동 갱신 {_span(now - checked)} 전"
     access = None if other else _sec(k.get("accessExpiresAt"))
-    return {"state": state, "text": text, "attention": state != "ok", "slot": None if other else current, "other": other,
+    return {"state": state, "text": text, "attention": state != "ok", "slot": current if not k or current == recorded else None, "other": other,
             "note": None if access is None else f"접근 토큰 {_span(access - now)} 뒤 만료(자동 갱신)" if access > now else "접근 토큰 만료됨(자동 갱신 대기)"}
 
 
