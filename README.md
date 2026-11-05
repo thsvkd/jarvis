@@ -378,10 +378,12 @@ Get-Content -Encoding UTF8 $env:LOCALAPPDATA\jarvis\jarvis.log -Tail 20
 
   다음 기동이 60초 뒤 옛 폴더를 옮긴다. `install.sh` 를 다시 실행해도 같은 일을 한다.
 - Linux·Windows 는 재시작을 강제하지 않는다. 다음 기동부터 app 에서 뜬다.
+- 설치기를 다시 실행해도 옛 base 를 그대로 app 으로 옮긴다(새 릴리스를 app 에 풀지 않는다. 롤백 기준이 바뀌지 않게). 이전 코드는 임시 폴더에 받은 최신 릴리스의 것을 쓴다.
+- 한 번에 하나만 돈다(`~/.local/share/jarvis/.relocate.lock`). 다른 이전이 도는 중이면 `busy` 로 끝나고 아무것도 바꾸지 않는다.
 
 ```sh
 $PY -m jarvis relocate --dry-run      # 할 일만 본다
-$PY -m jarvis relocate --json         # 지금 한 번 돈다: {"state": noop|registered|pending_reload|cleaned|failed, "detail", "steps"}
+$PY -m jarvis relocate --json         # 지금 한 번 돈다: {"state": noop|busy|registered|pending_reload|cleaned|failed, "detail", "steps"}
 ```
 
 되돌리기: `workspace-old` 를 `~/Workspace/jarvis` 로 옮기고, `~/.local/share/jarvis/<파일 이름>.bak-relocate` 를 원래 자리(`~/Library/LaunchAgents/`·`~/.config/systemd/user/`)로 되돌린다(Linux 는 `systemctl --user daemon-reload`,
