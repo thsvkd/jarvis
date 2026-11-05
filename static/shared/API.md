@@ -289,7 +289,7 @@ Claude 프로바이더(`providers[]`)에 붙는 기기 단위 로그인 상태�
 ```js
 login: {
   state: "ok"|"expiring"|"relogin"|"keychain"|"stalled"|"other_account"|"failed",
-  text: "로그인됨, 자동 갱신 5분 전",            // 화면에 그대로 보이는 한 줄
+  text: "로그인됨, 자동 갱신 5분 전",            // 화면에 그대로 보이는 한 줄. 고정 문구와 시간만 쓴다(파일의 error.message 는 내보내지 않는다)
   note: "접근 토큰 3시간 뒤 만료(자동 갱신)",   // 없으면 null
   attention: bool,                            // ok 만 false. 화면의 '주의 필요' 수에 기기마다 하나로 센다
   slot: "2",                                  // 사용 중 슬롯. 재로그인 안내의 --slot 에 쓴다. 맞는다고 확인하지 못하면 null
@@ -297,7 +297,7 @@ login: {
 }
 ```
 
-여럿에 해당하면 위에서부터 고른다: `relogin`(keepalive `error.type` relogin_required, 또는 사용 중 계정이 재로그인 필요) · `keychain`(`error.type` keychain_unavailable, 또는 hswap 의 `keychainUnavailable`) · `expiring`(`loginExpiresAt` 3일 안이거나 지남) · `stalled`(`checkedAt` 이 없거나 `claude_keepalive_stale_s` 보다 오래됨) · `other_account`(`activeSlot` 이 지금 로그인의 슬롯과 다름) · `failed`(그 밖의 `ok:false`) · `ok`. `activeSlot` 이 지금 로그인과 다르면 `relogin`·`expiring`·`failed` 판정과 `note` 에 keepalive 값을 쓰지 않는다(`error.type` 이 relogin_required 여도 그렇다). 지금 로그인을 읽지 못하면 맞는지 알 수 없으므로 경고는 남기고 `slot` 만 null 이다. `cache/keepalive.json` 이 없거나 소유자·권한·크기·심볼릭 링크 검사를 통과하지 못하거나 모르는 `schemaVersion` 이면 파일이 없는 것으로 본다.
+여럿에 해당하면 위에서부터 고른다: `relogin`(keepalive `error.type` relogin_required, 또는 사용 중 계정이 재로그인 필요) · `keychain`(`error.type` keychain_unavailable, 또는 hswap 의 `keychainUnavailable`) · `expiring`(`loginExpiresAt` 3일 안이거나 지남) · `stalled`(`checkedAt` 이 없거나 `claude_keepalive_stale_s` 보다 오래됨) · `other_account`(`activeSlot` 이 지금 로그인의 슬롯과 다름) · `failed`(그 밖의 `ok:false`. `error.type` 을 고정 문구로 바꿔 보이고, 모르는 type 은 "알 수 없는 오류"다) · `ok`. `activeSlot` 이 지금 로그인과 다르면 `relogin`·`expiring`·`failed` 판정과 `note` 에 keepalive 값을 쓰지 않는다(`error.type` 이 relogin_required 여도 그렇다). 지금 로그인을 읽지 못하면 맞는지 알 수 없으므로 경고는 남기고 `slot` 만 null 이다. `cache/keepalive.json` 이 없거나 소유자·권한·크기·심볼릭 링크 검사를 통과하지 못하거나 모르는 `schemaVersion` 이면 파일이 없는 것으로 본다.
 
 ## 화면 URL 계약
 

@@ -29,7 +29,9 @@ from .util import Installer, org, parse_iso, scrub_home, which_local
 
 CONFIG_MAX = 32 << 20  # Claude Code 전역 설정은 프로젝트 기록이 쌓여 수 MB 까지 큰다
 KNOWN_BUCKETS = {"opus", "sonnet", "haiku"}  # 첫 단어가 이것인 이름만 그대로 내보낸다. 나머지는 번호로 적는다
-FAILED_KINDS = {"split_brain", "refresh_failed", "no_credentials", "locked", "unmanaged"}  # 화면에 그대로 적는 keepalive error.type
+# keepalive error.type → 화면 문구. 파일의 자유 문구(error.message)는 토큰·조직 UUID 가 들어 있어도 새지 않게 내보내지 않는다
+KEEPALIVE_ERRORS = {"keychain_unavailable": "키체인 접근 불가", "relogin_required": "재로그인 필요", "split_brain": "키체인과 파일의 로그인이 갈라짐",
+                    "refresh_failed": "토큰 갱신 실패", "no_credentials": "자격 증명 없음", "locked": "다른 프로세스가 잠금을 쥐고 있음", "unmanaged": "저장 슬롯에 없는 로그인"}
 LOGIN_WARN_S = 3 * 86400  # 로그인(갱신 토큰) 만료 3일 전부터 '주의 필요'. 새 /login 만이 기한을 늘린다
 CACHE_S = 30  # hswap 자체가 캐시하므로 짧게만 묶는다(요청마다 프로세스를 띄우지 않게)
 TIMEOUT_S = 15  # Orca 와 동시에 돈다. core 의 기기당 시간 제한(70초) 안에 들어와야 한다
@@ -405,10 +407,7 @@ def login(rows=(), keychain=False, signed_in=False):
     elif other:
         state, text = "other_account", "자동 갱신 기록이 이전 계정의 것입니다"
     elif k.get("ok") is not True:
-        # 파일에 담긴 글자는 데이터다: 짝 없는 서로게이트가 응답 인코딩을 깨지 않게 바꾼다
-        message = scrub_home(str(err.get("message") or "")).encode("utf-8", "replace").decode()[:200]
-        detail = ": ".join(x for x in (kind if kind in FAILED_KINDS else None, message) if x)
-        state, text = "failed", "자동 갱신 실패" + (f"({detail})" if detail else "")
+        state, text = "failed", f"자동 갱신 실패({KEEPALIVE_ERRORS.get(kind, '알 수 없는 오류')})"
     else:
         state, text = "ok", f"로그인됨, 자동 갱신 {_span(now - checked)} 전"
     access = None if other else _sec(k.get("accessExpiresAt"))

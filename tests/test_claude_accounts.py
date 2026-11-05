@@ -343,13 +343,21 @@ class LoginStateTest(StoreCase):
         self.keepalive(checkedAt="soon")
         self.assertEqual(claude_accounts.login()["state"], "stalled")
 
-    def test_failed_keeps_type_and_message_short(self):
+    def test_failed_shows_only_the_fixed_text_for_the_type(self):
+        """covers: USAGE-7. 파일의 자유 문구는 내보내지 않고, 허용 목록의 type 만 고정 문구로 바꾼다. 나머지는 알 수 없는 오류다"""
+        for kind, want in (("split_brain", "키체인과 파일의 로그인이 갈라짐"), ("refresh_failed", "토큰 갱신 실패"), ("no_credentials", "자격 증명 없음"),
+                           ("locked", "다른 프로세스가 잠금을 쥐고 있음"), ("unmanaged", "저장 슬롯에 없는 로그인"),
+                           ("something_new", "알 수 없는 오류"), (["list"], "알 수 없는 오류"), (None, "알 수 없는 오류")):
+            self.keepalive(ok=False, error={"type": kind, "message": "x" * 500})
+            s = claude_accounts.login()
+            self.assertEqual((s["state"], s["attention"], s["text"]), ("failed", True, f"자동 갱신 실패({want})"), kind)
+        self.keepalive(ok=False, error=None)
+        self.assertEqual(claude_accounts.login()["text"], "자동 갱신 실패(알 수 없는 오류)")
+
+    def test_every_allowed_type_has_a_fixed_text(self):
         """covers: USAGE-7"""
-        self.keepalive(ok=False, error={"type": "split_brain", "message": "x" * 500})
-        s = claude_accounts.login()
-        self.assertEqual((s["state"], s["attention"]), ("failed", True))
-        self.assertTrue(s["text"].startswith("자동 갱신 실패(split_brain: xxx"))
-        self.assertLess(len(s["text"]), 300)
+        self.assertEqual(set(claude_accounts.KEEPALIVE_ERRORS),
+                         {"keychain_unavailable", "relogin_required", "split_brain", "refresh_failed", "no_credentials", "locked", "unmanaged"})
 
     def test_unknown_when_the_file_is_missing(self):
         """covers: USAGE-7. keepalive 를 쓰지 않는 기기에는 경고하지 않는다"""
@@ -385,13 +393,41 @@ class LoginStateTest(StoreCase):
         self.assertEqual((s["state"], s["slot"], s["note"]), ("stalled", None, None))
         self.assertEqual(s["text"], "자동 갱신 멈춤")
 
-    def test_failure_text_is_safe_data(self):
-        """covers: USAGE-7. 모르는 종류는 적지 않고, 홈 경로를 가리며, 응답을 인코딩할 수 있다"""
-        self.write("cache/keepalive.json", json.dumps({"schemaVersion": 1, "checkedAt": time.time(), "ok": False,
-                                                       "error": {"type": "/home/alice/x", "message": "bad /home/alice/y \ud800"}}))
-        text = claude_accounts.login()["text"]
-        self.assertNotIn("alice", text)
-        text.encode("utf-8")
+    def test_file_text_never_reaches_any_response(self):
+        """covers: USAGE-7. 비밀처럼 보이는 문자열을 파일 곳곳과 hswap 의 usageError 에 넣어도 두 API 응답 어디에도 나오지 않는다"""
+        secrets = ("123e4567-e89b-12d3-a456-426614174000", "Authorization: Bearer abc.def", "sk-ant-oat01-SECRET", "/home/alice/.claude", "C:\\Users\\alice\\x", "\ud800")
+        leak = " ".join(secrets)
+        self.store(time.time() - 60)
+        kinds = ("split_brain", "refresh_failed", "no_credentials", "locked", "unmanaged", "relogin_required", "keychain_unavailable", leak)
+        for kind in kinds:
+            for slot in (1, 2):  # 지금 로그인의 기록과 이전 계정의 기록 모두
+                self.write("cache/keepalive.json", json.dumps({"schemaVersion": 1, "checkedAt": time.time(), "ok": False, "action": leak, "note": leak, "activeSlot": slot,
+                                                               "error": {"type": kind, "message": leak, "detail": leak}, "extra": leak}))
+                self.hswap(hswap_row(usageStatus="unavailable", usage=None, usageError=leak, lastGoodUsage={"sevenDay": {"pct": 1}}, lastGoodFetchedAt=iso(time.time() - 60)))
+                claude_accounts._cache = None
+                mine = claude_accounts.read(force=True)
+                claude_accounts._cache = None
+                theirs = self.compat_body()
+                for body in (mine, theirs):
+                    text = json.dumps(body, ensure_ascii=False)
+                    text.encode("utf-8")  # server.py 의 응답 인코딩이 깨지지 않는다
+                    for s in (*secrets[:-1], "alice", "SECRET", "Bearer"):
+                        self.assertNotIn(s, text, (kind, slot))
+                self.assertIn("사용량을 읽지 못했습니다.", mine["accounts"][0]["note"])
+
+    def compat_body(self):
+        with mock.patch.object(orca_usage, "_orca", return_value={"installed": False, "providers": []}), \
+                mock.patch.object(orca_usage.caam_usage, "read", return_value=None), \
+                mock.patch.object(orca_usage.cli_login, "available", return_value=[]), \
+                mock.patch.object(orca_usage.cli_login, "fresh", return_value=[]):
+            return orca_usage.read()[1]
+
+    def test_usage_error_only_passes_as_an_http_code(self):
+        """covers: USAGE-3, USAGE-7. hswap 의 usageError 는 http-NNN 꼴만 받는다"""
+        row = lambda err: hswap_row(usageStatus="unavailable", usage=None, usageError=err, lastGoodUsage={"sevenDay": {"pct": 1}}, lastGoodFetchedAt=iso(time.time() - 60))
+        self.assertIn("(http-429)", claude_accounts.account(row("http-429"))["note"])
+        for bad in ("http-429 Bearer abc", "Bearer abc", "http-999", "http-42", "\nhttp-429", ["http-429"], 429):
+            self.assertEqual(claude_accounts.account(row(bad))["note"], "사용량을 읽지 못했습니다.", bad)
 
     def test_record_of_another_account_says_only_that(self):
         """covers: USAGE-7. 전환 뒤에는 이전 슬롯의 만료·오류·접근 토큰을 붙이지 않고, 옛 슬롯을 덮어쓰게 안내하지 않는다"""
@@ -433,8 +469,7 @@ class LoginStateTest(StoreCase):
         self.store(time.time() - 60)
         self.keepalive(activeSlot=1, ok=False, error={"type": "refresh_failed", "message": "m"})
         s = claude_accounts.read()["login"]
-        self.assertEqual((s["state"], s["slot"], s["other"]), ("failed", "1", False))
-        self.assertIn("refresh_failed", s["text"])
+        self.assertEqual((s["state"], s["slot"], s["other"], s["text"]), ("failed", "1", False, "자동 갱신 실패(토큰 갱신 실패)"))
 
     def test_unknown_login_keeps_the_warning_without_a_slot(self):
         """covers: USAGE-7. 신원을 읽지 못하면(로그아웃 등) 맞는지 모른다: 경고는 남기고 슬롯은 권하지 않는다"""
