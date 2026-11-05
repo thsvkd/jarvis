@@ -296,7 +296,7 @@ login: {
 }
 ```
 
-여럿에 해당하면 위에서부터 고른다: `relogin`(keepalive `error.type` relogin_required, 또는 사용 중 계정이 재로그인 필요) · `keychain`(`error.type` keychain_unavailable, 또는 hswap 의 `keychainUnavailable`) · `expiring`(`loginExpiresAt` 3일 안) · `stalled`(`checkedAt` 이 `claude_keepalive_stale_s` 보다 오래됨) · `failed`(그 밖의 `ok:false`) · `ok`. `cache/keepalive.json` 이 없거나 소유자·권한·크기·심볼릭 링크 검사를 통과하지 못하거나 모르는 `schemaVersion` 이면 파일이 없는 것으로 본다.
+여럿에 해당하면 위에서부터 고른다: `relogin`(keepalive `error.type` relogin_required, 또는 사용 중 계정이 재로그인 필요) · `keychain`(`error.type` keychain_unavailable, 또는 hswap 의 `keychainUnavailable`) · `expiring`(`loginExpiresAt` 3일 안이거나 지남) · `stalled`(`checkedAt` 이 없거나 `claude_keepalive_stale_s` 보다 오래됨) · `failed`(그 밖의 `ok:false`) · `ok`. `cache/keepalive.json` 이 없거나 소유자·권한·크기·심볼릭 링크 검사를 통과하지 못하거나 모르는 `schemaVersion` 이면 파일이 없는 것으로 본다.
 
 ## 화면 URL 계약
 
