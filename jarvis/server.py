@@ -20,7 +20,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from . import __version__, cli_login, config, cswap_usage, fleet, independent_usage, modules_api, orca, orca_issue, orca_update, orca_usage, self_update
+from . import __version__, claude_accounts, cli_login, config, fleet, independent_usage, modules_api, orca, orca_issue, orca_update, orca_usage, self_update
 from .core import why
 from .util import client_kind
 
@@ -329,7 +329,7 @@ def make_handler(collector, core=None):
                     if path == "/api/orca/account":
                         if not self._trusted(config.CORE):
                             return self._json({"error": "core 로 지정한 기기만 부를 수 있습니다"}, head, 403)
-                        code, body = cswap_usage.switch((parse_qs(u.query).get("slot") or [""])[0])
+                        code, body = claude_accounts.switch((parse_qs(u.query).get("slot") or [""])[0])
                         return self._json(body, head, code)
                     if core and path.startswith("/api/devices/") and path.endswith("/account"):
                         dev = path.split("/")[3]

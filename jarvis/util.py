@@ -121,6 +121,12 @@ def docker_api(path, timeout=6):
         conn.close()
 
 
+def org(name, email):
+    """계정의 조직 이름. 개인 계정에 자동으로 붙는 '<이메일>'s Organization' 은 이메일과 같은 말이라 뺀다."""
+    name = name[:80] if isinstance(name, str) and name else None
+    return None if not name or (email and name == f"{email}'s Organization") else name
+
+
 def which_local(name):
     """PATH(서비스는 짧다) 다음에 사용자 도구의 기본 설치 위치 ~/.local/bin."""
     p = os.path.join(os.path.expanduser("~"), ".local", "bin", name + (".exe" if sys.platform == "win32" else ""))

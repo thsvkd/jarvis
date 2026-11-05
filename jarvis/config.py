@@ -93,6 +93,10 @@ PROXIES = env_list("PROXIES")
 PROXY_KEY = str(env("PROXY_KEY", ""))
 # Claude Code 가 있는 기기에서 hswap(harness-swap)이 없거나 고정 버전보다 낮으면 uv/pipx 로 고정 버전을 설치한다(AI 사용량의 Claude 계정별 값·계정 전환). false 로 끈다(키 이름은 호환을 위해 cswap_install 그대로)
 CSWAP_INSTALL = str(env("CSWAP_INSTALL", "true")).lower() not in ("0", "false", "no", "off")
+# Claude 사용량 저장소 값이 이보다 오래되면(초) hswap list 로 실값을 받고, 그래도 오래된 값에는 '주의 필요'를 붙인다
+CLAUDE_STALE_S = int(env("CLAUDE_STALE_S", 900))
+# hswap claude keepalive 의 마지막 확인이 이보다 오래되면(초) '자동 갱신 멈춤'으로 보인다
+CLAUDE_KEEPALIVE_STALE_S = int(env("CLAUDE_KEEPALIVE_STALE_S", 1200))
 # caam 이 없고 Codex CLI 가 있으면 고정 버전 릴리스(SHA256 확인)를 ~/.local/bin 에 둔다(AI 사용량의 Codex 계정별 값). false 로 끈다
 CAAM_INSTALL = str(env("CAAM_INSTALL", "true")).lower() not in ("0", "false", "no", "off")
 
@@ -138,7 +142,7 @@ ALLOW_NETS = ",".join(env_list("ALLOW", (
 _LIVE_KEYS = ("INGRESS_DIR", "CADDY_CONTAINER", "TUNNEL_CONTAINER", "TUNNEL_NAME", "DOMAIN",
               "CADDYFILE_CONTAINER_PATH", "HERMES_RE", "HERMES_URL",
               "EXTRA_HOSTS", "INFRA_UNITS", "WATCH_UNITS", "EXPECTED_SERVICES", "EXPECTED_UNITS", "CORE",
-              "VIEWERS", "PROXIES", "PROXY_KEY", "CSWAP_INSTALL", "CAAM_INSTALL")
+              "VIEWERS", "PROXIES", "PROXY_KEY", "CSWAP_INSTALL", "CAAM_INSTALL", "CLAUDE_STALE_S", "CLAUDE_KEEPALIVE_STALE_S")
 _RESTART_KEYS = ("BIND", "PORT", "ALLOW_NETS", "STATIC_DIR", "STATE_DIR", "DOCKER_SOCK", "USER_UID",
                  "SS_BIN", "PM2_BIN", "TAILSCALE_BIN", "DEVICES")
 CONFIG_RESTART_REQUIRED = []

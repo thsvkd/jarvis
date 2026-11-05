@@ -1,5 +1,5 @@
 """이 기기 Orca 가 아는 AI 구독 사용량(프로바이더 → 계정 → 한도 창). GET /api/orca/usage 로 core 에게만 준다.
-Claude 는 cswap(cswap_usage)이 있으면 그 계정 목록을 쓴다: Orca 는 cswap 이 바꿔 끼운 로그인을 '시스템 기본 계정' 하나로만 본다.
+Claude 는 hswap(claude_accounts)이 있으면 그 계정 목록을 쓴다: Orca 는 hswap 이 바꿔 끼운 로그인을 '시스템 기본 계정' 하나로만 본다.
 
 Orca 로컬 RPC accounts.list 의 rateLimits 를 그대로 정규화한다(사용량 조회·토큰 갱신은 Orca 가 한다).
 refreshUsage=true 는 계정마다 프로바이더 API 를 한 번씩 부르고 Orca 의 조회 간격·Retry-After 를 건너뛴다:
@@ -15,8 +15,8 @@ import re
 import threading
 import time
 
-from . import caam_usage, cli_login, cswap_usage, orca, orca_rpc
-from .util import scrub_home
+from . import caam_usage, claude_accounts, cli_login, cswap_usage, orca, orca_rpc  # noqa: F401 (cswap_usage: 호환 이름)
+from .util import org, scrub_home
 
 REFRESH_S = 300
 FORCE_S = 30
@@ -52,12 +52,6 @@ def _dict(v):
 
 def _list(v):
     return v if isinstance(v, list) else []
-
-
-def org(name, email):
-    """조직 이름. 개인 계정에 자동으로 붙는 '<이메일>'s Organization' 은 이메일과 같은 말이라 뺀다."""
-    name = _text(name, 80)
-    return None if not name or (email and name == f"{email}'s Organization") else name
 
 
 def _pct(v):
@@ -236,8 +230,8 @@ def read(force=False):
     셋은 동시에 읽는다(차례로 읽으면 강제 새로고침이 core 의 시간 제한을 넘을 수 있다)."""
     start = time.monotonic()
     box = {}
-    ts = [threading.Thread(target=lambda m=m, k=k: box.update({k: m.read(force)}), name="jarvis-" + k, daemon=True)
-          for k, m in (("cswap", cswap_usage), ("caam", caam_usage))]
+    ts = [threading.Thread(target=lambda f=f, k=k: box.update({k: f(force)}), name="jarvis-" + k, daemon=True)
+          for k, f in (("cswap", claude_accounts.live), ("caam", caam_usage.read))]
     for t in ts:
         t.start()
     body = _orca(force)
@@ -247,21 +241,15 @@ def read(force=False):
     cs = box.get("cswap") if not ts[0].is_alive() else {"error": "hswap 이 늦게 답합니다"}
     ca = box.get("caam") if not ts[1].is_alive() else {"error": "caam 이 늦게 답합니다"}
     if cs and cs.get("accounts"):
-        mine = [{**a, "org": org(a["org"], a["label"])} for a in cs["accounts"]]  # hswap 결과는 캐시라 고치지 않는다
-        seen = {(a["label"].lower(), a["org"]) for a in mine}
-        emails = {a["label"].lower() for a in mine}
         old = next((p for p in body["providers"] if p["id"] == "claude"), None)
-        # Orca 의 '시스템 기본 계정'은 hswap 의 사용 중 계정과 같은 로그인이다(hswap 에 사용 중 계정이 있을 때만 뺀다).
-        # Orca 에만 있는 관리 계정(같은 이메일의 다른 조직 포함)은 남긴다
-        # 조직을 모르는 Orca 줄(시스템 기본 계정이 조직 이름을 못 빌린 경우)은 같은 이메일이면 같은 로그인으로 본다
-        extra = [a for a in (old or {}).get("accounts", []) if (a["label"].lower(), a.get("org")) not in seen
-                 and not (a.get("org") is None and a["label"].lower() in emails)
-                 and not (a["label"] == "시스템 기본 계정" and any(m["active"] for m in mine))]
-        body["providers"] = [{"id": "claude", "name": "Claude", "accounts": mine + extra}] + \
+        body["providers"] = [{"id": "claude", "name": "Claude", "accounts": claude_accounts.merge_orca(cs["accounts"], (old or {}).get("accounts", []))}] + \
             [p for p in body["providers"] if p["id"] != "claude"]
         body.setdefault("fetched_at", cs["fetched_at"])  # Orca 를 못 읽은 기기도 수집 시각이 보이게
     elif cs:
         body["cswap_error"] = cs["error"]
+    # 독립 경로와 같은 기기 로그인 상태. Orca 의 프로바이더는 보관값과 함께 쓰는 dict 라 새로 만든다
+    if login := claude_accounts.login((cs or {}).get("accounts") or [], (cs or {}).get("keychainUnavailable") is True):
+        body["providers"] = [{**p, "login": login} if p["id"] == "claude" else p for p in body["providers"]]
     if ca and ca.get("accounts"):
         _codex(body, ca)
         body.setdefault("fetched_at", ca["fetched_at"])

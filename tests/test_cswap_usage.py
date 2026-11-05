@@ -124,6 +124,7 @@ class MergeTest(unittest.TestCase):
         with mock.patch.object(orca_usage, "_orca", return_value=orca_body), \
                 mock.patch.object(orca_usage.cswap_usage, "read", return_value=cs), \
                 mock.patch.object(orca_usage.caam_usage, "read", return_value=ca), \
+                mock.patch.object(orca_usage.claude_accounts, "_keepalive", return_value=None), \
                 mock.patch.object(orca_usage.cli_login, "fresh", return_value=[]):  # 자격 확인은 실제 홈을 읽는다
             return orca_usage.read()[1]
 

@@ -5,7 +5,8 @@ import sys
 import threading
 import time
 
-from . import antigravity_usage, caam_usage, cli_login, codex_native_usage, cswap_cached_usage, cswap_usage, gemini_usage, kimi_usage, minimax_usage, opencode_usage, orca_usage, provider_usage, zcode_usage
+from . import antigravity_usage, caam_usage, claude_accounts, cli_login, codex_native_usage, gemini_usage, kimi_usage, minimax_usage, opencode_usage, orca_usage, provider_usage, zcode_usage
+from . import cswap_cached_usage, cswap_usage  # noqa: F401 (호환 이름)
 from .util import which_local
 
 _pool = ThreadPoolExecutor(max_workers=5, thread_name_prefix="jarvis-usage")
@@ -44,7 +45,7 @@ def _codex():
 
 
 def _claude(force):
-    return cswap_cached_usage.read()
+    return claude_accounts.read(force)
 
 
 def _orca(force):
@@ -77,7 +78,7 @@ def read(force=False):
     with _lock:
         for name, job in jobs.items():
             previous = _tasks.get(name)
-            # Claude 는 로컬 파일만 읽어(수 ms) 묶지 않는다. 묶으면 계정 전환 직후에도 이전 '사용 중'을 30초 동안 보인다
+            # Claude 는 claude_accounts 가 hswap 을 부를 때를 정하므로 여기서 묶지 않는다. 묶으면 계정 전환 직후에도 이전 '사용 중'을 보인다
             ttl = 0 if name == "claude" else 120
             if previous is None or (previous[1].done() and (force or now - previous[0] >= ttl)):
                 previous = _tasks[name] = (now, _pool.submit(job))
@@ -93,12 +94,13 @@ def read(force=False):
         extra = {}
     providers, unavailable = [], []
     for name, future in selected.items():
-        accounts, failed = [], True
+        accounts, failed, login = [], True, None
         try:
             value = future.result(0) if future.done() else None
             if name == "claude":
                 accounts = value.get("accounts", []) if isinstance(value, dict) else []
                 failed = not isinstance(value, dict) or bool(value.get("error"))
+                login = value.get("login") if isinstance(value, dict) else None
             elif name in ("opencodeGo", "antigravity", "kimi", "zcode", "gemini", "minimax"):
                 accounts = value.get("accounts", []) if isinstance(value, dict) else []
                 failed = not isinstance(value, dict) or value.get("status") != "ok"
@@ -112,7 +114,7 @@ def read(force=False):
         if failed and not extra.get(name) or not accounts:
             unavailable.append(name)
         if accounts:
-            providers.append({"id": name, "name": _names[name], "accounts": accounts})
+            providers.append({"id": name, "name": _names[name], "accounts": accounts, **({"login": login} if login else {})})
     # Orca 경로와 같은 후속 처리: Grok 토큰 위임 갱신(grok CLI), 화면의 '다시 로그인' 버튼을 낼 CLI 목록
     if any(a.get("failure") == "delegated-refresh-required" for p in providers if p["id"] == "grok" for a in p["accounts"]):
         cli_login.refresh_grok()
@@ -123,6 +125,6 @@ def read(force=False):
     if fresh_logins := cli_login.fresh():
         body["fresh_logins"] = fresh_logins
     # 기기 행에 보일 hswap 버전(게이트웨이가 확인해 둔 값만 쓴다. 여기서 실행·설치하지 않는다)
-    if hswap := cswap_usage.status():
+    if hswap := claude_accounts.status():
         body["hswap"] = hswap
     return body
