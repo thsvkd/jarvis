@@ -20,6 +20,7 @@
 | `GET /api/devices/<id>/orca/update` | core 전용. 업데이트 확인: 그 게이트웨이 `GET /api/orca/update` 로 전달. 옛 게이트웨이(404)는 501 `{error}`(갱신 필요) | `viewers`. 캐시 없음 |
 | `POST /api/devices/<id>/orca/update` | core 전용. 그 기기 Orca 업데이트. 게이트웨이 `POST /api/orca/update` 로 전달 | `viewers`. 헤더 `X-Jarvis-Action: orca-update` 필수 |
 | `POST /api/devices/orca/update` | core 전용. 목록의 기기마다 업데이트를 시작한다. `{devices:[{id, status, ...}]}`. 한 대 실패가 나머지를 멈추지 않는다 | `viewers`. 헤더 `X-Jarvis-Action: orca-update` 필수 |
+| `GET /api/usage/independent` | 이 기기 AI 구독 사용량 `{mode: "independent", providers: [{id, name, accounts, login}], unavailable, fetched_at}`. `login` 은 Claude 프로바이더에만 붙는다(아래 "사용량의 login"). 호환 경로 `GET /api/orca/usage` 도 같은 값을 붙인다 | 설정 `core`. core 는 `GET /api/devices/usage?independent=1` 로 모은다 |
 | `GET /api/changes` | 최근 구성 변경 최대 200건 `{changes:[...]}` | 10초. 30초마다 저장 및 종료 시 저장 |
 
 SSH 기기(`url` 이 `ssh://…`, `docs/SPEC.md` 의 "SSH 기기"): 모듈(`/api/devices/modules`·`plan`·`apply`)과 jarvis 업데이트는 HTTP 기기와 같은 응답 모양이다. 그 밖의 기기 조작(페어링·`orca/issue`·Orca 업데이트 확인·실행·사용량·로그인·계정 전환)은 ssh 를 실행하지 않고 501 `{error}`(페어링은 `{supported:false, error}`)다. 스냅샷 판이 1.7.8 미만이면 조작이 501, 스냅샷이 없거나 ssh·원격 실행이 실패하면 502, 그 기기에서 core 가 시작한 apply·갱신이 진행 중이면 409 다. history·changes 는 기기마다 동시에 4개까지이고 넘치면 502 다.
@@ -280,6 +281,22 @@ edges: [{from, to, kind, label}]
 갱신하지 않으므로 오프라인 피어에만 의미가 있다.
 `service_ids` 로 `services[]` 와 이어진다(인스펙터·홈 딥링크용). 같은 CurAddr IP 를 쓰는 tailnet 노드는 먼저 생긴 노드 안에 들어간다
 (예: 서버 안의 Tailscale 사이드카 컨테이너).
+
+## 사용량의 login
+
+Claude 프로바이더(`providers[]`)에 붙는 기기 단위 로그인 상태다. 계정 행이 아니라 그 기기의 상태이며, 알릴 것이 없으면 키가 없다.
+
+```js
+login: {
+  state: "ok"|"expiring"|"relogin"|"keychain"|"stalled"|"failed",
+  text: "로그인됨, 자동 갱신 5분 전",            // 화면에 그대로 보이는 한 줄
+  note: "접근 토큰 3시간 뒤 만료(자동 갱신)",   // 없으면 null
+  attention: bool,                            // ok 만 false. 화면의 '주의 필요' 수에 기기마다 하나로 센다
+  slot: "2"                                   // 사용 중 슬롯. 재로그인 안내의 --slot 에 쓴다. 모르면 null
+}
+```
+
+여럿에 해당하면 위에서부터 고른다: `relogin`(keepalive `error.type` relogin_required, 또는 사용 중 계정이 재로그인 필요) · `keychain`(`error.type` keychain_unavailable, 또는 hswap 의 `keychainUnavailable`) · `expiring`(`loginExpiresAt` 3일 안) · `stalled`(`checkedAt` 이 `claude_keepalive_stale_s` 보다 오래됨) · `failed`(그 밖의 `ok:false`) · `ok`. `cache/keepalive.json` 이 없거나 소유자·권한·크기·심볼릭 링크 검사를 통과하지 못하거나 모르는 `schemaVersion` 이면 파일이 없는 것으로 본다.
 
 ## 화면 URL 계약
 
