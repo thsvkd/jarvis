@@ -201,6 +201,27 @@ class Mac(Base):
             self.assertEqual(self.calls(), [])
         self.assertEqual(relocate.run()["state"], "pending_reload")  # 풀리면 돈다
 
+    def case_alias(self):
+        alias = os.path.join(os.path.dirname(self.old), "JARVIS")
+        if not os.path.exists(alias):
+            self.skipTest("대소문자를 구분하는 파일시스템")
+        return alias
+
+    def test_paths_that_differ_only_in_case_are_the_same(self):
+        """covers: RELOC-1"""
+        alias = self.case_alias()
+        self.assertTrue(relocate.same(alias, self.old))
+        self.assertTrue(relocate.under(os.path.join(alias, "jarvis"), self.old))
+
+    def test_a_registration_spelled_in_another_case_is_relocated(self):
+        """covers: RELOC-1"""
+        data = self.plist()
+        data["WorkingDirectory"] = self.case_alias()
+        with open(self.agent, "wb") as f:
+            plistlib.dump(data, f)
+        self.assertEqual(relocate.run()["state"], "pending_reload")
+        self.assertTrue(relocate.same(self.plist()["WorkingDirectory"], self.app))
+
     def test_dry_run_changes_nothing(self):
         """covers: RELOC-6"""
         r = relocate.run(dry_run=True)
@@ -471,6 +492,24 @@ class DevCheckout(Base):
                     self.assertEqual(self.calls(), [])
                     self.assertEqual(self.snapshot(), before)
                     self.assertFalse(os.path.exists(self.root))
+
+
+class Paths(Base):
+    def test_symlinked_home_is_the_same_folder(self):
+        """covers: RELOC-1"""
+        alias = os.path.join(self.link, "Workspace", "jarvis")
+        self.assertTrue(relocate.same(alias, self.old))
+        self.assertTrue(relocate.under(os.path.join(alias, "jarvis", "x.py"), self.old))
+        self.assertTrue(relocate.under(os.path.join(alias, "nope", "x.py"), self.old))  # 없는 경로도 조상으로 본다
+        self.assertFalse(relocate.under(self.old + "-dev", self.old))
+        self.assertFalse(relocate.same(None, self.old))
+
+    def test_the_installer_shell_waiting_in_the_old_folder_is_not_a_user(self):
+        """covers: RELOC-7"""
+        code = f"import sys; sys.path.insert(0, {ROOT!r}); from jarvis import relocate; print(relocate._users({self.old!r}))"
+        out = subprocess.run(["sh", "-c", 'cd "$1"; "$2" -c "$3"; true', "sh", self.old, sys.executable, code],
+                             capture_output=True, text=True, timeout=60)
+        self.assertEqual(out.stdout.strip(), "[]", out.stderr)
 
 
 class Entry(unittest.TestCase):

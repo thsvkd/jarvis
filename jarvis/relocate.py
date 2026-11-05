@@ -61,13 +61,26 @@ def _key(p):
 
 
 def same(a, b):
-    """같은 폴더인가. $HOME 이 심링크로 다른 이름일 수 있어(/home/x = /Users/x) 문자열이 아니라 실제 경로로 비교한다."""
-    return bool(a) and bool(b) and _key(a) == _key(b)
+    """같은 폴더인가. $HOME 이 심링크(/home/x = /Users/x)이거나 대소문자만 다른 이름(macOS)일 수 있어 문자열로 비교하지 않는다.
+    둘 다 있으면 파일시스템 정체(samefile), 아니면 실제 경로로 본다."""
+    if not a or not b:
+        return False
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return _key(a) == _key(b)
 
 
 def under(p, d):
-    p, d = _key(p), _key(d)
-    return p == d or p.startswith(d.rstrip(os.sep) + os.sep)
+    """p 가 d 이거나 d 아래인가. p 의 조상을 거슬러 올라가며 same 으로 본다."""
+    p = os.path.abspath(p)
+    while True:
+        if same(p, d):
+            return True
+        up = os.path.dirname(p)
+        if up == p:
+            return False
+        p = up
 
 
 def _code(d):
@@ -245,10 +258,12 @@ def _users(d):
         import psutil
     except ImportError:
         return ["?"]
+    # 자신과 조상(이 이전을 기다리는 설치기 셸·서비스 관리자)은 뺀다. 옛 폴더가 옮겨져도 이름만 바뀔 뿐이다
+    mine = {os.getpid()} | {q.pid for q in psutil.Process().parents()}
     found = []
     for p in psutil.process_iter(["pid", "cwd", "cmdline"]):
         paths = [p.info.get("cwd")] + [a for a in p.info.get("cmdline") or [] if os.path.isabs(a)]
-        if p.info["pid"] != os.getpid() and any(x and under(x, d) for x in paths):
+        if p.info["pid"] not in mine and any(x and under(x, d) for x in paths):
             found.append(p.info["pid"])
     return found
 
