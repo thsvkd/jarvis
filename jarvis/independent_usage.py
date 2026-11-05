@@ -113,7 +113,7 @@ def read(force=False):
             accounts = _merge(accounts, extra[name])
         if failed and not extra.get(name) or not accounts:
             unavailable.append(name)
-        if accounts:
+        if accounts or login:  # 계정이 없어도 기기 로그인 상태의 경고·복구 안내를 보일 칸은 남긴다
             providers.append({"id": name, "name": _names[name], "accounts": accounts, **({"login": login} if login else {})})
     # Orca 경로와 같은 후속 처리: Grok 토큰 위임 갱신(grok CLI), 화면의 '다시 로그인' 버튼을 낼 CLI 목록
     if any(a.get("failure") == "delegated-refresh-required" for p in providers if p["id"] == "grok" for a in p["accounts"]):

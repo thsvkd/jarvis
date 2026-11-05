@@ -268,8 +268,9 @@ def live(force=False, install=True):
         try:
             body = _json(exe, "list")
             accounts = [account(r) for r in body.get("accounts") or [] if isinstance(r, dict)]
-            out = {"accounts": accounts, "fetched_at": time.time()} if accounts else None
-            if out and body.get("keychainUnavailable") is True:
+            keychain = body.get("keychainUnavailable") is True  # 계정이 없어도 기기 상태로 보인다
+            out = {"accounts": accounts, "fetched_at": time.time()} if accounts or keychain else None
+            if keychain:
                 out["keychainUnavailable"] = True
         except Exception as e:
             out = {"error": scrub_home(str(e))[:200] or type(e).__name__}
@@ -441,7 +442,8 @@ def _aged(a, why=None):
 
 
 def read(force=False):
-    """독립 경로(화면). None(저장소도 실값도 없음) 또는 {"error": "..."} 또는 {"accounts": [...], "login": {...}}(login 은 알릴 것이 있을 때만).
+    """독립 경로(화면). None(저장소도 실값도 없고 알릴 것도 없음) 또는 {"error": "..."} 또는 {"accounts": [...], "login": {...}}.
+    login 은 알릴 것이 있을 때만이며 계정 목록과 상관없다: 계정이 없어도 {"accounts": [], "login": {...}}(hswap 오류가 있으면 error 도)를 준다.
     force 이거나, hswap 에 물은 지 신선도 기준이 지났거나, 보일 실값 중 기준보다 오래된 것이 있으면 hswap list 를 실행한다
     (저장소에는 로그인 기한·상태가 없어 만료 경고는 실값에서만 나온다. 예약 실행이 저장소를 늘 새로 써도 경고가 사라지지 않게 한다).
     그 사이에는 마지막 실값을 그대로 준다. 오래된 저장소 값은 실값이 없을 때만 보이므로 따로 보지 않는다. hswap 이 없거나 실패하면 저장소 값을 대체값으로 쓰고 이유를 붙인다. hswap 을 설치하지 않는다(USAGE-3)."""
@@ -450,9 +452,10 @@ def read(force=False):
     recent = held[1] if held and time.monotonic() - held[0] < config.CLAUDE_STALE_S else None
     recent = recent if recent and recent.get("accounts") else None
     if store is None and recent is None and not force:
-        return None
-    asked = force or recent is None or any(_old(a) for a in recent["accounts"])
-    out = live(force, install=False) if asked else recent
+        out = None
+    else:
+        asked = force or recent is None or any(_old(a) for a in recent["accounts"])
+        out = live(force, install=False) if asked else recent
     rows = (out or {}).get("accounts")
     if rows:
         rows = [{**a, "org": org(a.get("org"), a.get("label"))} for a in _mark_current(rows, store)]
@@ -462,7 +465,8 @@ def read(force=False):
         reason = (out or {}).get("error") or ("hswap 이 없습니다" if not binary() else "hswap 이 계정을 주지 않았습니다")
         why = reason.rstrip(".") + ". 저장된 값을 보입니다."
     else:
-        return out
+        state = login((), (out or {}).get("keychainUnavailable") is True)
+        return {**(out or {}), "accounts": [], "login": state} if state else out
     state = login(rows, (out or {}).get("keychainUnavailable") is True, bool(store and store.get("signed_in")))
     result = {"accounts": [_aged(a, why) for a in rows]}
     return {**result, "login": state} if state else result

@@ -245,7 +245,7 @@ def read(force=False):
         body["providers"] = [{"id": "claude", "name": "Claude", "accounts": claude_accounts.merge_orca(cs["accounts"], (old or {}).get("accounts", []))}] + \
             [p for p in body["providers"] if p["id"] != "claude"]
         body.setdefault("fetched_at", cs["fetched_at"])  # Orca 를 못 읽은 기기도 수집 시각이 보이게
-    elif cs:
+    elif cs and cs.get("error"):
         body["cswap_error"] = cs["error"]
     # 독립 경로와 같은 기기 로그인 상태. Orca 의 프로바이더는 보관값과 함께 쓰는 dict 라 새로 만든다
     claude = next((p for p in body["providers"] if p["id"] == "claude"), None)

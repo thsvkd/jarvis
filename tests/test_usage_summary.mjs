@@ -198,6 +198,31 @@ delete claudeOf(devices[0]).login;
 click({ prov: "all" });
 assert.equal(hotNow(), hotBase); // 상태가 없으면(keepalive 를 쓰지 않는 기기) 세지 않는다
 
+// covers: USAGE-7. 계정이 하나도 없어도 로그인 상태가 있으면 Claude 칸에 그리고, 세고, 안내한다
+{
+  const noAccounts = { id: "claude", name: "Claude", accounts: [], login: { state: "relogin", text: "재로그인 필요", note: null, attention: true, slot: null, other: false } };
+  devices[2].providers.push(noAccounts);
+  const before = hotBase + 1;
+  click({ prov: "all" });
+  assert.equal(hotNow(), before);
+  const cellOf = () => rendered().match(/<tr aria-busy="false"><th scope="row"><b>empty<\/b>[\s\S]*?<\/tr>/)?.[0] || "";
+  assert.match(cellOf(), /<td data-label="Claude" class="ul-full"><p class="ul-err">재로그인 필요<\/p><button type="button" class="seg-action" data-guide="empty">다시 로그인 방법<\/button>/);
+  click({ guide: "empty" });
+  assert.match(element("ulDlgB").innerHTML, /\/login/);
+  element("ulDlg").close();
+  click({}, "ulHot"); // 주의 필터 중에도 그 기기와 칸이 남는다
+  assert.match(cellOf(), /data-guide="empty"/);
+  click({}, "ulHot");
+  // Claude 필터에서는 정상 상태만 있어도 행이 남는다(계정이 없어 숨으면 상태를 볼 곳이 없다)
+  noAccounts.login = { state: "ok", text: "로그인됨, 자동 갱신 5분 전", note: null, attention: false, slot: null, other: false };
+  click({ prov: "claude" });
+  assert.match(cellOf(), /<p class="ul-age">로그인됨, 자동 갱신 5분 전<\/p>/);
+  assert.equal(hotNow() < before, true);
+  click({ prov: "all" });
+  devices[2].providers.pop();
+  click({ prov: "all" });
+}
+
 // 탭과 섹션은 사용량 모으기(기기마다 프로바이더를 불러 수십 초)를 기다리지 않고 core 확인(/api/devices)만으로 뜬다.
 // 셸이 core 로 기억한 탭이면(지도에서 넘어올 때) 어떤 응답보다 먼저 섹션을 연다
 for (const cached of [false, true]) {

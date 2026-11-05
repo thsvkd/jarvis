@@ -284,7 +284,7 @@ edges: [{from, to, kind, label}]
 
 ## 사용량의 login
 
-Claude 프로바이더(`providers[]`)에 붙는 기기 단위 로그인 상태다. 계정 행이 아니라 그 기기의 상태이며, 알릴 것이 없으면 키가 없다.
+Claude 프로바이더(`providers[]`)에 붙는 기기 단위 로그인 상태다. 계정 행이 아니라 그 기기의 상태이며, 알릴 것이 없으면 키가 없다. 계정이 하나도 없어도 알릴 것이 있으면 `{id: "claude", accounts: [], login}` 으로 프로바이더가 남는다.
 
 ```js
 login: {

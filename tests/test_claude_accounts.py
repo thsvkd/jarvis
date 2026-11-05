@@ -436,6 +436,60 @@ class LoginStateTest(StoreCase):
         self.assertNotIn("error", claude["login"])
 
 
+class NoAccountsTest(StoreCase):
+    """기기 로그인 상태는 계정 목록과 상관없이 보인다."""
+
+    def test_login_survives_without_any_account(self):
+        """covers: USAGE-7"""
+        for kind, want in (("no_credentials", "failed"), ("relogin_required", "relogin")):
+            self.keepalive(ok=False, activeSlot=None, error={"type": kind, "message": "m"})
+            for force in (False, True):
+                out = claude_accounts.read(force=force)
+                self.assertEqual((out["accounts"], out["login"]["state"], out["login"]["attention"]), ([], want, True), (kind, force))
+                self.assertNotIn("error", out)
+
+    def test_hswap_error_and_login_are_both_kept(self):
+        """covers: USAGE-7"""
+        self.hswap().side_effect = RuntimeError("locked")
+        self.keepalive(ok=False, error={"type": "relogin_required"})
+        out = claude_accounts.read(force=True)
+        self.assertEqual((out["accounts"], out["error"], out["login"]["state"]), ([], "locked", "relogin"))
+
+    def test_no_accounts_with_unreachable_keychain_is_reported(self):
+        """covers: USAGE-7"""
+        self.hswap(keychainUnavailable=True)
+        out = claude_accounts.read(force=True)
+        self.assertEqual((out["accounts"], out["login"]["state"]), ([], "keychain"))
+
+    def test_nothing_to_say_stays_none(self):
+        """covers: USAGE-7"""
+        self.assertIsNone(claude_accounts.read())
+        self.keepalive()
+        self.assertEqual(claude_accounts.read(), {"accounts": [], "login": claude_accounts.login()})
+
+    def test_independent_keeps_the_provider_for_login(self):
+        """covers: USAGE-7. 계정이 없어 확인 불가로 남더라도 칸은 남아 복구 안내를 보인다"""
+        self.keepalive(ok=False, error={"type": "no_credentials", "message": "m"})
+        empty = {"status": "unavailable", "accounts": []}
+        with mock.patch.object(independent_usage, "_caam", side_effect=RuntimeError("없음")), \
+                mock.patch.object(independent_usage, "_opencode", return_value=empty), \
+                mock.patch.object(independent_usage.codex_native_usage, "read", return_value=[]), \
+                mock.patch.object(independent_usage.antigravity_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.kimi_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.zcode_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.gemini_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.minimax_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.orca_usage, "_orca", return_value={"providers": []}), \
+                mock.patch.object(independent_usage.cli_login, "available", return_value=[]), \
+                mock.patch.object(independent_usage.cli_login, "fresh", return_value=[]):
+            independent_usage._tasks.clear()
+            self.addCleanup(independent_usage._tasks.clear)
+            body = independent_usage.read()
+        claude = next(p for p in body["providers"] if p["id"] == "claude")
+        self.assertEqual((claude["accounts"], claude["login"]["state"]), ([], "failed"))
+        self.assertIn("claude", body["unavailable"])
+
+
 class AliasTest(unittest.TestCase):
     def test_old_names_read_and_patch_the_new_module(self):
         """covers: USAGE-6. 옛 이름으로 바꿔 끼운 값이 새 모듈에 그대로 닿고, 끝나면 되돌아간다"""

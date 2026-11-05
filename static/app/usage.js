@@ -47,6 +47,7 @@
  const peak=a=>{const v=[...a.windows,...a.buckets].map(cur).filter(u=>u!=null);return isErr(a)||!v.length?null:Math.max(...v);};
  const isHot=a=>isErr(a)||a.attention===true||(peak(a)??0)>=75; // attention: 재로그인 등 사람이 손봐야 다시 읽힌다
  const loginHot=p=>!!(p.login&&p.login.attention); // 기기 단위 로그인 상태(Claude). 계정이 아니라 기기마다 센다
+ const loginShown=p=>S.hot?loginHot(p):!!p.login; // 계정이 하나도 없어도 칸에 보인다
  // 같은 구독 계정(이메일·조직)은 어느 기기에서 보든 한도가 같다. 이메일이 없는 '기본 계정'은 기기마다 따로 센다.
  const keyOf=(d,p,a,index)=>p.id+":"+(a.label.includes("@")?a.label.toLowerCase()+"\n"+(a.org||""):d.id+":"+index);
  // 여러 기기에 같은 계정이 있으면 사용량을 읽은 쪽, 그중 최근 것을 쓴다(사용 중이 아닌 기기는 아직 안 읽었을 수 있다)
@@ -73,7 +74,7 @@
  const fresh=d=>d.status===200?(d.fresh_logins||[]).filter(id=>!(d.providers||[]).some(p=>p.id===id)):[];
  const filtering=()=>S.prov!=="all"||S.hot;
  // 필터 중에는 사용량을 못 읽은 기기도 '전체'일 때만 보인다(어느 프로바이더인지 모른다)
- const visible=d=>!S.hot&&fresh(d).includes(S.prov)||(ok(d)?(!filtering()||provs(d).some(p=>shown(d,p).length||loginHot(p))):S.prov==="all");
+ const visible=d=>!S.hot&&fresh(d).includes(S.prov)||(ok(d)?(!filtering()||provs(d).some(p=>shown(d,p).length||loginShown(p))):S.prov==="all");
   function uniq(filterHot=true){
   const m=new Map();
   for(const d of S.devs)for(const p of provs(d))for(const [i,a] of p.accounts.entries()){
@@ -145,7 +146,7 @@
   const rows=S.devs.filter(visible),cols=columns(S.hot).filter(c=>S.prov==="all"||c.id===S.prov);
   if(!rows.length)return html`${kpi}${soon}<div class="tile ul-none"><p>${filtering()?"조건에 맞는 계정이 없습니다.":"사용량을 보여 줄 기기가 없습니다."}</p>${filtering()?html`<button type="button" class="seg-action" data-clear>필터 해제</button>`:""}</div>`;
   const cell=(d,c)=>{
-   const p=provs(d).find(p=>p.id===c.id),list=p?shown(d,p):[],L=p&&(!S.hot||loginHot(p))?loginLine(d,p):"";
+   const p=provs(d).find(p=>p.id===c.id),list=p?shown(d,p):[],L=p&&loginShown(p)?loginLine(d,p):"";
    if(!list.length&&fresh(d).includes(c.id))return html`<td data-label="${c.name}" class="ul-full"><div class="ul-acct"><p class="ul-muted">로그인하지 않았습니다.</p>${relog(d,c.id,false)}</div></td>`;
    if(!list.length)return L?html`<td data-label="${c.name}" class="ul-full">${L}</td>`:html`<td data-label="${c.name}" class="ul-nil">–</td>`;
    if(S.mode==="full")return html`<td data-label="${c.name}" class="ul-full">${L}${list.map(a=>acct(a,d,p))}</td>`;
