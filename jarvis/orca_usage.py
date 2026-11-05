@@ -248,8 +248,9 @@ def read(force=False):
     elif cs:
         body["cswap_error"] = cs["error"]
     # 독립 경로와 같은 기기 로그인 상태. Orca 의 프로바이더는 보관값과 함께 쓰는 dict 라 새로 만든다
-    if login := claude_accounts.login((cs or {}).get("accounts") or [], (cs or {}).get("keychainUnavailable") is True):
-        body["providers"] = [{**p, "login": login} if p["id"] == "claude" else p for p in body["providers"]]
+    claude = next((p for p in body["providers"] if p["id"] == "claude"), None)
+    if claude and (login := claude_accounts.login(claude.get("accounts", []), (cs or {}).get("keychainUnavailable") is True)):
+        body["providers"] = [{**p, "login": login} if p is claude else p for p in body["providers"]]
     if ca and ca.get("accounts"):
         _codex(body, ca)
         body.setdefault("fetched_at", ca["fetched_at"])

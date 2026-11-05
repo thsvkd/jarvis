@@ -110,6 +110,21 @@ class FreshnessTest(StoreCase):
         claude_accounts.read()
         self.assertEqual(run.call_count, 2)
 
+    def test_a_healthy_scheduled_device_gets_no_false_alarm(self):
+        """covers: USAGE-6. 대기 계정의 값이 조금 묵었어도 묶어 둔 실값을 그대로 늙히지 않고 hswap 에 다시 묻는다"""
+        self.store(time.time() - 60)
+        now = time.time()
+        run = self.hswap(hswap_row(usageFetchedAt=iso(now - 590)))
+        with mock.patch.object(claude_accounts.time, "time", return_value=now):
+            claude_accounts.read()
+        run.return_value = {"accounts": [hswap_row(usageFetchedAt=iso(now + 300))]}
+        held = claude_accounts._cache
+        claude_accounts._cache = (held[0] - 31, held[1])  # 30초 묶음이 지났다
+        with mock.patch.object(claude_accounts.time, "time", return_value=now + 320):
+            a = claude_accounts.read()["accounts"][0]
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual((a["note"], a["attention"]), (None, False))
+
     def test_threshold_is_configurable(self):
         """covers: USAGE-6"""
         self.store(time.time() - 3600)
@@ -171,6 +186,19 @@ class SameRulesTest(StoreCase):
         """covers: USAGE-6"""
         self.hswap(hswap_row(organizationName="a@example.com's Organization"))
         self.assertIsNone(claude_accounts.read(force=True)["accounts"][0]["org"])
+
+    def test_active_is_the_same_on_both_paths(self):
+        """covers: USAGE-6"""
+        self.store(time.time() - 60)
+        self.hswap(hswap_row(active=False))
+        self.assertTrue(claude_accounts.read(force=True)["accounts"][0]["active"])
+        claude_accounts._cache = None
+        self.assertTrue(self.compat()["accounts"][0]["active"])
+
+    def test_bucket_name_with_a_version_keeps_its_name(self):
+        """covers: USAGE-6"""
+        a = claude_accounts.account(hswap_row(usage={"scoped": [{"name": "Sonnet 4.6", "pct": 1}, {"name": "sonnetish", "pct": 2}]}))
+        self.assertEqual([b["name"] for b in a["buckets"]], ["Sonnet 4.6", "모델별 한도 2"])
 
     def compat(self):
         with mock.patch.object(orca_usage, "_orca", return_value={"installed": False, "providers": []}), \
@@ -286,6 +314,32 @@ class LoginStateTest(StoreCase):
         for body in ("{broken", '["x"]', '{"schemaVersion": 2, "ok": false}'):
             self.write("cache/keepalive.json", body)
             self.assertIsNone(claude_accounts.login())
+
+    def test_odd_values_never_break_the_response(self):
+        """covers: USAGE-7. 선택 기능의 상태 파일 하나가 사용량 표시를 막지 않는다"""
+        huge = "1" + "0" * 400
+        for field in ("checkedAt", "loginExpiresAt", "accessExpiresAt"):
+            self.write("cache/keepalive.json", json.dumps({"schemaVersion": 1, "ok": True, "checkedAt": time.time()})[:-1] + f', "{field}": {huge}}}')
+            json.dumps(claude_accounts.login())
+        self.write("cache/keepalive.json", '{"schemaVersion": 1, "x": ' + "[" * 30000 + "]" * 30000 + "}")
+        self.assertIsNone(claude_accounts.login())
+        self.keepalive(activeSlot=int(huge), checkedAt=-1e308, accessExpiresAt=1e308)
+        s = claude_accounts.login()
+        self.assertEqual((s["state"], s["slot"], s["note"]), ("stalled", None, None))
+        self.assertEqual(s["text"], "자동 갱신 멈춤")
+
+    def test_failure_text_is_safe_data(self):
+        """covers: USAGE-7. 모르는 종류는 적지 않고, 홈 경로를 가리며, 응답을 인코딩할 수 있다"""
+        self.write("cache/keepalive.json", json.dumps({"schemaVersion": 1, "checkedAt": time.time(), "ok": False,
+                                                       "error": {"type": "/home/alice/x", "message": "bad /home/alice/y \ud800"}}))
+        text = claude_accounts.login()["text"]
+        self.assertNotIn("alice", text)
+        text.encode("utf-8")
+
+    def test_guide_slot_prefers_the_current_login(self):
+        """covers: USAGE-7. keepalive 의 슬롯은 마지막 실행 때의 값이라 옛 슬롯을 덮어쓰게 안내하지 않는다"""
+        self.keepalive(activeSlot=2)
+        self.assertEqual(claude_accounts.login([{"active": True, "slot": "1"}])["slot"], "1")
 
     def test_order_when_several_apply(self):
         """covers: USAGE-7"""

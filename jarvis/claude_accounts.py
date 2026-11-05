@@ -28,7 +28,8 @@ from . import config, opencode_usage, provider_usage
 from .util import Installer, org, parse_iso, scrub_home, which_local
 
 CONFIG_MAX = 32 << 20  # Claude Code 전역 설정은 프로젝트 기록이 쌓여 수 MB 까지 큰다
-KNOWN_BUCKETS = {"opus", "sonnet", "haiku"}  # 저장소·hswap 이 주는 다른 이름은 그대로 내보내지 않고 번호로 적는다
+KNOWN_BUCKETS = {"opus", "sonnet", "haiku"}  # 첫 단어가 이것인 이름만 그대로 내보낸다. 나머지는 번호로 적는다
+FAILED_KINDS = {"split_brain", "refresh_failed", "no_credentials", "locked", "unmanaged"}  # 화면에 그대로 적는 keepalive error.type
 LOGIN_WARN_S = 3 * 86400  # 로그인(갱신 토큰) 만료 3일 전부터 '주의 필요'. 새 /login 만이 기한을 늘린다
 CACHE_S = 30  # hswap 자체가 캐시하므로 짧게만 묶는다(요청마다 프로세스를 띄우지 않게)
 TIMEOUT_S = 15  # Orca 와 동시에 돈다. core 의 기기당 시간 제한(70초) 안에 들어와야 한다
@@ -143,7 +144,8 @@ def _sec(v):
     """hswap 의 ISO 시각이나 저장소의 epoch 초 → epoch 초. 형식이 이상하면 None."""
     if isinstance(v, str):
         return parse_iso(v)
-    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else None
+    # 범위 비교는 inf·nan·아주 큰 정수에서도 예외가 나지 않는다
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v < 1e11 else None
 
 
 def _pct(v):
@@ -168,7 +170,7 @@ def _windows(u):
         if name.lower() == "fable":
             wins.append({"key": "fable", "used": _pct(s["pct"]), "resets_at": reset(s)})
         else:
-            buckets.append({"name": name if name.lower() in KNOWN_BUCKETS else f"모델별 한도 {len(buckets) + 1}",
+            buckets.append({"name": name if name.lower().split(" ")[0] in KNOWN_BUCKETS else f"모델별 한도 {len(buckets) + 1}",
                             "used": _pct(s["pct"]), "resets_at": reset(s)})
     return wins, buckets
 
@@ -189,8 +191,7 @@ def account(row, source="cswap"):
         note = "사용량을 읽지 못했습니다" + (f"({reason})" if reason else "") + "."
     left = (parse_iso(row.get("loginExpiresAt") or "") or 0) - time.time()
     if status not in ("relogin_required", "api_key") and 0 < left <= LOGIN_WARN_S:
-        days = f"{left / 86400:.0f}일" if left >= 86400 else f"{max(1, left // 3600):.0f}시간"
-        soon = f"로그인 만료 {days} 남음. 그 계정으로 다시 /login 하세요."
+        soon = f"로그인 만료 {_span(left)} 남음. 그 계정으로 다시 /login 하세요."
         note, attention = (note + " " + soon if note else soon), True
     windows, buckets = _windows(usage)
     plan = " · ".join(x for x in (str(row.get("alias") or "")[:40], "자동 전환 제외" if row.get("disabled") is True else "") if x)
@@ -354,7 +355,7 @@ def _store_read():
             # 화면은 이메일+조직 이름으로 같은 계정을 묶는다. Orca 경로와 같은 규칙으로 개인 조직("<email>'s Organization")은 None
             result.append({**a, "org": org(a["org"], a["label"])})
         return {"accounts": result} if result else None
-    except (OSError, ValueError, TypeError):
+    except (OSError, ValueError, TypeError, OverflowError, RecursionError):
         return None
 
 
@@ -362,14 +363,14 @@ def _keepalive():
     """hswap claude keepalive 가 남긴 저장소의 cache/keepalive.json(토큰 없음). 없거나 안전하지 않거나 모르는 형식이면 None."""
     try:
         body = opencode_usage._private_json(os.path.join(_root(), "cache", "keepalive.json"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return None
     return body if isinstance(body, dict) and body.get("schemaVersion") == 1 else None
 
 
 def _span(s):
     s = max(0, s)
-    return f"{s // 86400:.0f}일" if s >= 86400 else f"{s // 3600:.0f}시간" if s >= 3600 else f"{max(1, s // 60):.0f}분"
+    return f"{s / 86400:.0f}일" if s >= 86400 else f"{s // 3600:.0f}시간" if s >= 3600 else f"{max(1, s // 60):.0f}분"
 
 
 def login(rows=(), keychain=False):
@@ -392,23 +393,39 @@ def login(rows=(), keychain=False):
     elif checked is None or now - checked > config.CLAUDE_KEEPALIVE_STALE_S:
         state, text = "stalled", "자동 갱신 멈춤" + (f"(마지막 {_span(now - checked)} 전)" if checked else "")
     elif k.get("ok") is not True:
-        detail = ": ".join(x for x in (kind and kind[:40], scrub_home(str(err.get("message") or ""))[:200]) if x)
+        # 파일에 담긴 글자는 데이터다: 짝 없는 서로게이트가 응답 인코딩을 깨지 않게 바꾼다
+        message = scrub_home(str(err.get("message") or "")).encode("utf-8", "replace").decode()[:200]
+        detail = ": ".join(x for x in (kind if kind in FAILED_KINDS else None, message) if x)
         state, text = "failed", "자동 갱신 실패" + (f"({detail})" if detail else "")
     else:
         state, text = "ok", f"로그인됨, 자동 갱신 {_span(now - checked)} 전"
     access = _sec(k.get("accessExpiresAt"))
-    slot = k.get("activeSlot") if isinstance(k.get("activeSlot"), int) and not isinstance(k.get("activeSlot"), bool) else None
-    slot = str(slot) if slot and slot > 0 else next((a.get("slot") for a in rows if a.get("active")), None)
+    # 안내의 --slot 은 지금 사용 중인 슬롯이어야 한다(다른 계정의 슬롯에 add 하면 저장 로그인을 덮을 수 있다). keepalive 값은 마지막 실행 때의 것이라 뒤로 둔다
+    slot = next((a.get("slot") for a in rows if a.get("active") and a.get("slot")), None)
+    if slot is None and isinstance(k.get("activeSlot"), int) and not isinstance(k.get("activeSlot"), bool) and 0 < k["activeSlot"] < 10000:
+        slot = str(k["activeSlot"])
     return {"state": state, "text": text, "attention": state != "ok", "slot": slot,
             "note": None if access is None else f"접근 토큰 {_span(access - now)} 뒤 만료(자동 갱신)" if access > now else "접근 토큰 만료됨(자동 갱신 대기)"}
+
+
+def _old(a):
+    """값이 있는데 신선도 기준보다 오래됐는가."""
+    at = a.get("updated_at")
+    return bool(a.get("windows") or a.get("buckets")) and (not at or time.time() - at > config.CLAUDE_STALE_S)
+
+
+def _mark_current(rows, store):
+    """사용 중 판정: 실제 로그인과 맞춘 저장소 쪽을 우선한다(엔진과 같은 규칙. 로그인을 읽지 못하면 hswap 의 값)."""
+    current = {a.get("slot") for a in (store or {}).get("accounts", []) if a.get("active")}
+    return [{**a, "active": a.get("slot") in current} for a in rows] if current else rows
 
 
 def _aged(a, why=None):
     """값이 있는 계정에 대체 이유와 신선도를 붙인다. hswap 묶음이 들고 있는 dict 는 고치지 않는다."""
     if not (a.get("windows") or a.get("buckets")):
         return a
+    old = _old(a)
     at = a.get("updated_at")
-    old = not at or time.time() - at > config.CLAUDE_STALE_S
     if not (old or why):
         return a
     age = (f"{_span(time.time() - at)} 전 값입니다." if at else "저장 시각을 모르는 값입니다.") if old else None
@@ -417,23 +434,20 @@ def _aged(a, why=None):
 
 def read(force=False):
     """독립 경로(화면). None(저장소도 실값도 없음) 또는 {"error": "..."} 또는 {"accounts": [...], "login": {...}}(login 은 알릴 것이 있을 때만).
-    force 이거나, 저장소 값이 신선도 기준보다 오래됐거나, hswap 에 물은 지 기준이 지났으면 hswap list 를 실행한다
+    force 이거나, hswap 에 물은 지 신선도 기준이 지났거나, 보일 실값 중 기준보다 오래된 것이 있으면 hswap list 를 실행한다
     (저장소에는 로그인 기한·상태가 없어 만료 경고는 실값에서만 나온다. 예약 실행이 저장소를 늘 새로 써도 경고가 사라지지 않게 한다).
-    그 사이에는 마지막 실값을 그대로 준다. hswap 이 없거나 실패하면 저장소 값을 대체값으로 쓰고 이유를 붙인다. hswap 을 설치하지 않는다(USAGE-3)."""
+    그 사이에는 마지막 실값을 그대로 준다. 오래된 저장소 값은 실값이 없을 때만 보이므로 따로 보지 않는다. hswap 이 없거나 실패하면 저장소 값을 대체값으로 쓰고 이유를 붙인다. hswap 을 설치하지 않는다(USAGE-3)."""
     store = _store_read()
-    stale_s = config.CLAUDE_STALE_S
-    recent = _cache[1] if _cache and time.monotonic() - _cache[0] < stale_s else None
+    held = _cache  # switch() 가 도중에 비워도 같은 값을 본다
+    recent = held[1] if held and time.monotonic() - held[0] < config.CLAUDE_STALE_S else None
     recent = recent if recent and recent.get("accounts") else None
     if store is None and recent is None and not force:
         return None
-    newest = max((a.get("updated_at") or 0 for a in store["accounts"]), default=0) if store else None
-    asked = force or recent is None or (newest is not None and time.time() - newest > stale_s)
+    asked = force or recent is None or any(_old(a) for a in recent["accounts"])
     out = live(force, install=False) if asked else recent
     rows = (out or {}).get("accounts")
     if rows:
-        # 사용 중 판정은 실제 로그인과 맞춘 저장소 쪽을 우선한다(엔진과 같은 규칙. 로그인을 읽지 못하면 hswap 의 값)
-        current = {a.get("slot") for a in (store or {}).get("accounts", []) if a.get("active")}
-        rows = [{**a, "org": org(a.get("org"), a.get("label")), **({"active": a.get("slot") in current} if current else {})} for a in rows]
+        rows = [{**a, "org": org(a.get("org"), a.get("label"))} for a in _mark_current(rows, store)]
         why = None
     elif store:
         rows = store["accounts"]
@@ -448,7 +462,7 @@ def read(force=False):
 
 def merge_orca(mine, orca_rows):
     """호환 경로: hswap 계정 + Orca 에만 있는 관리 계정(같은 이메일의 다른 조직 포함)."""
-    mine = [{**a, "org": org(a["org"], a["label"])} for a in mine]  # hswap 결과는 묶음이라 고치지 않는다
+    mine = [{**a, "org": org(a["org"], a["label"])} for a in _mark_current(mine, _store_read())]  # hswap 결과는 묶음이라 고치지 않는다
     seen = {(a["label"].lower(), a["org"]) for a in mine}
     emails = {a["label"].lower() for a in mine}
     # Orca 의 '시스템 기본 계정'은 hswap 의 사용 중 계정과 같은 로그인이다(hswap 에 사용 중 계정이 있을 때만 뺀다).
