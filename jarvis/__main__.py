@@ -1,5 +1,6 @@
 """python3 -m jarvis · python3 -m jarvis update [--check] · python3 -m jarvis module <이름> <동작> --json
-· python3 -m jarvis agentsmd · python3 -m jarvis core-trust <plan|apply> · python3 -m jarvis --version"""
+· python3 -m jarvis agentsmd · python3 -m jarvis core-trust <plan|apply> · python3 -m jarvis relocate [--dry-run] [--json]
+· python3 -m jarvis --version"""
 
 import os
 import signal
@@ -11,7 +12,7 @@ from . import __version__, launch
 
 launch.run(__version__)  # 받아 둔 새 릴리스가 있으면 그쪽으로 넘어가고 여기로 돌아오지 않는다
 
-from . import config, cswap_usage, orca_issue, orca_update, self_update, tray  # noqa: E402
+from . import config, cswap_usage, orca_issue, orca_update, relocate, self_update, tray  # noqa: E402
 from .util import hide_child_consoles  # noqa: E402
 from .collector import Collector  # noqa: E402
 from .core import Core, devices_from  # noqa: E402
@@ -20,16 +21,22 @@ from .server import serve  # noqa: E402
 
 def _confirm():
     """HEALTHY_S 동안 돌면 새 릴리스를 확정한다. 실패하면(Windows 백신이 파일을 잡는 등) 될 때까지 다시 한다:
-    확정하지 못하면 평범한 재시작 몇 번에 멀쩡한 릴리스가 되돌려진다."""
+    확정하지 못하면 평범한 재시작 몇 번에 멀쩡한 릴리스가 되돌려진다.
+    확정한 뒤(건강한 판에서만) 옛 배치(~/Workspace/jarvis)를 한 번 옮긴다(relocate)."""
     time.sleep(launch.HEALTHY_S)
     while True:
         try:
             with self_update._lock:  # 버튼이 새 버전을 적는 중에 옛 값을 덮어쓰지 않게
                 launch.confirm()
-            return
+            break
         except Exception as e:
             print(f"[jarvis] 릴리스 확정 실패, 1분 뒤 다시: {e}", flush=True)
             time.sleep(60)
+    try:
+        r = relocate.run()
+        print(f"[jarvis] 실행본 이전: {r['state']} {r['detail']}", flush=True)
+    except Exception as e:  # 이전이 실패해도 게이트웨이는 계속 돈다
+        print(f"[jarvis] 실행본 이전 실패: {type(e).__name__}: {e}", flush=True)
 
 
 def agentsmd(args):
@@ -62,9 +69,11 @@ def main():
     if sys.argv[1:2] == ["core-trust"]:
         from . import core_trust
         return core_trust.cli(sys.argv[2:])
+    if sys.argv[1:2] == ["relocate"]:
+        return relocate.cli(sys.argv[2:])
     if sys.argv[1:]:  # 오타를 게이트웨이 기동으로 받지 않는다(같은 포트에 게이트웨이를 하나 더 띄우지 않게)
         print("사용법: python -m jarvis [update [--check] | module <이름> <동작> --json | agentsmd [인자] "
-              "| core-trust <plan|apply> … | --version]", file=sys.stderr)
+              "| core-trust <plan|apply> … | relocate [--dry-run] [--json] | --version]", file=sys.stderr)
         return 1
     sigs = {signal.SIGTERM, signal.SIGINT}
     masked = os.environ.get("JARVIS_TRAY") == "1" and hasattr(signal, "pthread_sigmask")
