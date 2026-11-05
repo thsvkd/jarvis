@@ -47,7 +47,7 @@ class StoreCase(unittest.TestCase):
         self.root = tmp.name
         os.mkdir(os.path.join(self.root, "cache"), 0o700)
         for name, kw in (("_root", {"return_value": self.root}), ("_live_identity", {"return_value": ("a@example.com", "o1")}),
-                         ("binary", {"return_value": None}), ("_cache", {"new": None}), ("_device", {"new": None}), ("_discovered", {"new": False}),
+                         ("binary", {"return_value": None}), ("_cache", {"new": None}), ("_device", {"new": None}), ("_discovered", {"new": False}), ("_built", {"new": None}),
                          ("ensure", {"side_effect": AssertionError("독립 경로는 설치하지 않는다")})):
             p = mock.patch.object(claude_accounts, name, **kw)
             setattr(self, name.strip("_"), p.start())
@@ -1180,6 +1180,126 @@ class SlotIdentityTest(StoreCase):
             text = json.dumps(body, ensure_ascii=False)
             for secret in ("org-uuid-secret", fingerprint, '"ids"'):
                 self.assertNotIn(secret, text)
+
+
+class StoreShapeTest(StoreCase):
+    """슬롯 추가·삭제·신원 변경·사용 중 슬롯 변경은 묶어 둔 hswap 값을 무효로 한다."""
+
+    RELOGIN = claude_accounts.STATUS["relogin_required"][0]
+    A = ("a@example.com", "o1")
+    B = ("b@example.com", "o2")
+
+    def slots(self, *held):
+        """held: (슬롯, 신원, strikes) 들로 저장소를 쓴다."""
+        self.write("sequence.json", {"sequence": [n for n, _, _ in held], "accounts": {
+            str(n): {"email": who[0], "organizationUuid": who[1], "organizationName": "Org"} for n, who, _ in held}})
+        self.write("cache/usage.json", {"schemaVersion": 2, "accounts": {
+            str(n): {"email": who[0], "organizationUuid": who[1], "fetchedAt": time.time() - 60, "authDeadStrikes": strikes, "lastGood": {"five_hour": {"pct": 99}}}
+            for n, who, strikes in held}})
+
+    def row(self, n, who, active=False):
+        return hswap_row(number=n, email=who[0], organizationUuid=who[1], active=active)
+
+    def test_new_active_slot_with_auth_failure_shows_at_once(self):
+        """covers: USAGE-6, USAGE-7. A 를 묶어 둔 뒤 새 슬롯에 B 를 더해 활성화하고 인증 실패가 적히면 다음 보통 읽기에 보인다"""
+        self.slots((1, self.A, 0))
+        run = self.hswap(self.row(1, self.A, active=True))
+        self.assertEqual([a["label"] for a in claude_accounts.read()["accounts"]], ["a@example.com"])
+        self.slots((1, self.A, 0), (2, self.B, 1))
+        self.live_identity.return_value = self.B
+        run.return_value = {"accounts": [self.row(1, self.A), self.row(2, self.B, active=True)]}
+        out = claude_accounts.read()
+        self.assertEqual(run.call_count, 2)  # 30초 묶음 안이어도 다시 묻는다
+        a, b = out["accounts"]
+        self.assertEqual((a["label"], a["active"], a["attention"]), ("a@example.com", False, False))
+        self.assertEqual((b["label"], b["active"], b["note"], b["attention"]), ("b@example.com", True, self.RELOGIN, True))
+        self.assertEqual((out["login"]["state"], out["login"]["slot"]), ("relogin", "2"))
+
+    def test_removed_slot_disappears(self):
+        """covers: USAGE-6"""
+        self.slots((1, self.A, 0), (2, self.B, 0))
+        run = self.hswap(self.row(1, self.A, active=True), self.row(2, self.B))
+        self.assertEqual(len(claude_accounts.read()["accounts"]), 2)
+        self.slots((1, self.A, 0))
+        run.return_value = {"accounts": [self.row(1, self.A, active=True)]}
+        self.assertEqual([a["slot"] for a in claude_accounts.read()["accounts"]], ["1"])
+        self.assertEqual(run.call_count, 2)
+
+    def test_removed_slot_disappears_when_hswap_fails(self):
+        """covers: USAGE-6. 다시 묻기가 실패하면 지금 저장소 값을 쓴다"""
+        self.slots((1, self.A, 0), (2, self.B, 0))
+        run = self.hswap(self.row(1, self.A, active=True), self.row(2, self.B))
+        claude_accounts.read()
+        self.slots((1, self.A, 0))
+        run.side_effect = RuntimeError("locked")
+        rows = claude_accounts.read()["accounts"]
+        self.assertEqual([(a["slot"], a["source"]) for a in rows], [("1", "cswap-cache")])
+        self.assertIn("locked", rows[0]["note"])
+
+    def test_added_slot_appears_without_activation(self):
+        """covers: USAGE-6"""
+        self.slots((1, self.A, 0))
+        run = self.hswap(self.row(1, self.A, active=True))
+        claude_accounts.read()
+        self.slots((1, self.A, 0), (2, self.B, 0))
+        run.return_value = {"accounts": [self.row(1, self.A, active=True), self.row(2, self.B)]}
+        self.assertEqual([a["slot"] for a in claude_accounts.read()["accounts"]], ["1", "2"])
+        self.assertEqual(run.call_count, 2)
+
+    def test_active_slot_change_alone_reruns_hswap(self):
+        """covers: USAGE-6. 슬롯 구성이 같아도 사용 중 슬롯이 바뀌면 묶음을 쓰지 않는다"""
+        self.slots((1, self.A, 0), (2, self.B, 0))
+        run = self.hswap(self.row(1, self.A, active=True), self.row(2, self.B))
+        claude_accounts.read()
+        self.live_identity.return_value = self.B
+        run.return_value = {"accounts": [self.row(1, self.A), self.row(2, self.B, active=True)]}
+        self.assertEqual([a["active"] for a in claude_accounts.read()["accounts"]], [False, True])
+        self.assertEqual(run.call_count, 2)
+
+    def test_change_during_the_call_is_seen_by_the_next_read(self):
+        """covers: USAGE-6. 기록은 hswap 을 부르기 전에 잡으므로 호출 중의 변경을 놓치지 않는다"""
+        self.slots((1, self.A, 0))
+        answer = {"accounts": [self.row(1, self.A, active=True)]}
+        run = self.hswap(self.row(1, self.A, active=True))
+
+        def store_changes_meanwhile(*args, **kw):
+            self.slots((1, self.A, 0), (2, self.B, 0))
+            return answer
+        run.side_effect = store_changes_meanwhile
+        self.assertEqual(len(claude_accounts.read()["accounts"]), 1)
+        run.side_effect = None
+        run.return_value = {"accounts": [self.row(1, self.A, active=True), self.row(2, self.B)]}
+        self.assertEqual(len(claude_accounts.read()["accounts"]), 2)
+        self.assertEqual(run.call_count, 2)
+
+    def test_one_change_reruns_once_even_if_hswap_keeps_disagreeing(self):
+        """covers: USAGE-6. hswap 답과 저장소가 계속 어긋나도 변경 한 번에 한 번만 다시 부른다"""
+        self.slots((1, self.A, 0))
+        run = self.hswap(self.row(1, self.A, active=True))
+        claude_accounts.read()
+        self.slots((1, self.A, 0), (2, self.B, 0))
+        for _ in range(4):
+            claude_accounts.read()
+        self.assertEqual(run.call_count, 2)
+
+    def test_auth_failure_and_new_usage_do_not_rerun(self):
+        """covers: USAGE-6. 슬롯 구성·사용 중 슬롯 말고는 묶음을 무효로 하지 않는다"""
+        self.slots((1, self.A, 0))
+        run = self.hswap(self.row(1, self.A, active=True))
+        claude_accounts.read()
+        self.slots((1, self.A, 1))
+        self.assertEqual(claude_accounts.read()["login"]["state"], "relogin")
+        run.assert_called_once()
+
+    def test_unreadable_store_keeps_using_held_values(self):
+        """covers: USAGE-6. 저장소를 처음부터 읽지 못하면 비교할 것이 같아 다시 묻지 않는다"""
+        self.slots((1, self.A, 0))
+        os.chmod(os.path.join(self.root, "sequence.json"), 0o644)
+        run = self.hswap(self.row(1, self.A, active=True))
+        claude_accounts.read(force=True)
+        for _ in range(3):
+            self.assertEqual(len(claude_accounts.read()["accounts"]), 1)
+        run.assert_called_once()
 
 
 class AliasTest(unittest.TestCase):

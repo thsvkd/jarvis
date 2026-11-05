@@ -49,6 +49,7 @@ STATUS = {
 }
 _lock = threading.Lock()
 _cache = None  # (monotonic, 결과)
+_built = None  # hswap 에 물을 때의 저장소 모습(_store_shape). 묶음이 어떤 저장소를 보고 만들어졌는지 나타낸다
 _discovered = False  # hswap 이 마지막으로 답한 때 계정을 주었다. 저장소를 읽지 못해도 기준이 지나면 다시 묻는 근거다
 _device = None  # (monotonic, 키체인에 닿지 못함). hswap 이 답한 기기 상태. 계정 행과 따로 두어 계정이 없거나 다음 조회가 실패해도 남는다
 _switched = 0  # switch() 가 끝난 횟수. 이것이 바뀌면 그 전에 시작한 읽기의 값은 전환 전 값일 수 있다
@@ -443,10 +444,9 @@ def _same_login(a, ids, store):
     return fingerprint is not None and fingerprint == store.get("ids", {}).get(a.get("slot"))
 
 
-def _ids_changed(out, store):
-    """묶어 둔 CLI 행의 슬롯에 지금 저장소에서 다른 계정이 들어 있는가."""
-    now = (store or {}).get("ids", {})
-    return any(slot in now and now[slot] != fingerprint for slot, fingerprint in (out or {}).get("ids", {}).items())
+def _store_shape(store):
+    """슬롯→신원 지문 전체와 사용 중 슬롯. 슬롯이 늘거나 줄거나 신원·사용 중 슬롯이 바뀌면 달라진다."""
+    return store and (store.get("ids", {}), {a.get("slot") for a in store["accounts"] if a.get("active")})
 
 
 def _mark_current(rows, store, ids):
@@ -506,6 +506,7 @@ def _keychain_down():
 
 
 def _read(force, install):
+    global _built
     store = _store_read()
     held = _cache  # switch() 가 도중에 비워도 같은 값을 본다
     recent = held[1] if held and time.monotonic() - held[0] < config.CLAUDE_STALE_S else None
@@ -516,11 +517,14 @@ def _read(force, install):
     if store is None and recent is None and not force and not install and not recheck:
         out = None
     else:
-        changed = _ids_changed(recent, store)  # 30초 묶음 안이어도 옛 계정의 값이므로 다시 묻는다
+        shape = _store_shape(store)
+        changed = recent is not None and shape != _built  # 30초 묶음 안이어도 옛 저장소의 값이므로 다시 묻는다
         asked = force or changed or recent is None or any(_old(a) for a in recent["accounts"])
-        out = live(force or changed, install=install) if asked else recent
-        if asked:  # 사용 중 판정은 hswap 이 답한 뒤의 로그인으로 한다(잠금을 기다리는 사이 로그인이 바뀌었을 수 있다)
-            store = _store_read()
+        out = recent
+        if asked:
+            _built = shape  # 부르기 전에 잡는다: 호출 중의 변경은 다음 읽기가 알아채고, 답이 저장소와 계속 어긋나도 변경 한 번에 한 번만 부른다
+            out = live(force or changed, install=install)
+            store = _store_read()  # 사용 중 판정은 hswap 이 답한 뒤의 로그인으로 한다(잠금을 기다리는 사이 로그인이 바뀌었을 수 있다)
     rows = (out or {}).get("accounts")
     if rows:
         ids = out.get("ids", {})
