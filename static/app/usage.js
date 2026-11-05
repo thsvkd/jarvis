@@ -167,8 +167,8 @@
   if(S.guide){ // 안내만 한다: 로그인은 그 기기의 화면 세션에서 사람이 한다. 문구에 기기 이름·경로를 넣지 않는다
    const d=S.devs.find(x=>x.id===S.guide),L=d&&(d.providers||[]).find(x=>x.id==="claude")?.login;
    $("#ulDlgT").textContent=(d?d.host||d.id:S.guide)+" · Claude 다시 로그인";
-   const add=L&&L.slot?"hswap claude add --slot "+L.slot:"hswap claude add";
-   P.render($("#ulDlgB"),html`<div class="ul-login">${L&&L.state==="keychain"?html`<p class="ul-err">SSH·서비스가 아니라 로그인 세션에서 실행해야 합니다.</p>`:""}<p>1. 그 기기의 로그인된 화면(GUI) 터미널에서 <code>claude</code> 를 실행해 <code>/login</code> 합니다. SSH 나 원격 실행 맥락은 피합니다.</p><p>2. <code>${add}</code> 로 그 계정을 다시 저장합니다.${L&&L.slot?"":" 슬롯 번호를 알면 --slot N 을 덧붙입니다."}</p><p class="ul-muted">Claude 는 device-code 로그인이 없어 jarvis 가 대신 로그인하지 않습니다.</p></div>`);
+   const add=L&&L.slot?"hswap claude add --slot "+L.slot:"hswap claude add",other=!!(L&&L.other),onlyAdd=!!(L&&L.state==="other_account");
+   P.render($("#ulDlgB"),html`<div class="ul-login">${L&&L.state==="keychain"?html`<p class="ul-err">SSH·서비스가 아니라 로그인 세션에서 실행해야 합니다.</p>`:""}${onlyAdd?"":html`<p>1. 그 기기의 로그인된 화면(GUI) 터미널에서 <code>claude</code> 를 실행해 <code>/login</code> 합니다. SSH 나 원격 실행 맥락은 피합니다.</p>`}<p>${onlyAdd?"":"2. "}<code>${add}</code> 로 ${other?"지금 로그인을 새 슬롯에 저장합니다. 이미 저장한 계정이면 다음 자동 갱신 뒤 이 표시가 사라집니다.":html`그 계정을 다시 저장합니다.${L&&L.slot?"":" 슬롯 번호를 알면 --slot N 을 덧붙입니다."}`}</p><p class="ul-muted">Claude 는 device-code 로그인이 없어 jarvis 가 대신 로그인하지 않습니다.</p></div>`);
    return;
   }
   if(!S.dlg)return;

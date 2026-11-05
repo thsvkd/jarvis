@@ -178,6 +178,22 @@ click({ guide: "first" });
 guide = element("ulDlgB").innerHTML;
 assert.ok(guide.indexOf("로그인 세션에서 실행해야") < guide.indexOf("/login"));
 assert.match(guide, /<code>hswap claude add<\/code> 로 그 계정을 다시 저장합니다\. 슬롯 번호를 알면 --slot N/);
+// 자동 갱신 기록이 이전 계정의 것이면 옛 슬롯을 권하지 않고 새 슬롯으로 add 만 안내한다
+guideDialog.close();
+claudeOf(devices[0]).login = { state: "other_account", text: "자동 갱신 기록이 이전 계정의 것입니다", note: null, attention: true, slot: null, other: true };
+click({ guide: "first" });
+guide = element("ulDlgB").innerHTML;
+assert.match(guide, /<code>hswap claude add<\/code> 로 지금 로그인을 새 슬롯에 저장합니다/);
+assert.doesNotMatch(guide, /--slot|\/login/);
+guideDialog.close();
+// 다른 상태라도 기록이 이전 계정의 것이면 슬롯 안내 없이 새 슬롯으로 저장한다(재로그인 절차는 남는다)
+claudeOf(devices[0]).login = { state: "stalled", text: "자동 갱신 멈춤", note: null, attention: true, slot: null, other: true };
+click({ guide: "first" });
+guide = element("ulDlgB").innerHTML;
+assert.match(guide, /\/login/);
+assert.match(guide, /새 슬롯에 저장합니다/);
+assert.doesNotMatch(guide, /--slot/);
+guideDialog.close();
 delete claudeOf(devices[0]).login;
 click({ prov: "all" });
 assert.equal(hotNow(), hotBase); // 상태가 없으면(keepalive 를 쓰지 않는 기기) 세지 않는다

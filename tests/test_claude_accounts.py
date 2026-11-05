@@ -58,7 +58,7 @@ class StoreCase(unittest.TestCase):
 
     def keepalive(self, **kw):
         self.write("cache/keepalive.json", {"schemaVersion": 1, "checkedAt": time.time() - 300, "ok": True, "action": "none", "note": None,
-                                            "activeSlot": 2, "accessExpiresAt": iso(time.time() + 3 * 3600 + 30),
+                                            "activeSlot": 1, "accessExpiresAt": iso(time.time() + 3 * 3600 + 30),
                                             "loginExpiresAt": iso(time.time() + 30 * 86400), "error": None, **kw})
 
 
@@ -235,8 +235,8 @@ class LoginStateTest(StoreCase):
     def test_ok(self):
         """covers: USAGE-7"""
         self.keepalive()
-        s = claude_accounts.login()
-        self.assertEqual((s["state"], s["attention"], s["slot"]), ("ok", False, "2"))
+        s = claude_accounts.login([{"active": True, "slot": "1"}])
+        self.assertEqual((s["state"], s["attention"], s["slot"]), ("ok", False, "1"))
         self.assertEqual(s["text"], "로그인됨, 자동 갱신 5분 전")
         self.assertEqual(s["note"], "접근 토큰 3시간 뒤 만료(자동 갱신)")
 
@@ -336,10 +336,62 @@ class LoginStateTest(StoreCase):
         self.assertNotIn("alice", text)
         text.encode("utf-8")
 
-    def test_guide_slot_prefers_the_current_login(self):
-        """covers: USAGE-7. keepalive 의 슬롯은 마지막 실행 때의 값이라 옛 슬롯을 덮어쓰게 안내하지 않는다"""
+    def test_record_of_another_account_says_only_that(self):
+        """covers: USAGE-7. 전환 뒤에는 이전 슬롯의 만료·오류·접근 토큰을 붙이지 않고, 옛 슬롯을 덮어쓰게 안내하지 않는다"""
+        soon = iso(time.time() + 86400)
+        for kw in ({}, {"loginExpiresAt": soon}, {"ok": False, "error": {"type": "relogin_required"}},
+                   {"ok": False, "error": {"type": "refresh_failed", "message": "old slot"}}):
+            self.keepalive(activeSlot=2, **kw)
+            s = claude_accounts.login([{"active": True, "slot": "1"}])
+            self.assertEqual((s["state"], s["attention"], s["slot"], s["note"], s["other"]), ("other_account", True, None, None, True), kw)
+            self.assertEqual(s["text"], "자동 갱신 기록이 이전 계정의 것입니다")
+
+    def test_device_failures_stay_visible_over_another_accounts_record(self):
+        """covers: USAGE-7. 키체인·멈춤은 계정이 아니라 기기의 문제다. 슬롯은 여전히 빼고 새 슬롯 안내를 쓴다"""
+        for kw, want in (({"ok": False, "error": {"type": "keychain_unavailable"}}, "keychain"), ({"checkedAt": time.time() - 9 * 3600}, "stalled")):
+            self.keepalive(activeSlot=2, **kw)
+            s = claude_accounts.login([{"active": True, "slot": "1"}])
+            self.assertEqual((s["state"], s["slot"], s["other"]), (want, None, True))
+
+    def test_login_saved_in_no_slot_never_gets_the_old_slot(self):
+        """covers: USAGE-7. 현재 로그인이 저장 계정과 맞지 않으면 사용 중 슬롯이 없다. hswap 의 active 도 믿지 않는다"""
+        self.store(time.time() - 60)
+        self.live_identity.return_value = ("other@example.com", "")
+        self.keepalive(loginExpiresAt=iso(time.time() + 86400))
+        self.hswap(hswap_row(active=True))
+        out = claude_accounts.read(force=True)
+        self.assertFalse(out["accounts"][0]["active"])
+        self.assertEqual((out["login"]["state"], out["login"]["slot"]), ("other_account", None))
+
+    def test_unmanaged_login_keeps_its_own_record(self):
+        """covers: USAGE-7. 저장 슬롯이 없는 로그인을 keepalive 도 슬롯 없이 기록했으면 그 기록은 지금 로그인의 것이다"""
+        self.store(time.time() - 60)
+        self.live_identity.return_value = ("other@example.com", "")
+        self.keepalive(activeSlot=None, loginExpiresAt=iso(time.time() + 86400))
+        s = claude_accounts.read()["login"]
+        self.assertEqual((s["state"], s["slot"], s["other"]), ("expiring", None, False))
+
+    def test_matching_record_keeps_slot_and_details(self):
+        """covers: USAGE-7"""
+        self.store(time.time() - 60)
+        self.keepalive(activeSlot=1, ok=False, error={"type": "refresh_failed", "message": "m"})
+        s = claude_accounts.read()["login"]
+        self.assertEqual((s["state"], s["slot"], s["other"]), ("failed", "1", False))
+        self.assertIn("refresh_failed", s["text"])
+
+    def test_unknown_login_keeps_the_warning_without_a_slot(self):
+        """covers: USAGE-7. 신원을 읽지 못하면(로그아웃 등) 맞는지 모른다: 경고는 남기고 슬롯은 권하지 않는다"""
+        self.store(time.time() - 60)
+        self.live_identity.return_value = None
+        self.keepalive(activeSlot=1, ok=False, error={"type": "relogin_required"})
+        s = claude_accounts.read()["login"]
+        self.assertEqual((s["state"], s["slot"], s["other"]), ("relogin", None, False))
+
+    def test_current_rows_relogin_is_not_hidden_by_another_record(self):
+        """covers: USAGE-7. 재로그인 판정이 행에서 왔으면 지금 계정의 사실이다"""
         self.keepalive(activeSlot=2)
-        self.assertEqual(claude_accounts.login([{"active": True, "slot": "1"}])["slot"], "1")
+        relogin = claude_accounts.STATUS["relogin_required"][0]
+        self.assertEqual(claude_accounts.login([{"active": True, "slot": "1", "note": relogin}])["state"], "relogin")
 
     def test_order_when_several_apply(self):
         """covers: USAGE-7"""
@@ -352,11 +404,10 @@ class LoginStateTest(StoreCase):
             self.keepalive(**kw)
             self.assertEqual(claude_accounts.login()["state"], want, kw)
 
-    def test_access_expiry_and_slot_fallback(self):
+    def test_access_expiry(self):
         """covers: USAGE-7"""
-        self.keepalive(accessExpiresAt=iso(time.time() - 60), activeSlot=None)
-        s = claude_accounts.login([{"active": True, "slot": "7"}])
-        self.assertEqual((s["note"], s["slot"]), ("접근 토큰 만료됨(자동 갱신 대기)", "7"))
+        self.keepalive(accessExpiresAt=iso(time.time() - 60))
+        self.assertEqual(claude_accounts.login()["note"], "접근 토큰 만료됨(자동 갱신 대기)")
         self.keepalive(accessExpiresAt=None)
         self.assertIsNone(claude_accounts.login()["note"])
 

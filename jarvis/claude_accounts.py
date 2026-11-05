@@ -354,7 +354,8 @@ def _store_read():
                          "usage": usage, "usageFetchedAt": fetched, "lastGoodUsage": usage, "lastGoodFetchedAt": fetched}, "cswap-cache")
             # 화면은 이메일+조직 이름으로 같은 계정을 묶는다. Orca 경로와 같은 규칙으로 개인 조직("<email>'s Organization")은 None
             result.append({**a, "org": org(a["org"], a["label"])})
-        return {"accounts": result} if result else None
+        # signed_in: 로그인을 읽었다. 그런데 active 인 행이 없으면 지금 로그인은 어느 저장 슬롯과도 맞지 않는다
+        return {"accounts": result, "signed_in": identity is not None} if result else None
     except (OSError, ValueError, TypeError, OverflowError, RecursionError):
         return None
 
@@ -373,25 +374,34 @@ def _span(s):
     return f"{s / 86400:.0f}일" if s >= 86400 else f"{s // 3600:.0f}시간" if s >= 3600 else f"{max(1, s // 60):.0f}분"
 
 
-def login(rows=(), keychain=False):
-    """기기 단위 로그인 상태 {state, text, note, attention, slot}. 알릴 것이 없으면 None(keepalive.json 이 없으면 이 기능을 쓰지 않는 기기다).
-    순서: 사람이 다시 로그인해야 하는 것 > 키체인 > 만료 임박 > 멈춤 > 그 밖의 실패 > 정상.
-    rows: 사용 중 계정의 재로그인 판정(저장소의 authDeadStrikes 와 hswap 의 relogin_required 가 같은 문구가 된다). keychain: hswap 의 keychainUnavailable."""
+def login(rows=(), keychain=False, signed_in=False):
+    """기기 단위 로그인 상태 {state, text, note, attention, slot, other}. 알릴 것이 없으면 None(keepalive.json 이 없으면 이 기능을 쓰지 않는 기기다).
+    순서: 사람이 다시 로그인해야 하는 것 > 키체인 > 만료 임박 > 멈춤 > 이전 계정의 기록 > 그 밖의 실패 > 정상.
+    rows: 사용 중 계정의 재로그인 판정(저장소의 authDeadStrikes 와 hswap 의 relogin_required 가 같은 문구가 된다)과 사용 중 슬롯.
+    keychain: hswap 의 keychainUnavailable. signed_in: 로그인을 읽었다(rows 에 active 가 없으면 저장되지 않은 로그인이다).
+    other: keepalive 기록이 지금 로그인의 것이 아니다. 만료·오류·접근 토큰은 그 계정의 사실이라 쓰지 않고, 키체인·멈춤은 기기의 사실이라 그대로 쓴다.
+    슬롯은 맞다고 확인될 때만 준다(다른 계정의 슬롯에 add 하면 저장 로그인을 덮을 수 있다)."""
     k = _keepalive() or {}
     err = k.get("error") if isinstance(k.get("error"), dict) else {}
     kind = err.get("type") if isinstance(err.get("type"), str) else None
     relogin = STATUS["relogin_required"][0]
     now, checked, expires = time.time(), _sec(k.get("checkedAt")), _sec(k.get("loginExpiresAt"))
-    if kind == "relogin_required" or any(a.get("active") and relogin in (a.get("note"), a.get("error")) for a in rows):
+    current = next((a.get("slot") for a in rows if a.get("active") and a.get("slot")), None)
+    recorded = k.get("activeSlot") if isinstance(k.get("activeSlot"), int) and not isinstance(k.get("activeSlot"), bool) else None
+    # 사용 중 슬롯을 모르고 저장되지 않은 로그인도 아니면 맞는지 알 수 없다: 경고는 남기고 슬롯만 권하지 않는다
+    other = bool(k) and bool(current or signed_in) and current != (None if recorded is None else str(recorded))
+    if (kind == "relogin_required" and not other) or any(a.get("active") and relogin in (a.get("note"), a.get("error")) for a in rows):
         state, text = "relogin", "재로그인 필요"
     elif kind == "keychain_unavailable" or keychain:
         state, text = "keychain", "키체인 접근 불가: 키체인에 접근할 수 없는 곳에서 실행됨"
     elif not k:
         return None
-    elif expires is not None and expires - now <= LOGIN_WARN_S:
+    elif not other and expires is not None and expires - now <= LOGIN_WARN_S:
         state, text = "expiring", f"로그인 만료 임박({_span(expires - now)})" if expires > now else "로그인 기한이 지났습니다"
     elif checked is None or now - checked > config.CLAUDE_KEEPALIVE_STALE_S:
         state, text = "stalled", "자동 갱신 멈춤" + (f"(마지막 {_span(now - checked)} 전)" if checked else "")
+    elif other:
+        state, text = "other_account", "자동 갱신 기록이 이전 계정의 것입니다"
     elif k.get("ok") is not True:
         # 파일에 담긴 글자는 데이터다: 짝 없는 서로게이트가 응답 인코딩을 깨지 않게 바꾼다
         message = scrub_home(str(err.get("message") or "")).encode("utf-8", "replace").decode()[:200]
@@ -399,12 +409,8 @@ def login(rows=(), keychain=False):
         state, text = "failed", "자동 갱신 실패" + (f"({detail})" if detail else "")
     else:
         state, text = "ok", f"로그인됨, 자동 갱신 {_span(now - checked)} 전"
-    access = _sec(k.get("accessExpiresAt"))
-    # 안내의 --slot 은 지금 사용 중인 슬롯이어야 한다(다른 계정의 슬롯에 add 하면 저장 로그인을 덮을 수 있다). keepalive 값은 마지막 실행 때의 것이라 뒤로 둔다
-    slot = next((a.get("slot") for a in rows if a.get("active") and a.get("slot")), None)
-    if slot is None and isinstance(k.get("activeSlot"), int) and not isinstance(k.get("activeSlot"), bool) and 0 < k["activeSlot"] < 10000:
-        slot = str(k["activeSlot"])
-    return {"state": state, "text": text, "attention": state != "ok", "slot": slot,
+    access = None if other else _sec(k.get("accessExpiresAt"))
+    return {"state": state, "text": text, "attention": state != "ok", "slot": None if other else current, "other": other,
             "note": None if access is None else f"접근 토큰 {_span(access - now)} 뒤 만료(자동 갱신)" if access > now else "접근 토큰 만료됨(자동 갱신 대기)"}
 
 
@@ -415,9 +421,11 @@ def _old(a):
 
 
 def _mark_current(rows, store):
-    """사용 중 판정: 실제 로그인과 맞춘 저장소 쪽을 우선한다(엔진과 같은 규칙. 로그인을 읽지 못하면 hswap 의 값)."""
-    current = {a.get("slot") for a in (store or {}).get("accounts", []) if a.get("active")}
-    return [{**a, "active": a.get("slot") in current} for a in rows] if current else rows
+    """사용 중 판정: 실제 로그인과 같은 저장 슬롯(엔진과 같은 규칙. 맞는 슬롯이 없으면 사용 중도 없다). 로그인이나 저장소를 읽지 못하면 hswap 의 값."""
+    if not (store and store.get("signed_in")):
+        return rows
+    current = {a.get("slot") for a in store["accounts"] if a.get("active")}
+    return [{**a, "active": a.get("slot") in current} for a in rows]
 
 
 def _aged(a, why=None):
@@ -455,7 +463,7 @@ def read(force=False):
         why = reason.rstrip(".") + ". 저장된 값을 보입니다."
     else:
         return out
-    state = login(rows, (out or {}).get("keychainUnavailable") is True)
+    state = login(rows, (out or {}).get("keychainUnavailable") is True, bool(store and store.get("signed_in")))
     result = {"accounts": [_aged(a, why) for a in rows]}
     return {**result, "login": state} if state else result
 
