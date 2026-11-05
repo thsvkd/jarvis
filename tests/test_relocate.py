@@ -49,7 +49,8 @@ if "Set-ScheduledTask" in script:
 elif "Get-ScheduledTask" in script:
     if state("get-broken") is not None:
         sys.exit(1)
-    print(state("task.json") or "")
+    if os.environ.get("JARVIS_TASK_NAME") == (state("task-name") or "jarvis"):  # 이름이 다른 작업은 없다
+        print(state("task.json") or "")
 ''',
 }
 FAKE_HEAD = '''import json, os, sys
@@ -183,6 +184,18 @@ class Mac(Base):
         self.assertEqual(r["state"], "cleaned", r)
         self.assert_moved()
         self.assertEqual(relocate.run()["state"], "noop")
+
+    def test_a_held_lock_makes_a_second_run_busy_and_change_nothing(self):
+        """covers: RELOC-11"""
+        with relocate._lock() as held:
+            self.assertTrue(held)
+            r = relocate.run()
+            self.assertEqual(r["state"], "busy", r)
+            self.assertFalse(os.path.exists(self.app))
+            with open(self.agent, "rb") as f:
+                self.assertEqual(f.read(), self.original)
+            self.assertEqual(self.calls(), [])
+        self.assertEqual(relocate.run()["state"], "pending_reload")  # 풀리면 돈다
 
     def test_dry_run_changes_nothing(self):
         """covers: RELOC-6"""
@@ -364,6 +377,33 @@ class Windows(Base):
         self.assertTrue(os.path.isdir(self.old))
 
 
+    def test_only_the_installer_task_shape_is_recognized(self):
+        """covers: RELOC-4"""
+        pyw = "C:/Python313/pythonw.exe"
+        dev = os.path.join(self.home, "Workspace", "jarvis-dev")
+        script = f"{self.old}/deploy/jarvis-win.pyw"
+        for task in ({"Execute": pyw, "Arguments": f'"{dev}/deploy/jarvis-win.pyw"', "WorkingDirectory": dev},
+                     {"Execute": pyw, "Arguments": f'"{script}" --debug', "WorkingDirectory": self.old},
+                     {"Execute": pyw, "Arguments": f'"{script}"', "WorkingDirectory": dev},
+                     {"Execute": pyw, "Arguments": f'"{self.old}/deploy/other.pyw"', "WorkingDirectory": self.old},
+                     {"Execute": "C:/Python313/python.exe", "Arguments": f'"{script}"', "WorkingDirectory": self.old}):
+            with self.subTest(task=task):
+                self.put("task.json", json.dumps([task]))
+                self.assertEqual(relocate.run()["state"], "noop")
+                self.assertEqual(self.task_now(), [task])
+                self.assertFalse(os.path.exists(self.app))
+        self.assertFalse([c for c in self.calls() if "Set-ScheduledTask" in c])
+
+    def test_an_unquoted_script_without_working_directory_and_another_task_name(self):
+        """covers: RELOC-1"""
+        self.put("task.json", json.dumps([{"Execute": "pythonw.exe", "Arguments": f"{self.old}/deploy/jarvis-win.pyw",
+                                           "WorkingDirectory": None}]))
+        self.put("task-name", "jarvis-trial")
+        self.assertEqual(relocate.run()["state"], "noop")  # 이름이 다르면 그 작업을 보지 않는다
+        with mock.patch.object(relocate, "TASK", "jarvis-trial"):
+            self.assertEqual(relocate.run()["state"], "cleaned")
+        self.assertEqual(self.task_now()[0]["Arguments"], f'"{self.app}/deploy/jarvis-win.pyw"')
+
     def test_an_unverifiable_change_keeps_the_app_the_task_may_already_use(self):
         """covers: RELOC-2"""
         self.put("get-breaks-after-set", "1")  # Set 은 됐지만 확인(Get)이 실패한다
@@ -445,10 +485,16 @@ class UpdatePath(Base):
     def test_the_old_base_hops_to_the_new_release_which_relocates(self):
         """covers: RELOC-9"""
         shutil.rmtree(self.old)
+        os.makedirs(self.old)
+        try:  # 실제 옛 base(Mac mini 의 1.7.9): relocate 가 없는 런처·__main__
+            archive = subprocess.run(["git", "-C", ROOT, "archive", "v1.7.9", "jarvis"], capture_output=True, timeout=60)
+        except OSError:
+            archive = None
+        if not archive or archive.returncode != 0:
+            self.skipTest("git 또는 태그 v1.7.9 가 없다")
+        subprocess.run(["tar", "-x", "-C", self.old], input=archive.stdout, check=True)
+        self.assertFalse(os.path.exists(os.path.join(self.old, "jarvis", "relocate.py")))
         ignore = shutil.ignore_patterns("__pycache__")
-        shutil.copytree(os.path.join(ROOT, "jarvis"), os.path.join(self.old, "jarvis"), ignore=ignore)
-        with open(os.path.join(self.old, "jarvis", "__init__.py"), "w") as f:
-            f.write('__version__ = "1.7.9"\n')
         new = os.path.join(self.root, "versions", "1.8.0")
         shutil.copytree(os.path.join(ROOT, "jarvis"), os.path.join(new, "jarvis"), ignore=ignore)
         with open(os.path.join(new, "jarvis", "__init__.py"), "w") as f:
@@ -472,6 +518,9 @@ class UpdatePath(Base):
         self.assertEqual(cli()["state"], "pending_reload")
         with open(agent, "rb") as f:
             self.assertTrue(relocate.same(plistlib.load(f)["WorkingDirectory"], self.app))
+        with open(os.path.join(self.app, "jarvis", "__init__.py")) as f:  # app 은 옛 base 그대로다(롤백 기준이 바뀌지 않게)
+            self.assertIn('"1.7.9"', f.read())
+        self.assertFalse(os.path.exists(os.path.join(self.app, "jarvis", "relocate.py")))
         self.put("launchd-wd", self.app)
         self.assertEqual(cli()["state"], "cleaned")  # 새 판(versions)에서 돌므로 옛 폴더를 옮긴다
         self.assertFalse(os.path.exists(self.old))

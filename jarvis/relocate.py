@@ -11,9 +11,12 @@ launch.ROOT/app 으로 옮기고 서비스 등록(LaunchAgent·systemd 사용자
   그때까지 옛 폴더를 남긴다(pending_reload): 지우면 KeepAlive 재시작이 chdir 에 실패해 기기가 꺼진다.
   jarvis 는 스스로 bootout/bootstrap 하지 않는다(원격 기기가 꺼질 수 있다).
 
-결과: {"state": noop|registered|pending_reload|cleaned|failed (dry-run 은 planned), "detail": 설명, "steps": 한 일·할 일}
+한 번에 하나만 돈다: ROOT/.relocate.lock 을 잡지 못하면 기다리지 않고 busy 로 끝난다(판정·복사·등록·실패 정리 모두 잠금 안).
+
+결과: {"state": noop|busy|registered|pending_reload|cleaned|failed (dry-run 은 planned), "detail": 설명, "steps": 한 일·할 일}
 """
 
+import contextlib
 import json
 import os
 import plistlib
@@ -31,16 +34,18 @@ HERE = launch.HERE  # 지금 도는 코드의 저장소(또는 받은 릴리스)
 LABEL = "dev.jarvis"
 BAK = ".bak-relocate"
 TMP = ".app-tmp-"
+LOCK = ".relocate.lock"
+TASK = "jarvis"  # 예약 작업 이름. PowerShell 에는 환경 변수로 넘긴다(실기기 시험에서 다른 이름으로 바꿀 수 있게)
 UNIT_WD = re.compile(rb"^WorkingDirectory=(.*?)\r?$", re.M)
 # 예약 작업의 action 만 바꾼다(principal·trigger·settings 는 그대로). 값은 환경 변수로 넘겨 따옴표 해석을 피한다
 PS_GET = ("[Console]::OutputEncoding = New-Object Text.UTF8Encoding $false; "
-          "$t = Get-ScheduledTask -TaskName jarvis -ErrorAction SilentlyContinue; "
+          "$t = Get-ScheduledTask -TaskName $env:JARVIS_TASK_NAME -ErrorAction SilentlyContinue; "
           "if ($t) { ConvertTo-Json -Compress -InputObject @($t.Actions | ForEach-Object { "
           "@{Execute = $_.Execute; Arguments = $_.Arguments; WorkingDirectory = $_.WorkingDirectory} }) }")
 PS_SET = ("$ErrorActionPreference = 'Stop'; "
           "$a = New-ScheduledTaskAction -Execute $env:JARVIS_TASK_EXE -Argument $env:JARVIS_TASK_ARGS "
           "-WorkingDirectory $env:JARVIS_TASK_WD; "
-          "Set-ScheduledTask -TaskName jarvis -Action $a | Out-Null")
+          "Set-ScheduledTask -TaskName $env:JARVIS_TASK_NAME -Action $a | Out-Null")
 
 
 def old():
@@ -79,7 +84,52 @@ def _run(argv, env=None):
 
 
 def _ps(script, env=None):
+    env = {**(env or os.environ), "JARVIS_TASK_NAME": TASK}
     return _run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], env)
+
+
+@contextlib.contextmanager
+def _lock():
+    """ROOT/.relocate.lock 을 기다리지 않고 잡는다. 잡으면 True, 다른 프로세스가 쥐고 있으면 False."""
+    os.makedirs(launch.ROOT, exist_ok=True)
+    with open(os.path.join(launch.ROOT, LOCK), "a+") as f:
+        try:
+            if os.name == "nt":
+                import msvcrt
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            if os.name == "nt":
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+            # POSIX 는 파일을 닫으면 풀린다
+
+
+def _task_dir(a):
+    """설치기(install-windows.ps1)가 만든 모양의 action 이면 그 폴더, 아니면 None.
+    pythonw.exe "<폴더>\\deploy\\jarvis-win.pyw" 하나(따옴표는 없어도 됨, 다른 인자 없음), 작업 폴더는 <폴더> 또는 비어 있음."""
+    exe, args, wd = a.get("Execute") or "", (a.get("Arguments") or "").strip(), a.get("WorkingDirectory") or ""
+    if os.path.basename(exe.replace("\\", "/")).lower() != "pythonw.exe":
+        return None
+    if len(args) >= 2 and args[0] == args[-1] == '"':
+        args = args[1:-1]
+    elif any(c.isspace() for c in args):  # 따옴표 없이 공백이 있으면 인자가 여럿이다
+        return None
+    if '"' in args or not os.path.isabs(args):
+        return None
+    deploy, pyw = os.path.split(args)
+    d, name = os.path.split(deploy)
+    if pyw.lower() != "jarvis-win.pyw" or name.lower() != "deploy" or (wd and not same(wd, d)):
+        return None
+    return d
 
 
 def _write(path, data):
@@ -137,11 +187,8 @@ def registered():
             acts = [acts] if isinstance(acts, dict) else acts
             if not acts or len(acts) != 1:  # 설치기가 만드는 작업은 action 이 하나다. 다른 모양은 손대지 않는다
                 return None
-            a = acts[0]
-            wd = a.get("WorkingDirectory") or ""
-            if same(wd, old()) or old().lower() in (a.get("Arguments") or "").lower():
-                return {"kind": "task", "path": None, "raw": a, "wd": wd or old(), "dir": old()}
-            return {"kind": "task", "path": None, "raw": a, "wd": wd, "dir": wd}
+            d = _task_dir(acts[0])
+            return {"kind": "task", "path": None, "raw": acts[0], "wd": d, "dir": d} if d else None
         path = os.path.join(home, ".config", "systemd", "user", "jarvis.service")
         with open(path, "rb") as f:
             raw = f.read()
@@ -174,9 +221,7 @@ def _register(reg, new):
             return f"systemctl --user daemon-reload 실패({code}): {err}"
         return None
     a = reg["raw"]
-    args = a.get("Arguments") or ""
-    for lit in {reg["wd"], old()}:  # 작업 폴더와 인자(pyw 경로)가 같은 옛 경로를 다르게 적었을 수 있다
-        args = re.sub(re.escape(lit), lambda _: new, args, flags=re.I)
+    args = '"' + os.path.join(new, "deploy", "jarvis-win.pyw") + '"'  # 고쳐 쓰지 않고 설치기 모양으로 새로 만든다
     env = {**os.environ, "JARVIS_TASK_EXE": a.get("Execute") or "", "JARVIS_TASK_ARGS": args, "JARVIS_TASK_WD": new}
     code, _, err = _ps(PS_SET, env)
     return None if code == 0 else f"Set-ScheduledTask 실패({code}, 관리자 권한이 필요할 수 있습니다): {err}"
@@ -273,21 +318,40 @@ def _cleanup(reg, o, a, steps, dry_run):
     return "cleaned", f"옛 폴더를 {dest} 로 옮겼습니다"
 
 
+def _skip(o):
+    """옮길 것이 아니면 그 이유. 파일을 읽기만 한다(.git 이면 등록도 읽지 않는다)."""
+    if not os.path.isdir(o):
+        return "옛 배치(~/Workspace/jarvis)가 없습니다"
+    if os.path.lexists(os.path.join(o, ".git")):
+        return "개발 체크아웃(.git)이라 건드리지 않습니다"
+    if not _code(o):
+        return "옛 폴더에 jarvis 코드가 없습니다"
+    return None
+
+
 def run(dry_run=False):
-    """한 번 판정하고 할 수 있는 만큼 한다.
-    shortcut: 프로세스 사이 잠금이 없다(게이트웨이와 설치기가 동시에 돌면 한쪽이 failed 로 끝난다). 겹치는 일이 잦아지면 ROOT 에 잠금을 둔다."""
+    """한 번 판정하고 할 수 있는 만큼 한다. 옮길 것이 있으면 잠금 안에서만 한다(dry-run 은 읽기만 하므로 잠그지 않는다)."""
+    why = _skip(old())
+    if why:
+        return {"state": "noop", "detail": why, "steps": [], **({"dry_run": True} if dry_run else {})}
+    if dry_run:
+        return _relocate(True)
+    with _lock() as held:
+        if not held:
+            return {"state": "busy", "detail": "다른 프로세스가 이전 중입니다", "steps": []}
+        return _relocate(False)
+
+
+def _relocate(dry_run):
     o, a, steps = old(), app(), []
 
     def done(state, detail):
         r = {"state": state, "detail": detail, "steps": steps}
         return {**r, "dry_run": True} if dry_run else r
 
-    if not os.path.isdir(o):
-        return done("noop", "옛 배치(~/Workspace/jarvis)가 없습니다")
-    if os.path.lexists(os.path.join(o, ".git")):
-        return done("noop", "개발 체크아웃(.git)이라 건드리지 않습니다")
-    if not _code(o):
-        return done("noop", "옛 폴더에 jarvis 코드가 없습니다")
+    why = _skip(o)  # 잠금을 잡는 사이에 다른 프로세스가 끝냈을 수 있다
+    if why:
+        return done("noop", why)
     reg = registered()
     if not reg:
         return done("noop", "서비스 등록을 찾지 못했습니다")
