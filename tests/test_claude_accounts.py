@@ -29,7 +29,7 @@ class StoreCase(unittest.TestCase):
         self.root = tmp.name
         os.mkdir(os.path.join(self.root, "cache"), 0o700)
         for name, kw in (("_root", {"return_value": self.root}), ("_live_identity", {"return_value": ("a@example.com", "o1")}),
-                         ("binary", {"return_value": None}), ("_cache", {"new": None}), ("_device", {"new": None}),
+                         ("binary", {"return_value": None}), ("_cache", {"new": None}), ("_device", {"new": None}), ("_discovered", {"new": False}),
                          ("ensure", {"side_effect": AssertionError("독립 경로는 설치하지 않는다")})):
             p = mock.patch.object(claude_accounts, name, **kw)
             setattr(self, name.strip("_"), p.start())
@@ -56,6 +56,28 @@ class StoreCase(unittest.TestCase):
         p = mock.patch.object(claude_accounts, "_json", return_value={"accounts": list(rows), **top})
         self.addCleanup(p.stop)
         return p.start()
+
+    def independent_mocks(self, orca=()):
+        """독립 경로의 Claude 밖 수집기를 비우고 Orca 값만 준다."""
+        empty = {"status": "unavailable", "accounts": []}
+        patches = [mock.patch.object(independent_usage, "_caam", side_effect=RuntimeError("없음")),
+                   mock.patch.object(independent_usage, "_opencode", return_value=empty),
+                   mock.patch.object(independent_usage.codex_native_usage, "read", return_value=[]),
+                   *[mock.patch.object(m, "read", return_value=empty) for m in (independent_usage.antigravity_usage, independent_usage.kimi_usage,
+                                                                               independent_usage.zcode_usage, independent_usage.gemini_usage, independent_usage.minimax_usage)],
+                   mock.patch.object(independent_usage.orca_usage, "_orca", return_value={"providers": list(orca)}),
+                   mock.patch.object(independent_usage.cli_login, "available", return_value=[]),
+                   mock.patch.object(independent_usage.cli_login, "fresh", return_value=[])]
+
+        class Together:
+            def __enter__(self):
+                for p in patches:
+                    p.start()
+
+            def __exit__(self, *exc):
+                for p in patches:
+                    p.stop()
+        return Together()
 
     def keepalive(self, **kw):
         self.write("cache/keepalive.json", {"schemaVersion": 1, "checkedAt": time.time() - 300, "ok": True, "action": "none", "note": None,
@@ -676,27 +698,6 @@ class NoAccountsTest(StoreCase):
                 claude = next(p for p in independent_usage.read(force=force)["providers"] if p["id"] == "claude")
                 self.assertEqual((claude["accounts"], claude["login"]["state"]), ([], "keychain"), force)
 
-    def independent_mocks(self):
-        empty = {"status": "unavailable", "accounts": []}
-        patches = [mock.patch.object(independent_usage, "_caam", side_effect=RuntimeError("없음")),
-                   mock.patch.object(independent_usage, "_opencode", return_value=empty),
-                   mock.patch.object(independent_usage.codex_native_usage, "read", return_value=[]),
-                   *[mock.patch.object(m, "read", return_value=empty) for m in (independent_usage.antigravity_usage, independent_usage.kimi_usage,
-                                                                               independent_usage.zcode_usage, independent_usage.gemini_usage, independent_usage.minimax_usage)],
-                   mock.patch.object(independent_usage.orca_usage, "_orca", return_value={"providers": []}),
-                   mock.patch.object(independent_usage.cli_login, "available", return_value=[]),
-                   mock.patch.object(independent_usage.cli_login, "fresh", return_value=[])]
-
-        class Together:
-            def __enter__(self):
-                for p in patches:
-                    p.start()
-
-            def __exit__(self, *exc):
-                for p in patches:
-                    p.stop()
-        return Together()
-
     def test_independent_keeps_the_provider_for_login(self):
         """covers: USAGE-7. 계정이 없어 확인 불가로 남더라도 칸은 남아 복구 안내를 보인다"""
         self.keepalive(ok=False, error={"type": "no_credentials", "message": "m"})
@@ -837,6 +838,81 @@ class SwitchRaceTest(StoreCase):
         """covers: USAGE-6"""
         self.assertEqual(self.active(claude_accounts.read(force=True)), ["1"])
         self.assertEqual(self.lists, 1)
+
+
+class DiscoveryTest(StoreCase):
+    """저장소를 읽지 못하는 기기: CLI 로 계정을 찾은 적이 있는지와 찾은 적이 없는지를 나눈다."""
+
+    def setUp(self):
+        super().setUp()
+        self.store(time.time() - 60)
+        os.chmod(os.path.join(self.root, "sequence.json"), 0o644)  # _private_json 이 거부한다
+        self.assertIsNone(claude_accounts._store_read())
+
+    def age(self):
+        claude_accounts._cache = (time.monotonic() - claude_accounts.config.CLAUDE_STALE_S - 1, claude_accounts._cache[1])
+
+    def test_accounts_found_through_the_cli_do_not_vanish_after_the_threshold(self):
+        """covers: USAGE-6"""
+        run = self.hswap(hswap_row())
+        self.assertEqual(len(claude_accounts.read(force=True)["accounts"]), 1)
+        self.assertEqual(len(claude_accounts.read()["accounts"]), 1)  # 기준 안: 묶음을 쓰고 다시 부르지 않는다
+        self.assertEqual(run.call_count, 1)
+        self.age()
+        self.assertEqual(len(claude_accounts.read()["accounts"]), 1)
+        self.assertEqual(run.call_count, 2)
+
+    def test_never_discovered_stays_none_without_spawning_hswap(self):
+        """covers: USAGE-6"""
+        run = self.hswap(hswap_row())
+        for _ in range(3):
+            self.assertIsNone(claude_accounts.read())
+        run.assert_not_called()
+
+    def test_failed_or_empty_discovery_is_not_discovery(self):
+        """covers: USAGE-6"""
+        run = self.hswap()
+        run.side_effect = RuntimeError("locked")
+        self.assertEqual(claude_accounts.read(force=True), {"error": "locked"})
+        self.assertIsNone(claude_accounts.read())
+        run.side_effect = None
+        run.return_value = {"accounts": []}
+        self.assertIsNone(claude_accounts.read(force=True))
+        self.assertIsNone(claude_accounts.read())
+        self.assertEqual(run.call_count, 2)
+
+    def test_empty_answer_ends_discovery(self):
+        """covers: USAGE-6. hswap 이 계정이 없다고 답하면 찾은 기록을 지워 다시 부르지 않는다"""
+        run = self.hswap(hswap_row())
+        claude_accounts.read(force=True)
+        self.age()
+        run.return_value = {"accounts": []}
+        self.assertIsNone(claude_accounts.read())
+        self.assertEqual(run.call_count, 2)
+        self.age()
+        self.assertIsNone(claude_accounts.read())
+        self.assertEqual(run.call_count, 2)
+
+    def test_failed_recheck_reports_the_error_and_tries_again(self):
+        """covers: USAGE-6. 일시 실패가 찾은 기록을 지우지 않는다"""
+        run = self.hswap(hswap_row())
+        claude_accounts.read(force=True)
+        self.age()
+        run.side_effect = RuntimeError("locked")
+        self.assertEqual(claude_accounts.read(), {"error": "locked"})
+        self.age()
+        run.side_effect = None
+        self.assertEqual(len(claude_accounts.read()["accounts"]), 1)
+        self.assertEqual(run.call_count, 3)
+
+    def test_recheck_does_not_start_the_installer(self):
+        """covers: USAGE-6"""
+        self.hswap(hswap_row())
+        claude_accounts.read(force=True)
+        self.age()
+        self.binary.return_value = None
+        self.assertIsNone(claude_accounts.read())
+        self.ensure.assert_not_called()
 
 
 class AliasTest(unittest.TestCase):

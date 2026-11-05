@@ -48,6 +48,7 @@ STATUS = {
 }
 _lock = threading.Lock()
 _cache = None  # (monotonic, 결과)
+_discovered = False  # hswap 이 마지막으로 답한 때 계정을 주었다. 저장소를 읽지 못해도 기준이 지나면 다시 묻는 근거다
 _device = None  # (monotonic, 키체인에 닿지 못함). hswap 이 답한 기기 상태. 계정 행과 따로 두어 계정이 없거나 다음 조회가 실패해도 남는다
 _switched = 0  # switch() 가 끝난 횟수. 이것이 바뀌면 그 전에 시작한 읽기의 값은 전환 전 값일 수 있다
 # 자동 설치·올리기: 검증한 버전으로 고정한다(서비스가 최신판을 저절로 받아 실행하지 않게). PyPI 배포본이 그 태그의 소스와 같은지
@@ -257,7 +258,7 @@ def live(force=False, install=True):
     install 이면 hswap 이 없을 때 ensure() 가 설치를 시작하고 그 진행·실패를 error 로 준다(호환 경로만. 독립 경로는 설치하지 않는다).
     hswap 이 답하면 최상위 keychainUnavailable(0.2.2 의 추가 필드. 없으면 아니라고 본다)을 _device 에 적는다. 실패한 조회는 건드리지 않는다.
     force 는 jarvis 의 30초 묶음만 건너뛴다(프로바이더 조회 간격은 hswap 이 정한다)."""
-    global _cache, _device
+    global _cache, _device, _discovered
     exe = binary()
     if not exe:
         msg = ensure() if install else None
@@ -274,6 +275,7 @@ def live(force=False, install=True):
             body = _json(exe, "list")
             accounts = [account(r) for r in body.get("accounts") or [] if isinstance(r, dict)]
             _device = (time.monotonic(), body.get("keychainUnavailable") is True)
+            _discovered = bool(accounts)  # 실패한 조회는 건드리지 않는다: 일시 실패로 계정을 잊지 않게
             out = {"accounts": accounts, "fetched_at": time.time()} if accounts else None
         except Exception as e:
             out = {"error": scrub_home(str(e))[:200] or type(e).__name__}
@@ -471,8 +473,8 @@ def _read(force, install):
     recent = held[1] if held and time.monotonic() - held[0] < config.CLAUDE_STALE_S else None
     recent = recent if recent and recent.get("accounts") else None
     device = _device
-    # 계정도 저장소도 없는 기기는 묻지 않지만, 경고가 있던 기기는 기준이 지나면 다시 묻는다
-    recheck = bool(device and device[1]) and not _keychain_down()
+    # 계정을 찾은 적도 저장소도 없는 기기는 묻지 않는다. CLI 로 계정을 찾았거나 경고가 있던 기기는 기준이 지나면 다시 묻는다
+    recheck = _discovered or (bool(device and device[1]) and not _keychain_down())
     if store is None and recent is None and not force and not install and not recheck:
         out = None
     else:

@@ -18,7 +18,7 @@ class IndependentUsageTest(unittest.TestCase):
         self.fresh = p.start()
         self.addCleanup(p.stop)
         # 강제 조회는 hswap 을 부른다: 이 기기의 hswap·keepalive.json 에 닿지 않게 한다
-        for name, kw in (("binary", {"return_value": None}), ("_keepalive", {"return_value": None}), ("_cache", {"new": None})):
+        for name, kw in (("binary", {"return_value": None}), ("_keepalive", {"return_value": None}), ("_cache", {"new": None}), ("_discovered", {"new": False})):
             p = mock.patch.object(independent_usage.claude_accounts, name, **kw)
             p.start()
             self.addCleanup(p.stop)
