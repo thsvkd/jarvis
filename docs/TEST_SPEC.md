@@ -54,16 +54,16 @@
 
 | ID | 케이스 | 테스트 | 상태 |
 | --- | --- | --- | --- |
-| RELOC-1 | WHEN `~/Workspace/jarvis` 가 .git 없는 실행본이고 서비스 등록(plist·유닛·예약 작업)이 그곳을 가리키면 THE SYSTEM SHALL 그 폴더를 `launch.ROOT/app` 으로 복사(`__pycache__` 제외, 심링크 유지)하고 등록이 app 을 가리키게 고친다. plist 는 옛 경로가 든 모든 값, 유닛은 `WorkingDirectory=` 줄만 바꾸고 원본은 `.bak-relocate` 로 한 번만 남기며, Linux 는 daemon-reload 하고 실패하면 유닛을 원래 바이트로 되돌리고 만든 app 을 지운다. 경로는 실제 경로로 비교한다($HOME 이 심링크여도) | `tests/test_relocate.py` | GREEN (단위; 가짜 launchctl·systemctl·powershell) |
-| RELOC-2 | WHEN Windows 에서 `Set-ScheduledTask` 가 거부되면 THE SYSTEM SHALL 예약 작업을 바꾸지 않은 채 이번에 만든 app 을 지우고 failed 와 이유를 낸다 | `tests/test_relocate.py` | GREEN (단위; 실제 Windows·비관리자 토큰 미검증) |
-| RELOC-3 | WHEN 등록이 app 을 가리키면 THE SYSTEM SHALL 서비스 관리자가 로드한 설정도 app 일 때만 옛 폴더를 지우지 않고 `ROOT/workspace-old` 로 옮긴다. macOS 에서 launchd 가 아직 옛 plist 를 쓰면 옛 폴더를 남기고 `pending_reload` 를 내며 bootout·bootstrap·kickstart 를 부르지 않는다 | `tests/test_relocate.py` | GREEN (단위) |
+| RELOC-1 | WHEN `~/Workspace/jarvis` 가 .git 없는 실행본이고 서비스 등록(plist·유닛·예약 작업)이 그곳을 가리키면 THE SYSTEM SHALL 그 폴더를 `launch.ROOT/app` 으로 복사(`__pycache__` 제외, 심링크 유지)하고 등록이 app 을 가리키게 고친다. plist 는 옛 경로가 든 모든 값, 유닛은 `WorkingDirectory=` 줄만 바꾸고 원본은 `ROOT/<파일 이름>.bak-relocate` 로 한 번만 남기며, Linux 는 daemon-reload 하고 실패하면 유닛을 원래 바이트로 되돌리고 이번에 만든 app 만 지운다(이미 있던 app 은 남긴다). 경로는 실제 경로로 비교한다($HOME 이 심링크여도) | `tests/test_relocate.py` | GREEN (단위; 가짜 launchctl·systemctl·powershell) |
+| RELOC-2 | WHEN Windows 에서 `Set-ScheduledTask` 가 거부되면 THE SYSTEM SHALL 예약 작업을 바꾸지 않은 채 이번에 만든 app 을 지우고 failed 와 이유를 내며, 등록이 이미 바뀌었을 수 있으면(바꾼 뒤 확인 실패) app 을 지우지 않는다 | `tests/test_relocate.py` | GREEN (단위; 실제 Windows·비관리자 토큰 미검증) |
+| RELOC-3 | WHEN 등록이 app 을 가리키면 THE SYSTEM SHALL 서비스 관리자가 로드한 설정도 app 이고 등록 내용(유닛 주석 제외)에 옛 경로가 남지 않았을 때만 옛 폴더를 지우지 않고 `ROOT/workspace-old` 로 옮긴다. macOS 에서 launchd 가 아직 옛 plist 를 쓰면 옛 폴더를 남기고 `pending_reload` 를 내며 bootout·bootstrap·kickstart 를 부르지 않는다 | `tests/test_relocate.py` | GREEN (단위) |
 | RELOC-4 | WHEN 서비스 등록이 없거나 옛 폴더가 아닌 곳을 가리키면(pm2·수동) THE SYSTEM SHALL 아무것도 바꾸지 않는다 | `tests/test_relocate.py` | GREEN (단위) |
 | RELOC-5 | WHEN 이전을 여러 번 돌리거나 지난번 복사가 `ROOT/.app-tmp-*` 로 남았거나 app 이 코드 없이 있으면 THE SYSTEM SHALL 같은 결과를 내고(백업을 덮지 않는다) 남은 임시 폴더를 치운 뒤 다시 복사하며, 코드 없는 app 은 쓰지 않고 등록도 바꾸지 않는다 | `tests/test_relocate.py` | GREEN (단위) |
 | RELOC-6 | WHEN `python -m jarvis relocate --dry-run` 이면 THE SYSTEM SHALL 할 일만 보이고 파일·등록을 바꾸지 않는다 | `tests/test_relocate.py` | GREEN (단위) |
-| RELOC-7 | WHEN 지금 프로세스가 옛 폴더의 코드로 돌거나 다른 프로세스가 옛 폴더를 작업 폴더로 쓰면 THE SYSTEM SHALL 등록만 고치고 옛 폴더는 옮기지 않는다(registered) | `tests/test_relocate.py` | GREEN (단위) |
+| RELOC-7 | WHEN 지금 프로세스가 옛 폴더의 코드로 돌거나, 다른 프로세스가 옛 폴더를 작업 폴더나 명령줄 경로로 쓰거나, psutil 이 없으면 THE SYSTEM SHALL 등록만 고치고 옛 폴더는 옮기지 않는다(registered) | `tests/test_relocate.py` | GREEN (단위) |
 | RELOC-8 | WHEN `~/Workspace/jarvis` 에 .git(폴더·파일)이 있으면 THE SYSTEM SHALL 어떤 OS 에서도 파일·등록을 바꾸지 않고 외부 명령을 하나도 부르지 않으며, 설치기는 그 체크아웃으로 등록된 기기에서 릴리스를 받지도 등록을 바꾸지도 않는다 | `tests/test_relocate.py`, `tests/test_install_sh.py` | GREEN (단위) |
 | RELOC-9 | WHEN 게이트웨이가 `HEALTHY_S` 를 넘겨 `launch.confirm()` 을 마치면 THE SYSTEM SHALL relocate 를 한 번 부르고, 실패해도 게이트웨이는 계속 돈다. 옛 배치의 런처가 업데이트 버튼이 받은 새 릴리스로 넘어가면 그 릴리스의 relocate 가 돈다 | `tests/test_relocate.py` | GREEN (단위; macOS 흐름은 macOS 에서만) |
-| RELOC-10 | WHEN 옛 배치가 있는 기기에서 `install.sh` 를 다시 실행하면 THE SYSTEM SHALL 새 릴리스를 app 에 받고 app 의 코드로 relocate 를 부르며, macOS 에서 `pending_reload` 이면 LaunchAgent 를 bootout·bootstrap 한 뒤 다시 불러 옛 폴더를 옮긴다. Linux 는 재시작하지 않는다 | `tests/test_install_sh.py` | 부분 (macOS 단위 GREEN; Linux 케이스는 Linux 에서만 돈다. install.ps1 은 pwsh 가 없어 미검증) |
+| RELOC-10 | WHEN 옛 배치가 있는 기기에서 `install.sh` 를 다시 실행하면 THE SYSTEM SHALL 새 릴리스를 app 에 받고 app 의 코드로 relocate 를 부르며, macOS 에서 `pending_reload` 이면 LaunchAgent 를 bootout·bootstrap(실패하면 다시 시도) 한 뒤 다시 불러 옛 폴더를 옮긴다. Linux 는 재시작하지 않는다 | `tests/test_install_sh.py` | 부분 (macOS 단위 GREEN; Linux 케이스는 Linux 에서만 돈다. install.ps1 은 pwsh 가 없어 미검증) |
 
 ## core 전환
 

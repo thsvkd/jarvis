@@ -21,7 +21,8 @@ if [ "$1" = venv ]; then mkdir -p "$4/bin" && printf '#!/bin/sh\\nexec "%s" "$@"
     "launchctl": '''echo "launchctl $*" >> "$LOG"
 case "$1" in
   print) [ -f "$HOME/.loaded" ] && cat "$HOME/.loaded" ;;
-  bootstrap) python3 -c 'import plistlib, sys; print("working directory = " + plistlib.load(open(sys.argv[1], "rb"))["WorkingDirectory"])' "$3" > "$HOME/.loaded" ;;
+  bootstrap) if [ -f "$HOME/.bootstrap-fails-once" ]; then rm "$HOME/.bootstrap-fails-once"; exit 5; fi
+    python3 -c 'import plistlib, sys; print("working directory = " + plistlib.load(open(sys.argv[1], "rb"))["WorkingDirectory"])' "$3" > "$HOME/.loaded" ;;
   bootout) rm -f "$HOME/.loaded" ;;
 esac''',
     "systemctl": '''echo "systemctl $*" >> "$LOG"
@@ -209,17 +210,18 @@ class InstallTest(unittest.TestCase):
     def test_an_old_mac_install_moves_to_app_and_launchd_rereads_the_agent(self):
         """covers: BOOT-1, RELOC-10"""
         agent = self.old_layout()
+        open(os.path.join(self.home, ".bootstrap-fails-once"), "w").close()  # bootout 직후 bootstrap 이 한 번 실패한다
         r = self.run_install()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertTrue(os.path.isfile(os.path.join(self.app, "jarvis", "relocate.py")))  # 새 릴리스를 app 에 받았다
         with open(agent, "rb") as f:
             self.assertEqual(plistlib.load(f)["WorkingDirectory"], self.app)
-        self.assertTrue(os.path.isfile(agent + ".bak-relocate"))
+        self.assertTrue(os.path.isfile(os.path.join(self.share, "dev.jarvis.plist.bak-relocate")))
         with open(self.log) as f:
             log = f.read().splitlines()
         uid = os.getuid()
         i = log.index(f"launchctl bootout gui/{uid}/dev.jarvis")
-        self.assertEqual(log[i + 1], f"launchctl bootstrap gui/{uid} {agent}")
+        self.assertEqual(log[i + 1:i + 3], [f"launchctl bootstrap gui/{uid} {agent}"] * 2)  # 한 번 더 했다
         self.assertFalse(os.path.exists(self.old))  # 다시 읽힌 뒤라 옮겼다
         self.assertTrue(os.path.isfile(os.path.join(self.share, "workspace-old", "jarvis", "__init__.py")))
         self.assertIn("jarvis module orca apply --json --plan-id abc123", log)

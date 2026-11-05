@@ -48,12 +48,12 @@ if (-not $admin -and -not $DryRun) { Fail "관리자 PowerShell 에서 실행하
 $py = Find-Python
 $steps = @()
 if (-not $py) { $steps += "winget install -e --id Python.Python.3.13 --scope user" }
-if (-not (Test-Path $repo)) { $steps += "release bundle -> $repo (sha256 verified)" }
-if (-not (Test-Path $cfg)) { $steps += "config $cfg (core = $Core)" }
 $task = Get-ScheduledTask -TaskName jarvis -ErrorAction SilentlyContinue
 # 개발 체크아웃(.git)으로 이미 등록된 기기는 그대로 둔다(받지도 옮기지도 않는다)
 if (-not (Test-Path $repo) -and (Test-Path (Join-Path $old ".git")) -and $task) { $repo = $old }
 $relocate = (Test-Path $old) -and ($repo -ne $old)
+if (-not (Test-Path $repo)) { $steps += "release bundle -> $repo (sha256 verified)" }
+if (-not (Test-Path $cfg)) { $steps += "config $cfg (core = $Core)" }
 if (-not $task) { $steps += "deploy\install-windows.ps1 (firewall rule jarvis-9300, scheduled task jarvis)" }
 if ($relocate) { $steps += "relocate $old -> $repo (python -m jarvis.relocate)" }
 $steps += "modules: orca, hooks, setup (plan -> apply with its plan_id)"
@@ -75,9 +75,12 @@ if (-not (Test-Path $repo)) {
         $tgz = Join-Path $tmp "jarvis.tar.gz"
         Invoke-WebRequest $manifest.url -OutFile $tgz -UseBasicParsing
         if ((Get-FileHash $tgz -Algorithm SHA256).Hash -ne $manifest.sha256.ToUpper()) { Fail "릴리스 묶음의 sha256 이 매니페스트와 다릅니다" }
-        New-Item -ItemType Directory $repo -Force | Out-Null
-        tar -xzf $tgz -C $repo --strip-components 1
-        if ($LASTEXITCODE -ne 0) { Fail "릴리스 묶음을 풀지 못했습니다" }
+        # 다 푼 뒤에만 app 이름을 준다(반쯤 푼 app 을 쓰지 않게. 남은 .app-tmp-* 는 relocate 가 치운다)
+        $part = Join-Path (Split-Path -Parent $repo) (".app-tmp-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
+        New-Item -ItemType Directory $part -Force | Out-Null
+        tar -xzf $tgz -C $part --strip-components 1
+        if ($LASTEXITCODE -ne 0) { Remove-Item -Recurse -Force $part -ErrorAction SilentlyContinue; Fail "릴리스 묶음을 풀지 못했습니다" }
+        Move-Item $part $repo
     } finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
 }
 

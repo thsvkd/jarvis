@@ -61,8 +61,12 @@ if [ ! -d "$APP" ]; then
   curl -fsSL "$url" -o "$tmp/jarvis.tar.gz"
   if command -v sha256sum >/dev/null 2>&1; then echo "$sum  $tmp/jarvis.tar.gz" | sha256sum -c - >/dev/null
   else echo "$sum  $tmp/jarvis.tar.gz" | shasum -a 256 -c - >/dev/null; fi
-  mkdir -p "$APP"
-  tar -xzf "$tmp/jarvis.tar.gz" -C "$APP" --strip-components 1
+  # 다 푼 뒤에만 app 이름을 준다(끊기면 남는 .app-tmp-* 는 relocate 가 치운다. 반쯤 푼 app 을 쓰지 않게)
+  mkdir -p "$SHARE"
+  part=$(mktemp -d "$SHARE/.app-tmp-XXXXXX")
+  tar -xzf "$tmp/jarvis.tar.gz" -C "$part" --strip-components 1
+  chmod 755 "$part"
+  mv "$part" "$APP"
 fi
 
 # 3. 설정
@@ -112,8 +116,10 @@ if [ -d "$OLD" ] && [ "$APP" != "$OLD" ]; then
   # macOS 는 launchd 가 plist 를 다시 읽어야 app 에서 뜬다. 사용자가 실행한 설치기라 여기서 다시 읽힌 뒤 옛 폴더를 옮긴다
   if [ "$OS" = Darwin ] && [ "$state" = pending_reload ]; then
     launchctl bootout "gui/$(id -u)/dev.jarvis" 2>/dev/null || true
-    launchctl bootstrap "gui/$(id -u)" "$AGENT"
-    "$PY" -m jarvis.relocate || true
+    # bootout 직후의 bootstrap 은 작업이 아직 내려가는 중이면 실패할 수 있다(5: Input/output error). 몇 번 다시 한다
+    for i in 1 2 3 4 5; do launchctl bootstrap "gui/$(id -u)" "$AGENT" 2>/dev/null && break; sleep 1; done
+    if launchctl print "gui/$(id -u)/dev.jarvis" >/dev/null 2>&1; then "$PY" -m jarvis.relocate || true
+    else echo "jarvis 를 다시 띄우지 못했습니다. 직접 실행하세요: launchctl bootstrap gui/$(id -u) $AGENT" >&2; fi
   fi
 fi
 

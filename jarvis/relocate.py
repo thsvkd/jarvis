@@ -83,9 +83,12 @@ def _ps(script, env=None):
 
 
 def _write(path, data):
-    """원본을 <파일>.bak-relocate 로 한 번만 남기고 임시 파일에서 이름을 바꿔 쓴다."""
-    if not os.path.exists(path + BAK):
-        shutil.copy2(path, path + BAK)
+    """원본을 ROOT/<파일 이름>.bak-relocate 로 한 번만 남기고 임시 파일에서 이름을 바꿔 쓴다.
+    백업은 LaunchAgents·유닛 폴더 밖에 둔다(서비스 관리자가 같은 Label 의 옛 정의로 읽지 않게)."""
+    bak = os.path.join(launch.ROOT, os.path.basename(path) + BAK)
+    if not os.path.exists(bak):
+        os.makedirs(launch.ROOT, exist_ok=True)
+        shutil.copy2(path, bak)
     fd, tmp = tempfile.mkstemp(prefix="." + os.path.basename(path) + "-", dir=os.path.dirname(path))
     try:
         with os.fdopen(fd, "wb") as f:
@@ -150,7 +153,7 @@ def registered():
     except FileNotFoundError:
         return None
     except Exception as e:  # 깨진 plist·유닛·PowerShell 출력: 손대지 않는다
-        print(f"[jarvis] 이전: 서비스 등록을 읽지 못했습니다: {e}", flush=True)
+        print(f"[jarvis] 이전: 서비스 등록을 읽지 못했습니다: {e}", file=sys.stderr, flush=True)  # --json 출력을 깨지 않게
         return None
 
 
@@ -192,17 +195,39 @@ def _loaded(reg):
 
 
 def _users(d):
-    """d 아래를 작업 폴더로 쓰는 다른 프로세스. psutil 이 없으면 확인할 수 없으므로 있다고 본다."""
+    """d 아래를 작업 폴더로 쓰거나 명령줄에 d 아래 경로가 있는 다른 프로세스. psutil 이 없으면 확인할 수 없으므로 있다고 본다."""
     try:
         import psutil
     except ImportError:
         return ["?"]
     found = []
-    for p in psutil.process_iter(["pid", "cwd"]):
-        cwd = p.info.get("cwd")
-        if cwd and p.info["pid"] != os.getpid() and under(cwd, d):
+    for p in psutil.process_iter(["pid", "cwd", "cmdline"]):
+        paths = [p.info.get("cwd")] + [a for a in p.info.get("cmdline") or [] if os.path.isabs(a)]
+        if p.info["pid"] != os.getpid() and any(x and under(x, d) for x in paths):
             found.append(p.info["pid"])
     return found
+
+
+def _mentions(reg, o):
+    """등록 내용(유닛은 주석 빼고) 어딘가에 아직 옛 경로가 있는가. 있으면 옛 폴더를 옮기면 그 값이 깨진다."""
+    if reg["kind"] == "launchd":
+        text = json.dumps(plistlib.loads(reg["raw"]), default=str, ensure_ascii=False)
+    elif reg["kind"] == "systemd":
+        text = "\n".join(l for l in reg["raw"].decode("utf-8", "replace").splitlines() if not l.lstrip().startswith(("#", ";")))
+    else:
+        text = " ".join(str(v) for v in reg["raw"].values())
+    text = text.lower().replace("\\", "/")
+    return any(x.lower().replace("\\", "/") in text for x in (o, os.path.realpath(o), "%h/Workspace/jarvis"))
+
+
+def _discard(d):
+    """이번에 만든 app 을 지운다. 먼저 임시 이름으로 바꿔, 지우다 멈춰도 반쯤 남은 app 을 다음 실행이 쓰지 않게 한다."""
+    dead = os.path.join(os.path.dirname(d), TMP + "dead-" + str(os.getpid()))
+    try:
+        os.replace(d, dead)
+    except OSError:
+        return
+    shutil.rmtree(dead, ignore_errors=True)  # 남으면 다음 _copy 가 치운다
 
 
 def _copy(src, dest):
@@ -223,6 +248,8 @@ def _copy(src, dest):
 
 def _cleanup(reg, o, a, steps, dry_run):
     """등록이 app 을 가리킬 때 옛 폴더를 ROOT/workspace-old 로 옮긴다. (state, detail)."""
+    if _mentions(reg, o):
+        return "registered", "서비스 등록에 아직 옛 경로가 있어 옛 폴더를 남깁니다(손으로 고친 값일 수 있습니다)"
     loaded = _loaded(reg)
     if not same(loaded, a):
         if reg["kind"] == "launchd":
@@ -247,7 +274,8 @@ def _cleanup(reg, o, a, steps, dry_run):
 
 
 def run(dry_run=False):
-    """한 번 판정하고 할 수 있는 만큼 한다."""
+    """한 번 판정하고 할 수 있는 만큼 한다.
+    shortcut: 프로세스 사이 잠금이 없다(게이트웨이와 설치기가 동시에 돌면 한쪽이 failed 로 끝난다). 겹치는 일이 잦아지면 ROOT 에 잠금을 둔다."""
     o, a, steps = old(), app(), []
 
     def done(state, detail):
@@ -277,7 +305,10 @@ def run(dry_run=False):
         else:
             steps.append(f"copy {o} -> {a}")
             if not dry_run:
-                _copy(o, a)
+                try:
+                    _copy(o, a)
+                except OSError as e:
+                    return done("failed", f"옛 폴더를 복사하지 못했습니다: {e}")
                 created = True
         steps.append(f"point {reg['kind']} at {a}")
         if dry_run:
@@ -290,8 +321,10 @@ def run(dry_run=False):
         if not err and not (now and same(now["dir"], a)):
             err = "고친 서비스 등록이 app 을 가리키지 않습니다"
         if err:
-            if created:
-                shutil.rmtree(a, ignore_errors=True)
+            # 등록이 이미 바뀌었을 수 있다(시간 초과·확인 실패). 등록과 로드된 설정이 모두 옛 폴더일 때만 app 을 지운다
+            back = registered()
+            if created and back and same(back["dir"], o) and not same(_loaded(back), a):
+                _discard(a)
             return done("failed", err)
         reg = now
     return done(*_cleanup(reg, o, a, steps, dry_run))

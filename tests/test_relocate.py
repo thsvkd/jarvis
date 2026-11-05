@@ -44,7 +44,11 @@ if "Set-ScheduledTask" in script:
         sys.exit(1)
     put("task.json", json.dumps([{"Execute": os.environ["JARVIS_TASK_EXE"], "Arguments": os.environ["JARVIS_TASK_ARGS"],
                                   "WorkingDirectory": os.environ["JARVIS_TASK_WD"]}]))
+    if state("get-breaks-after-set") is not None:
+        put("get-broken", "1")
 elif "Get-ScheduledTask" in script:
+    if state("get-broken") is not None:
+        sys.exit(1)
     print(state("task.json") or "")
 ''',
 }
@@ -160,14 +164,19 @@ class Mac(Base):
         self.assertTrue(relocate.same(p["WorkingDirectory"], self.app))
         self.assertEqual(p["EnvironmentVariables"]["JARVIS_EXTRA"], self.app + "/static")
         self.assertEqual(p["ProgramArguments"][1:], ["-m", "jarvis"])
-        with open(self.agent + ".bak-relocate", "rb") as f:
+        bak = os.path.join(self.root, "dev.jarvis.plist.bak-relocate")  # LaunchAgents 밖에 둔다
+        with open(bak, "rb") as f:
             self.assertEqual(f.read(), self.original)
+        self.assertEqual(os.listdir(os.path.dirname(self.agent)), ["dev.jarvis.plist"])
         self.assertTrue(os.path.isfile(os.path.join(self.old, "jarvis", "__init__.py")))  # 로드된 WD 라 남긴다
         self.assertFalse([c for c in self.calls() if "bootout" in c or "bootstrap" in c or "kickstart" in c])
         # 다시 돌아도 같다(백업을 덮지 않고 복사도 다시 하지 않는다)
         self.assertEqual(relocate.run()["state"], "pending_reload")
-        with open(self.agent + ".bak-relocate", "rb") as f:
+        with open(bak, "rb") as f:
             self.assertEqual(f.read(), self.original)
+        os.remove(os.path.join(self.state, "launchd-wd"))  # 로드되지 않았거나 launchctl print 가 실패하면 옮기지 않는다
+        self.assertEqual(relocate.run()["state"], "pending_reload")
+        self.assertTrue(os.path.isdir(self.old))
         # launchd 가 plist 를 다시 읽으면(로그인·재부팅) 옛 폴더를 옮긴다
         self.put("launchd-wd", self.app)
         r = relocate.run()
@@ -274,6 +283,45 @@ class Linux(Base):
             p.wait()
         self.assertEqual(relocate.run()["state"], "cleaned")
 
+    def test_a_failed_daemon_reload_keeps_an_app_it_did_not_create(self):
+        """covers: RELOC-1, RELOC-5"""
+        shutil.copytree(self.old, self.app, symlinks=True)
+        self.put("reload-fails", "1")
+        self.assertEqual(relocate.run()["state"], "failed")
+        self.assertEqual(self.read_unit(), self.UNIT)
+        self.assertTrue(os.path.isfile(os.path.join(self.app, "jarvis", "__init__.py")))
+
+    def test_without_psutil_the_old_folder_is_kept(self):
+        """covers: RELOC-7"""
+        with mock.patch.dict(sys.modules, {"psutil": None}):
+            r = relocate.run()
+        self.assertEqual(r["state"], "registered", r)
+        self.assertTrue(os.path.isdir(self.old))
+
+    def test_old_paths_left_in_the_unit_keep_the_old_folder(self):
+        """covers: RELOC-3"""
+        with open(self.unit, "a") as f:
+            f.write("Environment=PYTHONPATH=%h/Workspace/jarvis\n")
+        r = relocate.run()
+        self.assertEqual(r["state"], "registered", r)
+        self.assertTrue(os.path.isdir(self.old))
+        self.assertIn("WorkingDirectory=" + self.app, self.read_unit())
+
+    def test_a_process_with_the_old_tree_on_its_command_line_keeps_it(self):
+        """covers: RELOC-7"""
+        p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", os.path.join(self.old, "jarvis")],
+                             cwd=self.tmp)
+        try:
+            for _ in range(50):
+                if relocate._users(self.old):
+                    break
+                time.sleep(0.05)
+            r = relocate.run()
+            self.assertEqual(r["state"], "registered", r)
+        finally:
+            p.kill()
+            p.wait()
+
     def test_an_absolute_working_directory_is_recognized_too(self):
         """covers: RELOC-1"""
         with open(self.unit, "w") as f:
@@ -313,6 +361,16 @@ class Windows(Base):
         self.assertIn("Access is denied", r["detail"])
         self.assertEqual(self.task_now(), self.task)
         self.assertFalse(os.path.exists(self.app))
+        self.assertTrue(os.path.isdir(self.old))
+
+
+    def test_an_unverifiable_change_keeps_the_app_the_task_may_already_use(self):
+        """covers: RELOC-2"""
+        self.put("get-breaks-after-set", "1")  # Set 은 됐지만 확인(Get)이 실패한다
+        r = relocate.run()
+        self.assertEqual(r["state"], "failed", r)
+        self.assertTrue(relocate.same(self.task_now()[0]["WorkingDirectory"], self.app))
+        self.assertTrue(os.path.isfile(os.path.join(self.app, "jarvis", "__init__.py")))
         self.assertTrue(os.path.isdir(self.old))
 
 

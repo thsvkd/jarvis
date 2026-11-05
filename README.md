@@ -369,8 +369,8 @@ Get-Content -Encoding UTF8 $env:LOCALAPPDATA\jarvis\jarvis.log -Tail 20
 게이트웨이가 새 릴리스로 60초를 버틴 뒤 스스로 옮긴다(업데이트 버튼만 누르면 된다). 계약은 `docs/SPEC.md` 의 "실행본 배치와 이전" 절이다.
 
 - `~/Workspace/jarvis` 에 `.git` 이 있으면(개발 체크아웃) 아무것도 하지 않는다. 서비스 등록이 그 폴더를 가리키지 않아도(pm2·수동) 그대로다.
-- 옛 폴더를 app 으로 복사하고 LaunchAgent plist·systemd 유닛·예약 작업 `jarvis` 가 app 을 가리키게 고친다. 원본 파일은 `<파일>.bak-relocate` 에 남는다.
-- 옛 폴더는 지우지 않고 `~/.local/share/jarvis/workspace-old` 로 옮긴다. 서비스 관리자가 실제로 app 을 쓰고, 옛 폴더에서 도는 프로세스가 없을 때만 옮긴다.
+- 옛 폴더를 app 으로 복사하고 LaunchAgent plist·systemd 유닛·예약 작업 `jarvis` 가 app 을 가리키게 고친다. 원본 파일은 `~/.local/share/jarvis/<파일 이름>.bak-relocate` 에 남는다.
+- 옛 폴더는 지우지 않고 `~/.local/share/jarvis/workspace-old` 로 옮긴다. 서비스 관리자가 실제로 app 을 쓰고, 등록에 옛 경로가 남지 않았고, 옛 폴더에서 도는 프로세스가 없을 때만 옮긴다.
 - **macOS 는 지연 완료다.** launchd 는 plist 를 다시 읽기 전까지(로그인·재부팅·bootout/bootstrap) 옛 폴더에서 띄우므로, 그때까지 옛 폴더를 남긴다(`pending_reload`).
   jarvis 는 원격 기기가 꺼질 수 있어 스스로 다시 읽히지 않는다. 바로 끝내려면 그 기기에서:
 
@@ -384,7 +384,7 @@ $PY -m jarvis relocate --dry-run      # 할 일만 본다
 $PY -m jarvis relocate --json         # 지금 한 번 돈다: {"state": noop|registered|pending_reload|cleaned|failed, "detail", "steps"}
 ```
 
-되돌리기: `workspace-old` 를 `~/Workspace/jarvis` 로 옮기고, `<파일>.bak-relocate` 를 원래 이름으로 되돌린다(Linux 는 `systemctl --user daemon-reload`,
+되돌리기: `workspace-old` 를 `~/Workspace/jarvis` 로 옮기고, `~/.local/share/jarvis/<파일 이름>.bak-relocate` 를 원래 자리(`~/Library/LaunchAgents/`·`~/.config/systemd/user/`)로 되돌린다(Linux 는 `systemctl --user daemon-reload`,
 Windows 는 백업 파일 대신 옛 폴더에서 `deploy\install-windows.ps1` 을 다시 실행한다).
 게이트웨이 로그에는 기동마다 `[jarvis] 실행본 이전: <state> <detail>` 한 줄이 남는다.
 
