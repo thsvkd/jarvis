@@ -30,6 +30,21 @@ case "$2" in is-active) [ -f "$HOME/.active" ] ;; enable) touch "$HOME/.active" 
     "loginctl": 'echo "loginctl $*" >> "$LOG"',
 }
 
+# 설치기의 Linux 이전 흐름을 플랫폼과 상관없이 본다: 첫 호출은 유닛을 app 으로 바꾸고(또는 바꾸지 않고) registered,
+# 다음 호출은 cleaned. 실제 판정은 tests/test_relocate.py 가 본다
+FAKE_RELOCATE = '''import json, os, sys
+log = os.environ["LOG"]
+n = sum(1 for l in open(log) if l.startswith("relocate ")) if os.path.exists(log) else 0
+with open(log, "a") as f:
+    f.write("relocate cwd=%s %s\\n" % (os.getcwd(), " ".join(sys.argv[1:])))
+unit = os.path.expanduser("~/.config/systemd/user/jarvis.service")
+if n == 0 and os.environ.get("FAKE_RELOCATE") == "changes":
+    text = open(unit).read().replace("%h/Workspace/jarvis", os.path.expanduser("~/.local/share/jarvis/app"))
+    open(unit, "w").write(text)
+state = "registered" if n == 0 else "cleaned"
+print(json.dumps({"state": state, "detail": "fake", "steps": []}) if "--json" in sys.argv else state + ": fake")
+'''
+
 FAKE_MAIN = '''import json, os, sys
 with open(os.environ["LOG"], "a") as f:
     f.write("jarvis " + " ".join(sys.argv[1:]) + "\\n")
@@ -48,7 +63,10 @@ class InstallTest(unittest.TestCase):
         bin_dir = os.path.join(self.tmp, "bin")
         os.makedirs(self.home)
         os.makedirs(bin_dir)
-        for name, body in STUBS.items():
+        # 게이트웨이 health 는 바로 답한다고 본다. 그 밖(file:// 매니페스트·묶음)은 실제 curl
+        curl = shutil.which("curl", path="/usr/bin:/bin")
+        stubs = {**STUBS, "curl": 'case "$*" in *api/health*) echo "curl $*" >> "$LOG" ;; *) exec %s "$@" ;; esac' % curl}
+        for name, body in stubs.items():
             path = os.path.join(bin_dir, name)
             with open(path, "w") as f:
                 f.write("#!/bin/sh\n" + body + "\n")
@@ -62,7 +80,7 @@ class InstallTest(unittest.TestCase):
         self.app = os.path.join(self.share, "app")
         self.old = os.path.join(self.home, "Workspace", "jarvis")
 
-    def release(self, old_templates=False):
+    def release(self, old_templates=False, fake_relocate=False):
         """가짜 최신 릴리스 묶음과 매니페스트. old_templates: 1.8.0 이전 릴리스처럼 템플릿의 작업 폴더가 ~/Workspace/jarvis."""
         src = os.path.join(self.tmp, "src", "jarvis-9.9.9")
         shutil.rmtree(src, ignore_errors=True)
@@ -80,6 +98,9 @@ class InstallTest(unittest.TestCase):
             f.write(FAKE_MAIN)
         for name in ("launch.py", "relocate.py"):  # 설치기가 부르는 실제 이전 코드
             shutil.copy(os.path.join(ROOT, "jarvis", name), os.path.join(src, "jarvis"))
+        if fake_relocate:
+            with open(os.path.join(src, "jarvis", "relocate.py"), "w") as f:
+                f.write(FAKE_RELOCATE)
         tgz = os.path.join(self.tmp, "jarvis.tar.gz")
         with tarfile.open(tgz, "w:gz") as t:
             t.add(src, arcname="jarvis-9.9.9")
@@ -278,6 +299,41 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn(f"WorkingDirectory={self.app}\n", self.read(".config", "systemd", "user", "jarvis.service"))
 
+    def old_linux(self, change):
+        self.linux()
+        self.old_layout()
+        unit = os.path.join(self.home, ".config", "systemd", "user", "jarvis.service")
+        os.makedirs(os.path.dirname(unit))
+        with open(os.path.join(ROOT, "deploy", "jarvis.service")) as f:
+            body = f.read().replace("%h/.local/share/jarvis/app", "%h/Workspace/jarvis")
+        with open(unit, "w") as f:
+            f.write(body)
+        with open(os.path.join(self.home, ".config", "jarvis", "config.toml"), "a") as f:
+            f.write("port = 9411\n")
+        self.release(fake_relocate=True)
+        self.env["FAKE_RELOCATE"] = change
+        r = self.run_install()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(self.log) as f:
+            return f.read().splitlines()
+
+    def test_linux_restarts_and_relocates_again_when_the_installer_moved_the_unit(self):
+        """covers: RELOC-10"""
+        log = self.old_linux("changes")
+        relocations = [i for i, line in enumerate(log) if line.startswith("relocate ")]
+        self.assertEqual(len(relocations), 2)
+        restart = log.index("systemctl --user try-restart jarvis")
+        health = log.index("curl -fsS http://127.0.0.1:9411/api/health")
+        self.assertTrue(relocations[0] < restart < health < relocations[1])
+        self.assertTrue(all(log[i].split()[1].endswith("/src") for i in relocations), log)  # 임시 폴더의 새 코드로 돈다
+        self.assertNotIn("launchctl bootout", "\n".join(log))
+
+    def test_linux_does_not_restart_when_the_unit_was_not_changed_now(self):
+        """covers: RELOC-10, BOOT-2"""
+        log = self.old_linux("")
+        self.assertEqual(len([line for line in log if line.startswith("relocate ")]), 1)
+        self.assertFalse([line for line in log if "restart" in line or "api/health" in line])
+
     def test_a_dev_checkout_install_is_left_as_it_is(self):
         """covers: BOOT-1, RELOC-8"""
         agent = self.old_layout(git=True)
@@ -297,7 +353,7 @@ class InstallTest(unittest.TestCase):
         self.assertIn("jarvis module orca apply --json --plan-id abc123", log)  # 모듈은 체크아웃의 코드로 돈다
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "relocate 는 실제 플랫폼으로 돈다: Linux 흐름")
-    def test_an_old_linux_install_moves_to_app_without_restarting(self):
+    def test_an_old_linux_install_moves_to_app_and_restarts_once(self):
         """covers: BOOT-2, RELOC-10"""
         self.linux()
         self.old_layout()
@@ -314,7 +370,7 @@ class InstallTest(unittest.TestCase):
         with open(self.log) as f:
             log = f.read()
         self.assertIn("systemctl --user daemon-reload", log)
-        self.assertNotIn("restart", log)
+        self.assertIn("systemctl --user try-restart jarvis", log)  # 이번에 유닛을 바꿨으므로 옛 폴더에서 도는 게이트웨이를 다시 띄운다
 
     def test_other_systems_are_refused_before_writing(self):
         """covers: BOOT-2"""

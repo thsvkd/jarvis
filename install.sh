@@ -33,6 +33,7 @@ UNIT="$HOME/.config/systemd/user/jarvis.service"
 PY="$SHARE/venv/bin/python"
 MANIFEST="${JARVIS_MANIFEST:-https://github.com/thsvkd/jarvis/releases/latest/download/manifest.json}"
 export PATH="$HOME/.local/bin:$PATH"
+cd "$HOME"  # 이 셸과 자식(파이프의 python 등)이 옛 폴더를 작업 폴더로 쥐지 않게(relocate 가 사용 중으로 본다)
 
 if [ ! -f "$CONFIG" ] && [ -z "$CORE" ]; then
   echo "처음 설치에는 --core <core 의 tailnet IP> 가 필요합니다(이 기기의 Orca 페어링을 받아 갈 기기)" >&2
@@ -126,6 +127,7 @@ fi
 # 5. 1.8.0 이전 배치를 쓰던 등록을 app 으로 옮긴다(옛 base 를 복사하고 등록을 고친다. 자동 이전 뒤 재실행이면 정리만)
 if [ -n "$RELOC" ]; then
   relocate() { (cd "$SRC" && "$PY" -m jarvis.relocate "$@"); }
+  before=$(cksum < "$REG")
   state=$(relocate --json | "$PY" -c 'import json, sys; r = json.load(sys.stdin); print("이전:", r["state"], r["detail"], file=sys.stderr); print(r["state"])') || state=failed
   # macOS 는 launchd 가 plist 를 다시 읽어야 app 에서 뜬다. 사용자가 실행한 설치기라 여기서 다시 읽힌 뒤 옛 폴더를 옮긴다
   if [ "$OS" = Darwin ] && [ "$state" = pending_reload ]; then
@@ -134,6 +136,16 @@ if [ -n "$RELOC" ]; then
     for i in 1 2 3 4 5; do launchctl bootstrap "gui/$(id -u)" "$AGENT" 2>/dev/null && break; sleep 1; done
     if launchctl print "gui/$(id -u)/dev.jarvis" >/dev/null 2>&1; then relocate || true
     else echo "jarvis 를 다시 띄우지 못했습니다. 직접 실행하세요: launchctl bootstrap gui/$(id -u) $AGENT" >&2; fi
+  # Linux: daemon-reload 로 유닛은 app 이지만 돌고 있는 게이트웨이는 옛 폴더에서 돈다(사용 중이라 registered).
+  # 옛 base 에는 relocate 가 없어 아무도 치우지 않으므로, 이번에 등록을 바꾼 경우에만 다시 띄우고 한 번 더 부른다
+  elif [ "$OS" != Darwin ] && [ "$state" = registered ] && [ "$before" != "$(cksum < "$REG")" ]; then
+    systemctl --user try-restart jarvis || true
+    port=$(sed -n 's/^port *= *\([0-9][0-9]*\).*/\1/p' "$CONFIG" | head -n 1)
+    if command -v curl >/dev/null 2>&1; then
+      i=0
+      while [ $i -lt 20 ] && ! curl -fsS "http://127.0.0.1:${port:-9300}/api/health" >/dev/null 2>&1; do sleep 1; i=$((i + 1)); done
+    else sleep 3; fi
+    relocate || true
   fi
 fi
 
