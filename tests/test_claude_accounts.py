@@ -2,6 +2,7 @@
 import json
 import os
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -544,6 +545,125 @@ class NoAccountsTest(StoreCase):
         claude = next(p for p in body["providers"] if p["id"] == "claude")
         self.assertEqual((claude["accounts"], claude["login"]["state"]), ([], "failed"))
         self.assertIn("claude", body["unavailable"])
+
+
+class SwitchRaceTest(StoreCase):
+    """계정 전환과 읽기가 끼어드는 순서. 전환이 끝난 뒤의 읽기는 전환 전 값을 내지 않는다."""
+
+    def setUp(self):
+        super().setUp()
+        self.write("sequence.json", {"sequence": [1, 2], "accounts": {"1": {"email": "a@example.com", "organizationUuid": "o1"},
+                                                                      "2": {"email": "b@example.com", "organizationUuid": "o2"}}})
+        self.lists = 0
+        self.gate = None
+        self.binary.return_value = "/fake/hswap"
+        p = mock.patch.object(claude_accounts, "_json", side_effect=self.fake_json)
+        self.addCleanup(p.stop)
+        p.start()
+        self.real_store = claude_accounts._store_read
+
+    def login_as_b(self):
+        self.live_identity.return_value = ("b@example.com", "o2")
+
+    def fake_json(self, exe, *args, timeout=None):
+        if args[0] == "switch":
+            if self.gate:
+                self.gate.wait(5)
+            self.login_as_b()
+            return {"switched": True}
+        self.lists += 1  # 몇 번째 list 의 값인지 사용량으로 구분한다
+        b = self.live_identity.return_value[0] == "b@example.com"
+        return {"accounts": [hswap_row(number=1, email="a@example.com", active=not b, usage={"fiveHour": {"pct": self.lists}}),
+                             hswap_row(number=2, email="b@example.com", active=b, usage={"fiveHour": {"pct": self.lists}})]}
+
+    def active(self, out):
+        return [a["slot"] for a in out["accounts"] if a["active"]]
+
+    def store_then(self, on_call):
+        """진짜 저장소를 읽은 뒤 on_call(몇 번째 읽기) 를 실행한다: 잡아 둔 값이 그 뒤의 일을 모르는 순서를 만든다."""
+        calls = []
+
+        def run():
+            calls.append(1)
+            got = self.real_store()
+            on_call(len(calls))
+            return got
+        p = mock.patch.object(claude_accounts, "_store_read", side_effect=run)
+        self.addCleanup(p.stop)
+        p.start()
+        return calls
+
+    def test_identity_is_read_after_hswap_answers(self):
+        """covers: USAGE-6. hswap 을 기다리는 사이 로그인이 바뀌면 답을 받기 전의 사용 중 슬롯으로 덮지 않는다"""
+        real = self.fake_json
+
+        def changed_meanwhile(exe, *args, timeout=None):
+            self.login_as_b()
+            return real(exe, *args, timeout=timeout)
+        claude_accounts._json.side_effect = changed_meanwhile
+        self.assertEqual(self.active(claude_accounts.read(force=True)), ["2"])
+
+    def test_reader_waiting_on_a_running_switch_sees_the_new_login(self):
+        """covers: USAGE-6. 전환이 잠금을 쥔 동안 들어온 읽기가 먼저 잡은 저장소로 새 결과를 덮지 않는다"""
+        self.gate = threading.Event()
+        reader_read = threading.Event()
+        self.store_then(lambda n: reader_read.set())
+        sw = threading.Thread(target=claude_accounts.switch, args=("2",))
+        sw.start()
+        while not claude_accounts._lock.locked():
+            time.sleep(.001)
+        box = {}
+        reader = threading.Thread(target=lambda: box.update(out=claude_accounts.read(force=True)))
+        reader.start()
+        self.assertTrue(reader_read.wait(5))
+        self.gate.set()
+        sw.join(10)
+        reader.join(10)
+        self.assertEqual(self.active(box["out"]), ["2"])
+
+    def test_switch_finishing_after_the_answer_is_not_answered_with_old_values(self):
+        """covers: USAGE-6. hswap 이 전환 전 값을 답한 뒤 전환이 끝나면 그 값을 내지 않고 다시 읽는다"""
+        self.store_then(lambda n: claude_accounts.switch("2") if n == 2 else None)
+        out = claude_accounts.read(force=True)
+        self.assertEqual(self.active(out), ["2"])
+        self.assertEqual(self.lists, 2)
+        self.assertEqual(out["accounts"][0]["windows"][0]["used"], 2)
+
+    def test_held_values_are_not_reused_across_a_switch(self):
+        """covers: USAGE-6. 묶어 둔 전환 전 실값을 잡은 뒤 전환이 끝나도 그 값을 내지 않는다"""
+        claude_accounts.read()
+        self.assertEqual(self.lists, 1)
+        pending = [lambda: claude_accounts.switch("2")]
+        # login() 은 묶음을 잡은 뒤에 불린다: 그 자리에서 전환이 끝나는 순서를 만든다
+        with mock.patch.object(claude_accounts, "_keepalive", side_effect=lambda: pending and pending.pop()() and None):
+            out = claude_accounts.read()
+        self.assertEqual(self.active(out), ["2"])
+        self.assertEqual(self.lists, 2)
+        self.assertEqual(out["accounts"][0]["windows"][0]["used"], 2)
+
+    def test_failed_switch_also_invalidates_the_read(self):
+        """covers: USAGE-6. 실패한 전환도 로그인을 바꿨을 수 있어 다시 묻는다"""
+        claude_accounts.read()
+        real = self.fake_json
+
+        def fail(exe, *args, timeout=None):
+            if args[0] == "switch":
+                raise RuntimeError("locked")
+            return real(exe, *args, timeout=timeout)
+        claude_accounts._json.side_effect = fail
+        self.assertEqual(claude_accounts.switch("2")[0], 409)
+        claude_accounts.read()
+        self.assertEqual(self.lists, 2)
+
+    def test_endless_switching_does_not_hang_the_read(self):
+        """covers: USAGE-6"""
+        self.store_then(lambda n: claude_accounts.switch("2"))
+        self.assertEqual(self.active(claude_accounts.read(force=True)), ["2"])
+
+    def test_no_switch_no_extra_list(self):
+        """covers: USAGE-6"""
+        self.assertEqual(self.active(claude_accounts.read(force=True)), ["1"])
+        self.assertEqual(self.lists, 1)
 
 
 class AliasTest(unittest.TestCase):

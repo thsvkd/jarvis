@@ -46,6 +46,7 @@ STATUS = {
 }
 _lock = threading.Lock()
 _cache = None  # (monotonic, 결과)
+_switched = 0  # switch() 가 끝난 횟수. 이것이 바뀌면 그 전에 시작한 읽기의 값은 전환 전 값일 수 있다
 # 자동 설치·올리기: 검증한 버전으로 고정한다(서비스가 최신판을 저절로 받아 실행하지 않게). PyPI 배포본이 그 태그의 소스와 같은지
 # 대조한 뒤 여기 버전을 올려 릴리스하면, 게이트웨이(maintain)가 이보다 낮은 hswap 을 이 버전으로 올린다
 # ponytail: 버전만 고정한다. 같은 버전에 나중에 더해진 배포 파일은 대조 없이 받을 수 있다. 막으려면 파일 해시로 고정한다
@@ -229,7 +230,7 @@ def _json(exe, *args, timeout=TIMEOUT_S):
 
 def switch(slot):
     """'이 계정 사용' 버튼: Claude Code 가 쓰는 계정을 hswap 슬롯 slot 으로 바꾼다. (http 상태, 응답)."""
-    global _cache
+    global _cache, _switched
     if not (isinstance(slot, str) and slot.isdigit() and len(slot) <= 4):
         return 400, {"error": "slot 은 hswap 슬롯 번호여야 합니다"}
     exe = binary()
@@ -244,6 +245,7 @@ def switch(slot):
         return 409, {"error": scrub_home(str(e))[:200] or type(e).__name__}
     finally:
         _cache = None  # 실패해도 다음 읽기는 hswap 에 다시 묻는다
+        _switched += 1  # 묶음을 비운 뒤에 는다: 새 번호를 본 읽기는 옛 묶음을 볼 수 없다
         _lock.release()
 
 
@@ -447,7 +449,17 @@ def read(force=False, install=False):
     force 이거나, hswap 에 물은 지 신선도 기준이 지났거나, 보일 실값 중 기준보다 오래된 것이 있으면 hswap list 를 실행한다
     (저장소에는 로그인 기한·상태가 없어 만료 경고는 실값에서만 나온다. 예약 실행이 저장소를 늘 새로 써도 경고가 사라지지 않게 한다).
     그 사이에는 마지막 실값을 그대로 준다. 오래된 저장소 값은 실값이 없을 때만 보이므로 따로 보지 않는다. hswap 이 없거나 실패하면 저장소 값을 대체값으로 쓰고 이유를 붙인다.
-    install: 호환 경로만 켠다. 저장소가 없어도 묻고, hswap 이 없으면 설치를 시작한다. 독립 경로는 설치하지 않는다(USAGE-3)."""
+    install: 호환 경로만 켠다. 저장소가 없어도 묻고, hswap 이 없으면 설치를 시작한다. 독립 경로는 설치하지 않는다(USAGE-3).
+    읽는 사이 switch() 가 끝나면 전환 전 값을 내지 않고 다시 읽는다. 전환이 쉬지 않고 이어져도 멈추지 않게 횟수는 제한한다."""
+    for _ in range(3):
+        seen = _switched
+        out = _read(force, install)
+        if seen == _switched:
+            break
+    return out
+
+
+def _read(force, install):
     store = _store_read()
     held = _cache  # switch() 가 도중에 비워도 같은 값을 본다
     recent = held[1] if held and time.monotonic() - held[0] < config.CLAUDE_STALE_S else None
@@ -457,6 +469,8 @@ def read(force=False, install=False):
     else:
         asked = force or recent is None or any(_old(a) for a in recent["accounts"])
         out = live(force, install=install) if asked else recent
+        if asked:  # 사용 중 판정은 hswap 이 답한 뒤의 로그인으로 한다(잠금을 기다리는 사이 로그인이 바뀌었을 수 있다)
+            store = _store_read()
     rows = (out or {}).get("accounts")
     if rows:
         rows = [{**a, "org": org(a.get("org"), a.get("label"))} for a in _mark_current(rows, store)]
