@@ -1,13 +1,31 @@
 """Claude 계정 모듈: 독립·호환 경로의 신선도, 만료 경고, 상태 문구, 기기 로그인 상태. 임시 저장소와 가짜 hswap 응답만 쓴다."""
 import json
 import os
+import subprocess
 import tempfile
 import threading
 import time
 import unittest
+import urllib.request
 from unittest import mock
 
-from jarvis import claude_accounts, cswap_cached_usage, cswap_usage, independent_usage, orca_usage
+from jarvis import caam_usage, claude_accounts, cswap_cached_usage, cswap_usage, independent_usage, orca_usage, util
+
+_GUARDS = []
+
+
+def setUpModule():
+    """이 파일의 어떤 경로도 caam·hswap 설치기, 실제 프로세스(codex·Orca·hswap 등), 외부 네트워크에 닿지 못한다. 닿으면 호출이 남아 tearDownModule 이 실패한다."""
+    for target, name in ((util.Installer, "ensure"), (subprocess, "Popen"), (urllib.request.OpenerDirector, "open")):
+        p = mock.patch.object(target, name, side_effect=AssertionError(f"테스트에서 {name} 호출 금지"))
+        _GUARDS.append((name, p, p.start()))
+
+
+def tearDownModule():
+    calls = {name: m.call_count for name, _, m in _GUARDS}
+    while _GUARDS:
+        _GUARDS.pop()[1].stop()
+    assert not any(calls.values()), f"설치기·프로세스·네트워크에 닿았다: {calls}"
 
 
 def iso(at):
@@ -16,7 +34,7 @@ def iso(at):
 
 def hswap_row(**kw):
     now = time.time()
-    return {"number": 1, "email": "a@example.com", "organizationName": "Org", "usageStatus": "ok", "active": True,
+    return {"number": 1, "email": "a@example.com", "organizationName": "Org", "organizationUuid": "o1", "usageStatus": "ok", "active": True,
             "usage": {"fiveHour": {"pct": 12, "resetsAt": iso(now + 3600)}}, "usageFetchedAt": iso(now - 60), **kw}
 
 
@@ -795,7 +813,7 @@ class SwitchRaceTest(StoreCase):
         self.lists += 1  # 몇 번째 list 의 값인지 사용량으로 구분한다
         b = self.live_identity.return_value[0] == "b@example.com"
         return {"accounts": [hswap_row(number=1, email="a@example.com", active=not b, usage={"fiveHour": {"pct": self.lists}}),
-                             hswap_row(number=2, email="b@example.com", active=b, usage={"fiveHour": {"pct": self.lists}})]}
+                             hswap_row(number=2, email="b@example.com", organizationUuid="o2", active=b, usage={"fiveHour": {"pct": self.lists}})]}
 
     def active(self, out):
         return [a["slot"] for a in out["accounts"] if a["active"]]
@@ -976,7 +994,7 @@ class StoreAuthFailureTest(StoreCase):
             "2": {"email": b_email, "organizationUuid": "o2", "fetchedAt": time.time() - 60, "authDeadStrikes": strikes[1], "lastGood": {"five_hour": {"pct": 99}}}}})
 
     def rows(self):
-        return [hswap_row(number=1, active=True), hswap_row(number=2, email="b@example.com", active=False)]
+        return [hswap_row(number=1, active=True), hswap_row(number=2, email="b@example.com", organizationUuid="o2", active=False)]
 
     def test_failure_after_a_successful_list_reaches_the_row_and_the_device(self):
         """covers: USAGE-7. hswap 0.2.1, keepalive 없음: list 성공 뒤 수집기가 사용 중 계정에 authDeadStrikes 를 적으면 바로 경고한다"""
@@ -1008,14 +1026,14 @@ class StoreAuthFailureTest(StoreCase):
     def test_row_without_values_shows_the_failure_as_its_error(self):
         """covers: USAGE-7"""
         self.two_slots((1, 0))
-        self.hswap(hswap_row(number=1, active=True, usage=None), hswap_row(number=2, email="b@example.com", active=False))
+        self.hswap(hswap_row(number=1, active=True, usage=None), hswap_row(number=2, email="b@example.com", organizationUuid="o2", active=False))
         a = claude_accounts.read(force=True)["accounts"][0]
         self.assertEqual((a["status"], a["error"], a["note"], a["attention"], a["windows"]), ("error", self.RELOGIN, None, True, []))
 
-    def test_only_the_same_slot_email_and_org_match(self):
+    def test_only_the_same_slot_and_identity_match(self):
         """covers: USAGE-7. 슬롯 번호가 같아도 다른 계정의 실패를 붙이지 않는다"""
-        row = {"number": 2, "active": False}
-        for kw in ({"email": "other@example.com"}, {"email": "b@example.com", "organizationName": "Other Org"}, {"email": "b@example.com", "number": 3}):
+        row = {"number": 2, "active": False, "organizationUuid": "o2"}
+        for kw in ({"email": "other@example.com"}, {"email": "b@example.com", "organizationUuid": "other-org"}, {"email": "b@example.com", "number": 3}):
             self.two_slots((0, 1))
             self.hswap(self.rows()[0], hswap_row(**{**row, **kw}))
             claude_accounts._cache = None
@@ -1061,6 +1079,107 @@ class StoreAuthFailureTest(StoreCase):
             theirs = next(p for p in orca_usage.read()[1]["providers"] if p["id"] == "claude")
         for claude in (mine, theirs):
             self.assertEqual((claude["login"]["state"], claude["accounts"][0]["attention"], claude["accounts"][0]["note"]), ("relogin", True, self.RELOGIN))
+
+
+class SlotIdentityTest(StoreCase):
+    """같은 슬롯에 다른 계정이 들어온 경우. 신원은 이메일과 조직 UUID 의 지문으로 비교하고 내보내지 않는다."""
+
+    RELOGIN = claude_accounts.STATUS["relogin_required"][0]
+
+    def slot_holds(self, email, uuid, strikes=0):
+        self.write("sequence.json", {"sequence": [1], "accounts": {"1": {"email": email, "organizationUuid": uuid, "organizationName": "Org"}}})
+        self.write("cache/usage.json", {"schemaVersion": 2, "accounts": {"1": {"email": email, "organizationUuid": uuid, "fetchedAt": time.time() - 60,
+                                                                               "authDeadStrikes": strikes, "lastGood": {"five_hour": {"pct": 99}}}}})
+
+    def b_row(self):
+        return hswap_row(email="b@example.com", organizationUuid="b-org", active=False)
+
+    def test_new_account_in_the_slot_invalidates_held_rows_at_once(self):
+        """covers: USAGE-6, USAGE-7. A 를 묶어 둔 뒤 그 슬롯에 B 가 들어오면 다음 보통 읽기가 hswap 을 다시 실행해 B 와 그 경고를 보인다"""
+        self.slot_holds("a@example.com", "o1")
+        run = self.hswap(hswap_row())
+        self.assertEqual(claude_accounts.read()["accounts"][0]["label"], "a@example.com")
+        self.slot_holds("b@example.com", "b-org", strikes=1)
+        self.live_identity.return_value = ("b@example.com", "b-org")
+        run.return_value = {"accounts": [self.b_row()]}
+        out = claude_accounts.read()
+        self.assertEqual(run.call_count, 2)  # 30초 묶음 안이어도 다시 묻는다
+        a = out["accounts"][0]
+        self.assertEqual((a["label"], a["active"], a["note"], a["attention"]), ("b@example.com", True, self.RELOGIN, True))
+        self.assertEqual((out["login"]["state"], out["login"]["slot"]), ("relogin", "1"))
+
+    def test_org_uuid_alone_is_a_different_identity(self):
+        """covers: USAGE-6. 같은 이메일의 다른 조직. 조직 이름이 같아도 UUID 로 가른다"""
+        self.slot_holds("a@example.com", "o1")
+        run = self.hswap(hswap_row())
+        claude_accounts.read()
+        self.slot_holds("a@example.com", "o2")
+        self.live_identity.return_value = ("a@example.com", "o2")
+        run.return_value = {"accounts": [hswap_row(organizationUuid="o2", active=False)]}
+        self.assertTrue(claude_accounts.read()["accounts"][0]["active"])
+        self.assertEqual(run.call_count, 2)
+
+    def test_unchanged_identity_does_not_rerun_hswap(self):
+        """covers: USAGE-6"""
+        self.slot_holds("a@example.com", "o1")
+        run = self.hswap(hswap_row())
+        for _ in range(4):
+            self.assertTrue(claude_accounts.read()["accounts"][0]["active"])
+        run.assert_called_once()
+
+    def test_missing_org_uuid_means_the_same_as_empty(self):
+        """covers: USAGE-6. 개인 계정은 UUID 가 비어 있다: 빈 문자열·null·누락을 같은 신원으로 본다"""
+        self.write("sequence.json", {"sequence": [1], "accounts": {"1": {"email": "a@example.com"}}})
+        self.write("cache/usage.json", {"schemaVersion": 2, "accounts": {}})
+        self.live_identity.return_value = ("a@example.com", "")
+        for uuid in ("", None):
+            claude_accounts._cache = None
+            run = self.hswap(hswap_row(organizationUuid=uuid))
+            for _ in range(2):
+                self.assertTrue(claude_accounts.read()["accounts"][0]["active"], uuid)
+            run.assert_called_once()
+
+    def test_failed_recheck_falls_back_to_the_new_account_in_the_store(self):
+        """covers: USAGE-6, USAGE-7"""
+        self.slot_holds("a@example.com", "o1")
+        run = self.hswap(hswap_row())
+        claude_accounts.read()
+        self.slot_holds("b@example.com", "b-org", strikes=1)
+        self.live_identity.return_value = ("b@example.com", "b-org")
+        run.side_effect = RuntimeError("locked")
+        out = claude_accounts.read()
+        a = out["accounts"][0]
+        self.assertEqual((a["label"], a["source"], a["active"], a["attention"]), ("b@example.com", "cswap-cache", True, True))
+        self.assertEqual(out["login"]["state"], "relogin")
+
+    def test_flags_do_not_cross_to_another_identity(self):
+        """covers: USAGE-6, USAGE-7. hswap 이 아직 A 를 답해도 B 의 사용 중 표시와 인증 실패를 A 에 옮기지 않는다"""
+        self.slot_holds("a@example.com", "o1")
+        run = self.hswap(hswap_row())
+        claude_accounts.read()
+        self.slot_holds("b@example.com", "b-org", strikes=1)
+        self.live_identity.return_value = ("b@example.com", "b-org")
+        out = claude_accounts.read()
+        self.assertEqual(run.call_count, 2)
+        a = out["accounts"][0]
+        self.assertEqual((a["label"], a["active"], a["note"], a["attention"]), ("a@example.com", False, None, False))
+        self.assertNotIn("login", out)
+
+    def test_identity_is_never_exported(self):
+        """covers: USAGE-6, USAGE-7. 조직 UUID 와 지문은 비교에만 쓴다"""
+        self.slot_holds("a@example.com", "org-uuid-secret")
+        self.live_identity.return_value = ("a@example.com", "org-uuid-secret")
+        self.hswap(hswap_row(organizationUuid="org-uuid-secret"))
+        fingerprint = claude_accounts._fingerprint("a@example.com", "org-uuid-secret")
+        with self.independent_mocks(), mock.patch.object(orca_usage.caam_usage, "read", return_value=None):
+            independent_usage._tasks.clear()
+            self.addCleanup(independent_usage._tasks.clear)
+            bodies = [claude_accounts.read(), claude_accounts.read(force=True), independent_usage.read(force=True), orca_usage.read()[1]]
+        self.assertEqual(claude_accounts._cache[1]["ids"]["1"], fingerprint)  # 묶음에는 있어 비교할 수 있다
+        for body in bodies:
+            text = json.dumps(body, ensure_ascii=False)
+            for secret in ("org-uuid-secret", fingerprint, '"ids"'):
+                self.assertNotIn(secret, text)
 
 
 class AliasTest(unittest.TestCase):

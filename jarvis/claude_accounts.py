@@ -13,6 +13,7 @@ https://github.com/realiti4/claude-swap/blob/v0.28.0/src/claude_swap/usage_store
 https://github.com/realiti4/claude-swap/blob/v0.28.0/src/claude_swap/switcher.py
 사용 중 계정: https://github.com/thsvkd/harness-swap/blob/9a1e5d1/src/claude_swap/switcher.py (current_account_number)·paths.py
 """
+import hashlib
 import json
 import math
 import os
@@ -232,6 +233,11 @@ def _json(exe, *args, timeout=TIMEOUT_S):
     return body
 
 
+def _fingerprint(email, org_uuid):
+    """슬롯의 계정 신원 지문(이메일 + 조직 UUID). 비교에만 쓰고 응답으로 내보내지 않는다. 개인 계정의 UUID 는 비어 있거나 null 이다."""
+    return hashlib.sha256(f"{email}\0{org_uuid or ''}".encode("utf-8", "replace")).hexdigest()
+
+
 def switch(slot):
     """'이 계정 사용' 버튼: Claude Code 가 쓰는 계정을 hswap 슬롯 slot 으로 바꾼다. (http 상태, 응답)."""
     global _cache, _switched
@@ -254,7 +260,7 @@ def switch(slot):
 
 
 def live(force=False, install=True):
-    """hswap CLI 어댑터. None(hswap 없음·계정 없음) 또는 {"accounts": [...], "fetched_at": 초} 또는 {"error": "..."}.
+    """hswap CLI 어댑터. None(hswap 없음·계정 없음) 또는 {"accounts": [...], "fetched_at": 초, "ids": {슬롯: 신원 지문}} 또는 {"error": "..."}. ids 는 read() 안에서만 쓴다.
     install 이면 hswap 이 없을 때 ensure() 가 설치를 시작하고 그 진행·실패를 error 로 준다(호환 경로만. 독립 경로는 설치하지 않는다).
     hswap 이 답하면 최상위 keychainUnavailable(0.2.2 의 추가 필드. 없으면 아니라고 본다)을 _device 에 적는다. 실패한 조회는 건드리지 않는다.
     force 는 jarvis 의 30초 묶음만 건너뛴다(프로바이더 조회 간격은 hswap 이 정한다)."""
@@ -273,10 +279,12 @@ def live(force=False, install=True):
             return _cache[1]
         try:
             body = _json(exe, "list")
-            accounts = [account(r) for r in body.get("accounts") or [] if isinstance(r, dict)]
+            raw = [r for r in body.get("accounts") or [] if isinstance(r, dict)]
+            accounts = [account(r) for r in raw]
             _device = (time.monotonic(), body.get("keychainUnavailable") is True)
             _discovered = bool(accounts)  # 실패한 조회는 건드리지 않는다: 일시 실패로 계정을 잊지 않게
-            out = {"accounts": accounts, "fetched_at": time.time()} if accounts else None
+            out = {"accounts": accounts, "fetched_at": time.time(),
+                   "ids": {str(r.get("number")): _fingerprint(r.get("email"), r.get("organizationUuid")) for r in raw}} if accounts else None
         except Exception as e:
             out = {"error": scrub_home(str(e))[:200] or type(e).__name__}
         _cache = (time.monotonic(), out)
@@ -334,7 +342,7 @@ def _store_read():
         cached = cache.get("accounts", {}) if isinstance(cache, dict) and cache.get("schemaVersion") == 2 else {}
         if not isinstance(accounts, dict) or not isinstance(sequence, list) or not isinstance(cached, dict):
             return None
-        result = []
+        result, ids = [], {}
         for number in sequence:
             if not isinstance(number, int) or isinstance(number, bool) or number <= 0:
                 continue
@@ -342,6 +350,7 @@ def _store_read():
             row = cached.get(str(number))
             if not isinstance(ident, dict):
                 continue
+            ids[str(number)] = _fingerprint(ident.get("email"), ident.get("organizationUuid"))
             valid = (isinstance(row, dict) and row.get("email") == ident.get("email")
                      and row.get("organizationUuid", "") == ident.get("organizationUuid", ""))
             usage = row.get("lastGood") if valid else None
@@ -361,7 +370,7 @@ def _store_read():
             # 화면은 이메일+조직 이름으로 같은 계정을 묶는다. Orca 경로와 같은 규칙으로 개인 조직("<email>'s Organization")은 None
             result.append({**a, "org": org(a["org"], a["label"])})
         # signed_in: 로그인을 읽었다. 그런데 active 인 행이 없으면 지금 로그인은 어느 저장 슬롯과도 맞지 않는다
-        return {"accounts": result, "signed_in": identity is not None} if result else None
+        return {"accounts": result, "signed_in": identity is not None, "ids": ids} if result else None
     except (OSError, ValueError, TypeError, OverflowError, RecursionError):
         return None
 
@@ -428,23 +437,34 @@ def _old(a):
     return bool(a.get("windows") or a.get("buckets")) and (not at or time.time() - at > config.CLAUDE_STALE_S)
 
 
-def _mark_current(rows, store):
-    """사용 중 판정: 실제 로그인과 같은 저장 슬롯(엔진과 같은 규칙. 맞는 슬롯이 없으면 사용 중도 없다). 로그인이나 저장소를 읽지 못하면 hswap 의 값."""
+def _same_login(a, ids, store):
+    """CLI 행과 저장소의 같은 슬롯이 같은 계정인가. 슬롯 번호만 같으면 다른 계정의 상태를 옮기게 된다."""
+    fingerprint = ids.get(a.get("slot"))
+    return fingerprint is not None and fingerprint == store.get("ids", {}).get(a.get("slot"))
+
+
+def _ids_changed(out, store):
+    """묶어 둔 CLI 행의 슬롯에 지금 저장소에서 다른 계정이 들어 있는가."""
+    now = (store or {}).get("ids", {})
+    return any(slot in now and now[slot] != fingerprint for slot, fingerprint in (out or {}).get("ids", {}).items())
+
+
+def _mark_current(rows, store, ids):
+    """사용 중 판정: 실제 로그인과 같은 저장 슬롯이고 신원도 같은 행(엔진과 같은 규칙. 맞는 슬롯이 없으면 사용 중도 없다). 로그인이나 저장소를 읽지 못하면 hswap 의 값."""
     if not (store and store.get("signed_in")):
         return rows
     current = {a.get("slot") for a in store["accounts"] if a.get("active")}
-    return [{**a, "active": a.get("slot") in current} for a in rows]
+    return [{**a, "active": a.get("slot") in current and _same_login(a, ids, store)} for a in rows]
 
 
-def _mark_dead(rows, store):
-    """저장소의 인증 실패(authDeadStrikes)를 슬롯·이메일·조직이 같은 CLI 행에 붙인다. 묶어 둔 행이 그 뒤에 적힌 실패를 가리지 않게 읽을 때마다 본다.
+def _mark_dead(rows, store, ids):
+    """저장소의 인증 실패(authDeadStrikes)를 슬롯과 신원이 같은 CLI 행에 붙인다. 묶어 둔 행이 그 뒤에 적힌 실패를 가리지 않게 읽을 때마다 본다.
     사용량 값은 건드리지 않고, 묶음의 dict 도 고치지 않는다."""
-    key = lambda a: (a.get("slot"), a.get("label"), a.get("org"))
-    dead = {key(a) for a in (store or {}).get("accounts", []) if _is_relogin(a)}
+    dead = {a.get("slot") for a in (store or {}).get("accounts", []) if _is_relogin(a)}
     relogin = STATUS["relogin_required"][0]
 
     def mark(a):
-        if key(a) not in dead or _is_relogin(a):
+        if a.get("slot") not in dead or _is_relogin(a) or not _same_login(a, ids, store):
             return a
         has = a.get("windows") or a.get("buckets")
         return {**a, "attention": True, **({"note": relogin, "error": None} if has else {"status": "error", "note": None, "error": relogin})}
@@ -496,13 +516,15 @@ def _read(force, install):
     if store is None and recent is None and not force and not install and not recheck:
         out = None
     else:
-        asked = force or recent is None or any(_old(a) for a in recent["accounts"])
-        out = live(force, install=install) if asked else recent
+        changed = _ids_changed(recent, store)  # 30초 묶음 안이어도 옛 계정의 값이므로 다시 묻는다
+        asked = force or changed or recent is None or any(_old(a) for a in recent["accounts"])
+        out = live(force or changed, install=install) if asked else recent
         if asked:  # 사용 중 판정은 hswap 이 답한 뒤의 로그인으로 한다(잠금을 기다리는 사이 로그인이 바뀌었을 수 있다)
             store = _store_read()
     rows = (out or {}).get("accounts")
     if rows:
-        rows = _mark_dead([{**a, "org": org(a.get("org"), a.get("label"))} for a in _mark_current(rows, store)], store)
+        ids = out.get("ids", {})
+        rows = _mark_dead([{**a, "org": org(a.get("org"), a.get("label"))} for a in _mark_current(rows, store, ids)], store, ids)
         why = None
     elif store:
         rows = store["accounts"]
