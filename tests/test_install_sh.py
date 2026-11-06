@@ -76,7 +76,7 @@ class InstallTest(unittest.TestCase):
         self.log = os.path.join(self.tmp, "log")
         self.env = {"HOME": self.home, "LOG": self.log, "PATH": bin_dir + ":/usr/bin:/bin",
                     "JARVIS_MANIFEST": "file://" + self.manifest, "TEST_PY": sys.executable,
-                    "JARVIS_DAEMON_PLIST": os.path.join(self.tmp, "LaunchDaemons", "dev.jarvis.plist")}
+                    "JARVIS_DAEMON_TEST": "1", "JARVIS_DAEMON_PLIST": os.path.join(self.tmp, "LaunchDaemons", "dev.jarvis.plist")}
         self.share = os.path.join(self.home, ".local", "share", "jarvis")
         self.app = os.path.join(self.share, "app")
         self.old = os.path.join(self.home, "Workspace", "jarvis")
@@ -385,6 +385,15 @@ class InstallTest(unittest.TestCase):
         with open(path, "w") as f:
             f.write("daemon")
         return path
+
+    def test_the_daemon_path_override_needs_the_test_flag(self):
+        """covers: DAEMON-12"""
+        del self.env["JARVIS_DAEMON_TEST"]
+        # 첫 설치에 --core 가 없으면 경로를 정한 뒤 아무것도 쓰지 않고 끝난다
+        r = subprocess.run(["sh", "-x", os.path.join(ROOT, "install.sh")], env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 1)
+        trace = [line for line in r.stderr.splitlines() if "DAEMON_PLIST=" in line]
+        self.assertEqual(trace[-1].lstrip("+ ").strip("'"), "DAEMON_PLIST=/Library/LaunchDaemons/dev.jarvis.plist")
 
     def test_without_the_flag_the_launchctl_calls_are_the_same_as_before(self):
         """covers: DAEMON-9"""

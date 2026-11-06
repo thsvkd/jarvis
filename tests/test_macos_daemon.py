@@ -66,8 +66,9 @@ shift
 [ "$1" = -v ] && exit 0
 export AS_ROOT=1
 case "$1" in
-  launchctl|rm) exec "$@" ;;
-  install) [ ! -f "$STATE/install-fails" ] || exit 1; shift 7; exec /bin/cp "$1" "$2" ;;
+  /bin/launchctl) shift; exec "$JARVIS_DAEMON_TEST_BIN/launchctl" "$@" ;;
+  /bin/rm) exec "$@" ;;
+  /usr/bin/install) [ ! -f "$STATE/install-fails" ] || exit 1; shift 7; exec /bin/cp "$1" "$2" ;;
   *) echo "모르는 sudo 명령: $*" >&2; exit 1 ;;
 esac''',
     "plutil": '[ ! -f "$STATE/lint-fails" ]',
@@ -247,7 +248,8 @@ class Harness(unittest.TestCase):
         self.agent = os.path.join(self.home, "Library", "LaunchAgents", "dev.jarvis.plist")
         self.kept = os.path.join(self.share, "dev.jarvis.plist.agent")
         self.env = {"HOME": self.home, "LOG": self.log, "STATE": self.state, "PATH": self.bin + ":/usr/bin:/bin",
-                    "JARVIS_DAEMON_PLIST": self.daemon, "TMPDIR": self.tmpdir, "TEST_PY": sys.executable}
+                    "JARVIS_DAEMON_TEST": "1", "JARVIS_DAEMON_TEST_BIN": self.bin, "JARVIS_DAEMON_PLIST": self.daemon,
+                    "TMPDIR": self.tmpdir, "TEST_PY": sys.executable}
 
     def _cleanup(self):
         for d, _, _ in os.walk(self.tmp):
@@ -320,11 +322,11 @@ class Script(Harness):
         self.assertEqual(d["EnvironmentVariables"]["JARVIS_LOG"], os.path.join(pwd.getpwuid(os.getuid()).pw_dir, "Library/Logs/jarvis.log"))
         self.assertTrue(os.path.isdir(os.path.join(self.home, "Library", "Logs")))
         calls = [c for c in self.calls() if not c.startswith(("launchctl print", "lsof", "curl"))]
-        self.assertRegex(calls[2], r"^sudo -n install -m 0644 -o root -g wheel \S+/dev\.jarvis\.plist " + re.escape(self.daemon) + "$")
+        self.assertRegex(calls[2], r"^sudo -n /usr/bin/install -m 0644 -o root -g wheel \S+/dev\.jarvis\.plist " + re.escape(self.daemon) + "$")
         self.assertEqual(calls[:2] + calls[3:], [
             "sudo -v",
             f"launchctl bootout gui/{UID}/dev.jarvis",
-            f"sudo -n launchctl bootstrap system {self.daemon}",
+            f"sudo -n /bin/launchctl bootstrap system {self.daemon}",
             f"launchctl bootstrap system {self.daemon}",
         ])
         all_calls = self.calls()
@@ -332,6 +334,54 @@ class Script(Harness):
         self.assertLess(all_calls.index("lsof -nP -iTCP:9300 -sTCP:LISTEN"), all_calls.index(calls[2]))
         self.assertIn("curl -fsS --max-time 1 http://127.0.0.1:9300/api/health", all_calls)
         self.assertEqual(os.listdir(self.tmpdir), [])
+
+    def test_privileged_commands_are_absolute_and_path_is_not_trusted(self):
+        """covers: DAEMON-12"""
+        evil = os.path.join(self.tmp, "evil")
+        os.makedirs(evil)
+        pwned = os.path.join(self.tmp, "pwned")
+        for name in ("sudo", "launchctl", "install", "rm", "plutil", "curl", "lsof", "cmp", "diff", "grep", "seq", "mktemp", "mv", "cp", "stat", "shasum", "sh", "dirname"):
+            path = os.path.join(evil, name)
+            with open(path, "w") as f:
+                f.write(f"#!/bin/sh\ntouch {pwned}\nexit 1\n")
+            os.chmod(path, 0o755)
+        self.env["PATH"] = evil + ":" + self.env["PATH"]
+        r = self.run_script("install")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        r = self.run_script("uninstall")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(os.path.exists(pwned))
+        privileged = {c.split()[2] for c in self.calls() if c.startswith("sudo -n ")}
+        self.assertEqual(privileged, {"/bin/launchctl", "/bin/rm", "/usr/bin/install"})
+        with open(SCRIPT, encoding="utf-8") as f:
+            source = f.read()
+        self.assertEqual({x for x in re.findall(r'"\$SUDO" -n (\S+)', source) if not x.startswith("-v")}, privileged)
+        self.assertNotRegex(source, r"(?m)^\s*(if .*; then )?sudo ")
+
+    def trace(self, flag):
+        """인자 오류로 외부 명령을 부르기 전에 끝내고, 경로를 정하는 대입만 본다."""
+        env = {k: v for k, v in self.env.items() if k != "JARVIS_DAEMON_TEST"}
+        if flag is not None:
+            env["JARVIS_DAEMON_TEST"] = flag
+        r = subprocess.run(["bash", "-x", SCRIPT, "frobnicate"], env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 1)
+        return r.stderr.splitlines()
+
+    def test_without_the_test_flag_overrides_are_ignored(self):
+        """covers: DAEMON-12"""
+        for flag in (None, "0", "yes"):
+            with self.subTest(flag):
+                lines = self.trace(flag)
+                for line in ("+ DAEMON=/Library/LaunchDaemons/dev.jarvis.plist", "+ SUDO=/usr/bin/sudo",
+                             "+ LAUNCHCTL=/bin/launchctl", "+ PLUTIL=/usr/bin/plutil", "+ PATH=/usr/bin:/bin:/usr/sbin:/sbin"):
+                    self.assertIn(line, lines)
+                self.assertFalse([x for x in lines if x.startswith("+ ") and "=" in x and (self.daemon in x or self.bin in x)], lines)
+
+    def test_the_test_flag_turns_on_the_overrides(self):
+        """covers: DAEMON-12"""
+        lines = self.trace("1")
+        self.assertIn(f"+ DAEMON={self.daemon}", lines)
+        self.assertIn(f"+ SUDO={self.bin}/sudo", lines)
 
     def test_sudo_is_asked_once_and_the_refresh_loop_stops(self):
         """covers: DAEMON-3"""
@@ -370,7 +420,7 @@ class Script(Harness):
                 self.assertTrue(self.has("agent"))  # 다시 로드됐다
                 self.assertIn(f"launchctl bootstrap gui/{UID} {self.agent}", self.calls())
                 if name.startswith("daemon-"):  # daemon 이 로드된 뒤의 실패는 sudo 로 내린다
-                    self.assertIn("sudo -n launchctl bootout system/dev.jarvis", self.calls())
+                    self.assertIn("sudo -n /bin/launchctl bootout system/dev.jarvis", self.calls())
                 os.remove(os.path.join(self.state, name))
                 os.remove(self.log)
 
@@ -380,7 +430,7 @@ class Script(Harness):
         r = self.run_script("install")
         self.assert_rolled_back(r)
         self.assertTrue(self.has("agent"))
-        self.assertFalse([c for c in self.calls() if c.startswith("sudo -n install")])
+        self.assertFalse([c for c in self.calls() if c.startswith("sudo -n /usr/bin/install")])
 
     def test_a_failed_move_of_the_agent_plist_rolls_back(self):
         """covers: DAEMON-4"""
@@ -436,7 +486,7 @@ class Script(Harness):
         r = self.run_script("install")
         self.assert_rolled_back(r)
         self.assertTrue(self.has("agent"))
-        self.assertEqual([c for c in self.calls() if c.startswith("sudo -n rm")], [])  # 지울 것이 없으면 sudo 가 필요 없다
+        self.assertEqual([c for c in self.calls() if c.startswith("sudo -n /bin/rm")], [])  # 지울 것이 없으면 sudo 가 필요 없다
 
     def test_a_daemon_that_cannot_be_stopped_is_not_joined_by_the_agent(self):
         """covers: DAEMON-4"""
@@ -553,7 +603,7 @@ class Script(Harness):
         r = self.run_script("install")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         calls = self.calls()
-        self.assertLess(calls.index("sudo -n launchctl bootout system/dev.jarvis"), calls.index(f"sudo -n launchctl bootstrap system {self.daemon}"))
+        self.assertLess(calls.index("sudo -n /bin/launchctl bootout system/dev.jarvis"), calls.index(f"sudo -n /bin/launchctl bootstrap system {self.daemon}"))
         self.assertIn("curl -fsS --max-time 1 http://127.0.0.1:9411/api/health", calls)
         self.assertEqual(self.assert_daemon_mode()["EnvironmentVariables"]["JARVIS_PORT"], "9411")
 
@@ -600,7 +650,7 @@ class Script(Harness):
         self.assertEqual(self.read(self.agent), self.original)
         calls = self.calls()
         self.assertEqual(calls.count("sudo -v"), 1)
-        for line in ("sudo -n launchctl bootout system/dev.jarvis", f"sudo -n rm -f {self.daemon}",
+        for line in ("sudo -n /bin/launchctl bootout system/dev.jarvis", f"sudo -n /bin/rm -f {self.daemon}",
                      f"launchctl bootstrap gui/{UID} {self.agent}"):
             self.assertIn(line, calls)
         self.assertEqual(self.run_script("uninstall").returncode, 0)  # 다시 실행해도 된다
@@ -697,7 +747,7 @@ if [ "$1" = venv ]; then mkdir -p "$4/bin" && printf '#!/bin/sh\\nexec "%s" "$@"
         self.assertNotIn("/Users/USER", plistlib.dumps(d).decode())
         calls = self.calls()
         self.assertFalse([c for c in calls if "bootstrap gui" in c])
-        self.assertLess(calls.index(f"sudo -n launchctl bootstrap system {self.daemon}"), calls.index("jarvis module orca plan --json"))
+        self.assertLess(calls.index(f"sudo -n /bin/launchctl bootstrap system {self.daemon}"), calls.index("jarvis module orca plan --json"))
 
         installed = self.read(self.daemon)
         os.remove(self.log)

@@ -8,7 +8,9 @@
 # 에이전트 plist 는 LaunchAgents 밖(~/.local/share/jarvis/dev.jarvis.plist.agent)에 둔다. 남겨 두면 다음 GUI 로그인 때
 # 두 번째 jarvis 가 같은 포트를 잡으려다 KeepAlive 재시작을 되풀이한다.
 set -u
-export PATH="$PATH:/usr/sbin:/sbin"  # lsof
+# ~/.local/bin·/opt/homebrew/bin 은 사용자가 쓸 수 있고 macOS 기본 sudoers 에는 secure_path 가 없다. 이름으로 찾으면 그 파일이 root 로 돈다
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
 
 LABEL=dev.jarvis
 REPO=$(cd "$(dirname "$0")/.." && pwd)
@@ -16,7 +18,19 @@ SHARE="$HOME/.local/share/jarvis"
 PY="$SHARE/venv/bin/python"
 AGENT="$HOME/Library/LaunchAgents/$LABEL.plist"
 KEPT="$SHARE/$LABEL.plist.agent"
-DAEMON="${JARVIS_DAEMON_PLIST:-/Library/LaunchDaemons/$LABEL.plist}"  # 재정의는 테스트용이다
+DAEMON=/Library/LaunchDaemons/$LABEL.plist
+SUDO=/usr/bin/sudo
+LAUNCHCTL=/bin/launchctl
+PLUTIL=/usr/bin/plutil
+# 테스트만 가짜 sudo·launchctl·plutil 과 임시 plist 경로를 쓴다. sudo 에 넘기는 명령은 테스트에서도 아래의 절대경로 그대로다
+if [ "${JARVIS_DAEMON_TEST:-}" = 1 ]; then
+  T="${JARVIS_DAEMON_TEST_BIN:?}"
+  PATH="$T:$PATH"
+  SUDO="$T/sudo"
+  LAUNCHCTL="$T/launchctl"
+  PLUTIL="$T/plutil"
+  DAEMON="${JARVIS_DAEMON_PLIST:-$DAEMON}"
+fi
 
 say() { printf '%s\n' "$*"; }
 die() { say "$*" >&2; exit 1; }
@@ -39,7 +53,7 @@ KEEP=""
 trap '[ -n "$KEEP" ] && kill "$KEEP" 2>/dev/null; rm -rf "$TMP"' EXIT
 
 py() { (cd "$REPO" && PYTHONDONTWRITEBYTECODE=1 "$PY" -m jarvis.macos_daemon "$@"); }
-loaded() { launchctl print "$1/$LABEL" >/dev/null 2>&1; }
+loaded() { "$LAUNCHCTL" print "$1/$LABEL" >/dev/null 2>&1; }
 wait_unloaded() {  # bootout 뒤 작업이 내려갈 때까지(ExitTimeOut 8초)
   for _ in $(seq 10); do loaded "$1" || return 0; sleep 1; done
   return 1
@@ -55,8 +69,8 @@ agent_plist() {  # 렌더 기준: LaunchAgents 의 것이 없으면 옮겨 둔 �
 }
 
 sudo_begin() {  # 이후의 sudo 는 모두 -n 이다: 다시 묻지 않고, 시간이 지나 끊기면 실패로 다룬다
-  sudo -v || die "sudo 권한을 얻지 못했습니다. 아무것도 바꾸지 않았습니다"
-  ( exec >/dev/null 2>&1 </dev/null; while kill -0 $$ && sudo -n -v; do sleep 30; done ) &
+  "$SUDO" -v || die "sudo 권한을 얻지 못했습니다. 아무것도 바꾸지 않았습니다"
+  ( exec >/dev/null 2>&1 </dev/null; while kill -0 $$ && "$SUDO" -n -v; do sleep 30; done ) &
   KEEP=$!
 }
 
@@ -64,8 +78,8 @@ rollback() {  # daemon 을 내리고 LaunchAgent 로 되돌린다. 0 = 에이전
   trap '' HUP INT TERM PIPE
   local ok=0
   say "LaunchAgent 로 되돌립니다"
-  if loaded system; then sudo -n launchctl bootout "system/$LABEL" 2>/dev/null; wait_unloaded system; fi
-  if [ -f "$DAEMON" ]; then sudo -n rm -f "$DAEMON" 2>/dev/null; fi
+  if loaded system; then "$SUDO" -n /bin/launchctl bootout "system/$LABEL" 2>/dev/null; wait_unloaded system; fi
+  if [ -f "$DAEMON" ]; then "$SUDO" -n /bin/rm -f "$DAEMON" 2>/dev/null; fi
   if loaded system || [ -f "$DAEMON" ]; then
     # 에이전트까지 올리면 두 벌이 같은 포트를 두고 KeepAlive 재시작을 되풀이한다
     if [ -f "$AGENT" ]; then mv "$AGENT" "$KEPT"; fi
@@ -79,7 +93,7 @@ rollback() {  # daemon 을 내리고 LaunchAgent 로 되돌린다. 0 = 에이전
   # bootout 직후의 bootstrap 은 작업이 아직 내려가는 중이면 실패할 수 있다. 몇 번 다시 한다
   for _ in 1 2 3 4 5; do
     loaded "$GUI" && break
-    launchctl bootstrap "$GUI" "$AGENT" 2>/dev/null
+    "$LAUNCHCTL" bootstrap "$GUI" "$AGENT" 2>/dev/null
     sleep 1
   done
   if ! loaded "$GUI"; then
@@ -105,13 +119,13 @@ install_plan() {
   say "렌더한 plist:"
   cat "$NEW"
   say "실행할 명령:"
-  say "  sudo -v"
-  say "  launchctl bootout $GUI/$LABEL   # 로드돼 있으면"
-  say "  sudo -n launchctl bootout system/$LABEL   # 로드돼 있으면"
+  say "  /usr/bin/sudo -v"
+  say "  /bin/launchctl bootout $GUI/$LABEL   # 로드돼 있으면"
+  say "  /usr/bin/sudo -n /bin/launchctl bootout system/$LABEL   # 로드돼 있으면"
   say "  # :$PORT 가 풀릴 때까지 대기"
-  say "  sudo -n install -m 0644 -o root -g wheel <렌더한 plist> $DAEMON"
-  say "  sudo -n launchctl bootstrap system $DAEMON"
-  say "  launchctl print system/$LABEL   # state = running 확인"
+  say "  /usr/bin/sudo -n /usr/bin/install -m 0644 -o root -g wheel <렌더한 plist> $DAEMON"
+  say "  /usr/bin/sudo -n /bin/launchctl bootstrap system $DAEMON"
+  say "  /bin/launchctl print system/$LABEL   # state = running 확인"
   say "  curl http://127.0.0.1:$PORT/api/health   # 최대 40초"
   say "  mv $AGENT $KEPT"
 }
@@ -122,7 +136,7 @@ cmd_install() {
   [ -x "$PY" ] || die "venv python 이 없습니다: $PY (install.sh 로 먼저 설치합니다)"
   py check --agent "$base" || die "사전 점검에 실패했습니다. 아무것도 바꾸지 않았습니다"
   py render --agent "$base" > "$NEW" || die "아무것도 바꾸지 않았습니다"
-  plutil -lint "$NEW" >/dev/null || die "렌더한 plist 가 plutil -lint 를 통과하지 못했습니다. 아무것도 바꾸지 않았습니다"
+  "$PLUTIL" -lint "$NEW" >/dev/null || die "렌더한 plist 가 plutil -lint 를 통과하지 못했습니다. 아무것도 바꾸지 않았습니다"
   PORT=$(py port --agent "$base") || die "포트를 읽지 못했습니다. 아무것도 바꾸지 않았습니다"
 
   if [ -f "$DAEMON" ] && cmp -s "$DAEMON" "$NEW" && loaded system && [ ! -f "$AGENT" ]; then
@@ -144,23 +158,23 @@ cmd_install() {
   trap '' HUP PIPE
   trap 'fail "중단되었습니다"' INT TERM
   mkdir -p "$HOME/Library/Logs" "$SHARE" || fail "로그·보관 폴더를 만들지 못했습니다"
-  if loaded "$GUI"; then launchctl bootout "$GUI/$LABEL" 2>/dev/null; fi
+  if loaded "$GUI"; then "$LAUNCHCTL" bootout "$GUI/$LABEL" 2>/dev/null; fi
   wait_unloaded "$GUI" || fail "LaunchAgent 를 내리지 못했습니다"
-  if loaded system; then sudo -n launchctl bootout "system/$LABEL" 2>/dev/null; fi
+  if loaded system; then "$SUDO" -n /bin/launchctl bootout "system/$LABEL" 2>/dev/null; fi
   wait_unloaded system || fail "기존 daemon 을 내리지 못했습니다"
   for _ in $(seq 30); do listening || break; sleep 1; done
   if listening; then fail ":$PORT 가 풀리지 않습니다"; fi
-  sudo -n install -m 0644 -o root -g wheel "$NEW" "$DAEMON" || fail "plist 를 설치하지 못했습니다: $DAEMON"
+  "$SUDO" -n /usr/bin/install -m 0644 -o root -g wheel "$NEW" "$DAEMON" || fail "plist 를 설치하지 못했습니다: $DAEMON"
   for _ in 1 2 3 4 5; do
-    sudo -n launchctl bootstrap system "$DAEMON" && break
+    "$SUDO" -n /bin/launchctl bootstrap system "$DAEMON" && break
     sleep 1
   done
   loaded system || fail "launchctl bootstrap system 에 실패했습니다"
   for _ in $(seq 10); do
-    launchctl print "system/$LABEL" 2>/dev/null | grep -q '^[[:space:]]*state = running' && break
+    "$LAUNCHCTL" print "system/$LABEL" 2>/dev/null | grep -q '^[[:space:]]*state = running' && break
     sleep 1
   done
-  launchctl print "system/$LABEL" 2>/dev/null | grep -q '^[[:space:]]*state = running' || fail "daemon 이 running 이 아닙니다"
+  "$LAUNCHCTL" print "system/$LABEL" 2>/dev/null | grep -q '^[[:space:]]*state = running' || fail "daemon 이 running 이 아닙니다"
   healthy || fail "health 가 40초 안에 응답하지 않습니다: http://127.0.0.1:$PORT/api/health"
   if [ -f "$AGENT" ]; then mv "$AGENT" "$KEPT" || fail "에이전트 plist 를 옮기지 못했습니다"; fi
   say "LaunchDaemon 으로 옮겼습니다: $DAEMON"
@@ -177,11 +191,11 @@ cmd_uninstall() {
   fi
   if [ -n "$DRY" ]; then
     say "실행할 명령:"
-    say "  sudo -v"
-    say "  sudo -n launchctl bootout system/$LABEL"
-    say "  sudo -n rm -f $DAEMON"
+    say "  /usr/bin/sudo -v"
+    say "  /usr/bin/sudo -n /bin/launchctl bootout system/$LABEL"
+    say "  /usr/bin/sudo -n /bin/rm -f $DAEMON"
     say "  mv $KEPT $AGENT"
-    say "  launchctl bootstrap $GUI $AGENT"
+    say "  /bin/launchctl bootstrap $GUI $AGENT"
     say "  curl http://127.0.0.1:$PORT/api/health   # 최대 40초"
     return 0
   fi

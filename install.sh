@@ -35,7 +35,8 @@ APP="$SHARE/app"
 OLD="$HOME/Workspace/jarvis"  # 1.8.0 이전 배치
 CONFIG="$HOME/.config/jarvis/config.toml"
 AGENT="$HOME/Library/LaunchAgents/dev.jarvis.plist"
-DAEMON_PLIST="${JARVIS_DAEMON_PLIST:-/Library/LaunchDaemons/dev.jarvis.plist}"  # 재정의는 테스트용이다
+DAEMON_PLIST=/Library/LaunchDaemons/dev.jarvis.plist
+if [ "${JARVIS_DAEMON_TEST:-}" = 1 ]; then DAEMON_PLIST="${JARVIS_DAEMON_PLIST:-$DAEMON_PLIST}"; fi  # 재정의는 테스트에서만 받는다
 UNIT="$HOME/.config/systemd/user/jarvis.service"
 PY="$SHARE/venv/bin/python"
 MANIFEST="${JARVIS_MANIFEST:-https://github.com/thsvkd/jarvis/releases/latest/download/manifest.json}"
@@ -173,7 +174,7 @@ if [ -n "$DAEMON" ]; then
   # 이 설치기보다 오래된 app 에는 스크립트가 없다. 나중에 uninstall 을 부를 수 있게 지워지지 않는 곳에 받는다
   if [ ! -f "$DSRC/deploy/macos-daemon.sh" ]; then DSRC="$SHARE/daemon-src"; fetch "$DSRC"; fi
   # 이 셸이 파이프(curl | sh)로 읽는 스크립트를 자식이 먹지 않게 한다. sudo 는 /dev/tty 로 묻는다
-  bash "$DSRC/deploy/macos-daemon.sh" install </dev/null || {
+  /bin/bash "$DSRC/deploy/macos-daemon.sh" install </dev/null || {
     echo "LaunchDaemon 으로 옮기지 못했습니다. 위 결과를 확인한 뒤 다시 실행하세요" >&2
     exit 1
   }
