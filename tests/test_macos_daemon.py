@@ -2,6 +2,7 @@
 임시 HOME 과 가짜 launchctl·sudo·plutil·curl·lsof 로 돌린다. 실제 launchd·sudo·/Library 는 건드리지 않는다."""
 import hashlib
 import io
+import json
 import os
 import plistlib
 import re
@@ -26,9 +27,19 @@ SCRIPT = os.path.join(ROOT, "deploy", "macos-daemon.sh")
 UID = "501"
 
 # 상태는 $STATE 의 파일이다: daemon·agent(로드됨), 그 밖의 파일은 실패 주입
+# $STATE/tamper(JSON)의 키로 렌더한 plist 를 바꾼다: sudo 비밀번호를 묻는 사이에 같은 uid 프로세스가 임시 파일을 바꾼 경우
+TAMPER = """import glob, json, os, plistlib
+over = json.load(open(os.path.join(os.environ["STATE"], "tamper")))
+for path in glob.glob(os.path.join(os.environ["TMPDIR"], "*", "dev.jarvis.plist")):
+    d = plistlib.load(open(path, "rb"))
+    d.update(over)
+    plistlib.dump(d, open(path, "wb"), sort_keys=False)
+"""
+
 STUBS = {
     "uname": 'echo "${FAKE_UNAME:-Darwin}"',
     "id": 'case "$1" in -u) echo "${FAKE_UID:-%s}" ;; *) exec /usr/bin/id "$@" ;; esac' % UID,
+    "mktemp": 'exec /usr/bin/mktemp -d "$TMPDIR/x.XXXXXX"',  # macOS 의 mktemp -d 는 TMPDIR 을 따르지 않는다
     "sleep": 'exec /bin/sleep "${FAKE_SLEEP:-0.01}"',  # 대기 횟수는 그대로 세고 시간만 줄인다
     "launchctl": '''echo "launchctl $*" >> "$LOG"
 S="$STATE"
@@ -59,7 +70,10 @@ case "$1" in
 esac''',
     # -v 외에는 -n 만 받는다: 비밀번호를 다시 묻는 호출을 잡는다
     "sudo": '''echo "sudo $*" >> "$LOG"
-if [ "$1" = -v ]; then [ ! -f "$STATE/sudo-denied" ]; exit; fi
+if [ "$1" = -v ]; then
+  if [ -f "$STATE/tamper" ]; then "$TEST_PY" "$STATE/tamper.py"; fi
+  [ ! -f "$STATE/sudo-denied" ]; exit
+fi
 [ "$1" = -n ] || { echo "sudo 가 다시 물었습니다" >&2; exit 1; }
 [ ! -f "$STATE/sudo-lost" ] || exit 1
 shift
@@ -71,7 +85,16 @@ case "$1" in
   /usr/bin/install) [ ! -f "$STATE/install-fails" ] || exit 1; shift 7; exec /bin/cp "$1" "$2" ;;
   *) echo "모르는 sudo 명령: $*" >&2; exit 1 ;;
 esac''',
-    "plutil": '[ ! -f "$STATE/lint-fails" ]',
+    "plutil": '''case "$1" in
+  -lint) [ ! -f "$STATE/lint-fails" ] ;;
+  -extract) exec "$TEST_PY" -c 'import plistlib, sys
+d = plistlib.load(open(sys.argv[2], "rb"))
+if sys.argv[1] not in d: sys.exit(1)
+print(d[sys.argv[1]])' "$2" "$6" ;;
+  *) exit 2 ;;
+esac''',
+    # 가짜 sudo 는 root 가 아니므로 설치된 파일의 소유·권한은 실패를 주입할 때만 다르게 보인다
+    "stat": '''if [ -f "$STATE/stat-output" ]; then cat "$STATE/stat-output"; else echo "root:wheel 644"; fi''',
     "lsof": '''echo "lsof $*" >> "$LOG"
 [ -f "$STATE/agent" ] || [ -f "$STATE/daemon" ] || [ -f "$STATE/port-held" ]''',
     "curl": '''case "$*" in
@@ -280,9 +303,21 @@ class Script(Harness):
         super().setUp()
         python = os.path.join(self.share, "venv", "bin", "python")
         os.makedirs(os.path.dirname(python))
+        # $STATE/render-override(JSON): 렌더 코드 자체가 바뀌어 sha256 도 일치하는 경우
         with open(python, "w") as f:
-            f.write('#!/bin/sh\nexec "$TEST_PY" "$@"\n')
+            f.write('''#!/bin/sh
+case "$*" in *"macos_daemon render"*) if [ -f "$STATE/render-override" ]; then
+  "$TEST_PY" "$@" | "$TEST_PY" -c 'import json, os, plistlib, sys
+d = plistlib.loads(sys.stdin.buffer.read())
+d.update(json.load(open(os.path.join(os.environ["STATE"], "render-override"))))
+plistlib.dump(d, sys.stdout.buffer, sort_keys=False)'
+  exit
+fi ;; esac
+exec "$TEST_PY" "$@"
+''')
         os.chmod(python, 0o755)
+        with open(os.path.join(self.state, "tamper.py"), "w") as f:
+            f.write(TAMPER)
         self.app = os.path.join(self.share, "app")
         os.makedirs(os.path.join(self.app, "jarvis"))
         open(os.path.join(self.app, "jarvis", "__init__.py"), "w").close()
@@ -387,6 +422,7 @@ class Script(Harness):
         """covers: DAEMON-3"""
         self.assertEqual(self.run_script("install").returncode, 0)
         self.assertEqual(self.calls().count("sudo -v"), 1)
+        time.sleep(0.2)  # 루프를 멈출 때 이미 돌던 가짜 sudo 한 번이 늦게 기록할 수 있다
         size = os.path.getsize(self.log)
         time.sleep(0.2)
         self.assertEqual(os.path.getsize(self.log), size)
@@ -422,6 +458,52 @@ class Script(Harness):
                 if name.startswith("daemon-"):  # daemon 이 로드된 뒤의 실패는 sudo 로 내린다
                     self.assertIn("sudo -n /bin/launchctl bootout system/dev.jarvis", self.calls())
                 os.remove(os.path.join(self.state, name))
+                os.remove(self.log)
+
+    def assert_never_loaded(self, r, why):
+        self.assert_rolled_back(r)
+        self.assertIn(why, r.stderr)
+        calls = self.calls()
+        self.assertFalse([c for c in calls if "bootstrap system" in c], calls)
+        self.assertIn(f"sudo -n /bin/rm -f {self.daemon}", calls)
+        self.assertTrue(self.has("agent"))
+
+    def put(self, name, value):
+        with open(os.path.join(self.state, name), "w") as f:
+            f.write(value)
+
+    def test_a_plist_swapped_while_sudo_asks_is_removed_before_bootstrap(self):
+        """covers: DAEMON-13"""
+        for over in ({"UserName": "root"}, {"ProgramArguments": ["/tmp/evil"]}, {"EnvironmentVariables": {"PATH": "/tmp"}}):
+            with self.subTest(over):
+                self.put("tamper", json.dumps(over))
+                self.assert_never_loaded(self.run_script("install"), "믿을 수 없습니다")
+                os.remove(os.path.join(self.state, "tamper"))
+                os.remove(self.log)
+
+    def test_the_sha256_catches_a_swap_that_keeps_every_checked_field(self):
+        """covers: DAEMON-13"""
+        self.put("tamper", json.dumps({"ProgramArguments": ["/tmp/evil"]}))
+        self.assert_never_loaded(self.run_script("install"), "sha256")
+
+    def test_a_wrong_owner_or_mode_on_the_installed_plist_is_removed_before_bootstrap(self):
+        """covers: DAEMON-13"""
+        for got in ("someone:staff 644", "root:staff 644", "root:wheel 664", "root:wheel 600", ""):
+            with self.subTest(got):
+                self.put("stat-output", got)
+                self.assert_never_loaded(self.run_script("install"), "root:wheel 0644")
+                os.remove(os.path.join(self.state, "stat-output"))
+                os.remove(self.log)
+
+    def test_bad_fields_are_caught_even_when_the_sha256_matches(self):
+        """covers: DAEMON-13"""
+        for over, why in (({"UserName": "root"}, "UserName"), ({"UserName": "0"}, "UserName"), ({"UserName": ""}, "UserName"),
+                          ({"UserName": "someone-else"}, "UserName"), ({"StandardOutPath": "/tmp/x"}, "StandardOutPath"),
+                          ({"StandardErrorPath": "/tmp/x"}, "StandardErrorPath"), ({"Label": "dev.other"}, "Label")):
+            with self.subTest(over):
+                self.put("render-override", json.dumps(over))
+                self.assert_never_loaded(self.run_script("install"), why)
+                os.remove(os.path.join(self.state, "render-override"))
                 os.remove(self.log)
 
     def test_an_agent_that_will_not_stop_stays_as_it_is(self):

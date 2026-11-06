@@ -22,13 +22,15 @@ DAEMON=/Library/LaunchDaemons/$LABEL.plist
 SUDO=/usr/bin/sudo
 LAUNCHCTL=/bin/launchctl
 PLUTIL=/usr/bin/plutil
-# 테스트만 가짜 sudo·launchctl·plutil 과 임시 plist 경로를 쓴다. sudo 에 넘기는 명령은 테스트에서도 아래의 절대경로 그대로다
+STAT=/usr/bin/stat
+# 테스트만 가짜 sudo·launchctl·plutil·stat 과 임시 plist 경로를 쓴다. sudo 에 넘기는 명령은 테스트에서도 아래의 절대경로 그대로다
 if [ "${JARVIS_DAEMON_TEST:-}" = 1 ]; then
   T="${JARVIS_DAEMON_TEST_BIN:?}"
   PATH="$T:$PATH"
   SUDO="$T/sudo"
   LAUNCHCTL="$T/launchctl"
   PLUTIL="$T/plutil"
+  STAT="$T/stat"
   DAEMON="${JARVIS_DAEMON_PLIST:-$DAEMON}"
 fi
 
@@ -66,6 +68,26 @@ healthy() {  # 최대 40초
 }
 agent_plist() {  # 렌더 기준: LaunchAgents 의 것이 없으면 옮겨 둔 것
   if [ -f "$AGENT" ]; then say "$AGENT"; elif [ -f "$KEPT" ]; then say "$KEPT"; else return 1; fi
+}
+
+sha() { /usr/bin/shasum -a 256 "$1" | cut -d' ' -f1; }
+field() { "$PLUTIL" -extract "$1" raw -o - "$DAEMON" 2>/dev/null; }
+# 설치된 root 소유 사본만 믿을 수 있다: $NEW 는 같은 uid 프로세스가 sudo 를 묻는 사이에 바꿀 수 있다. bootstrap 전에 부른다
+verify_installed() {
+  local got user
+  user=$(id -un)
+  got=$("$STAT" -f '%Su:%Sg %Lp' "$DAEMON" 2>/dev/null)
+  if [ "$got" != "root:wheel 644" ]; then say "소유·권한이 root:wheel 0644 가 아닙니다: $got"; return 1; fi
+  got=$(field UserName)
+  case "$got" in ""|root|0) say "UserName 이 root 입니다: $got"; return 1 ;; esac
+  if [ "$got" != "$user" ]; then say "UserName 이 $user 가 아닙니다: $got"; return 1; fi
+  for key in StandardOutPath StandardErrorPath; do
+    got=$(field "$key")
+    if [ "$got" != /dev/null ]; then say "$key 가 /dev/null 이 아닙니다: $got"; return 1; fi
+  done
+  got=$(field Label)
+  if [ "$got" != "$LABEL" ]; then say "Label 이 $LABEL 이 아닙니다: $got"; return 1; fi
+  if [ "$(sha "$DAEMON")" != "$NEW_SHA" ]; then say "렌더한 내용과 다릅니다(sha256)"; return 1; fi
 }
 
 sudo_begin() {  # 이후의 sudo 는 모두 -n 이다: 다시 묻지 않고, 시간이 지나 끊기면 실패로 다룬다
@@ -124,6 +146,7 @@ install_plan() {
   say "  /usr/bin/sudo -n /bin/launchctl bootout system/$LABEL   # 로드돼 있으면"
   say "  # :$PORT 가 풀릴 때까지 대기"
   say "  /usr/bin/sudo -n /usr/bin/install -m 0644 -o root -g wheel <렌더한 plist> $DAEMON"
+  say "  # 설치된 plist 검사: root:wheel 0644, UserName, Standard*Path, Label, sha256 $NEW_SHA"
   say "  /usr/bin/sudo -n /bin/launchctl bootstrap system $DAEMON"
   say "  /bin/launchctl print system/$LABEL   # state = running 확인"
   say "  curl http://127.0.0.1:$PORT/api/health   # 최대 40초"
@@ -131,11 +154,13 @@ install_plan() {
 }
 
 cmd_install() {
-  local base
+  local base why
   base=$(agent_plist) || die "에이전트 plist 가 없습니다: $AGENT (install.sh 로 먼저 설치합니다)"
   [ -x "$PY" ] || die "venv python 이 없습니다: $PY (install.sh 로 먼저 설치합니다)"
   py check --agent "$base" || die "사전 점검에 실패했습니다. 아무것도 바꾸지 않았습니다"
   py render --agent "$base" > "$NEW" || die "아무것도 바꾸지 않았습니다"
+  NEW_SHA=$(sha "$NEW")
+  [ -n "$NEW_SHA" ] || die "렌더한 plist 의 sha256 을 구하지 못했습니다. 아무것도 바꾸지 않았습니다"
   "$PLUTIL" -lint "$NEW" >/dev/null || die "렌더한 plist 가 plutil -lint 를 통과하지 못했습니다. 아무것도 바꾸지 않았습니다"
   PORT=$(py port --agent "$base") || die "포트를 읽지 못했습니다. 아무것도 바꾸지 않았습니다"
 
@@ -165,6 +190,7 @@ cmd_install() {
   for _ in $(seq 30); do listening || break; sleep 1; done
   if listening; then fail ":$PORT 가 풀리지 않습니다"; fi
   "$SUDO" -n /usr/bin/install -m 0644 -o root -g wheel "$NEW" "$DAEMON" || fail "plist 를 설치하지 못했습니다: $DAEMON"
+  why=$(verify_installed) || fail "설치된 plist 를 믿을 수 없습니다: $why"
   for _ in 1 2 3 4 5; do
     "$SUDO" -n /bin/launchctl bootstrap system "$DAEMON" && break
     sleep 1
