@@ -174,7 +174,7 @@
    // 파일 저장소: 키체인이 열린 곳에서 claude 를 실행하면 키체인에 쓰고 파일을 지운다. 그래서 키체인이 잠긴 SSH 로 안내한다
    const ssh=html`<p>1. <code>ssh &lt;그 기기&gt;</code> 로 접속합니다. 화면 터미널은 피합니다: 키체인이 열린 곳에서 <code>claude</code> 를 실행하면 로그인이 키체인으로 옮겨집니다.</p>${onlyAdd?"":html`<p>2. <code>claude</code> 를 실행해 <code>/login</code> 합니다.</p>`}<p>${onlyAdd?"2":"3"}. ${save}</p>`;
    // 복구가 먼저다: 항목이 남아 있으면 SSH 의 /login 이 저장되지 않을 수 있다
-   const repair=html`<p class="ul-err">키체인에 생긴 로그인을 파일로 되돌립니다: <code>hswap claude migrate-store --to file --keep keychain</code></p><p>이 명령은 키체인이 열린 맥락에서만 동작합니다. 그 기기의 화면 세션에서 실행하거나, 같은 셸에서 <code>security unlock-keychain</code> 을 먼저 실행합니다. 그 셸에서는 <code>claude</code> 를 실행하지 않습니다.</p><p class="ul-muted">복구한 뒤에도 로그인이 풀려 있으면 아래 순서로 다시 로그인합니다.</p>`;
+   const repair=html`<p class="ul-err"><code>hswap claude migrate-store --to file --keep keychain</code>은 항목이 있을 때 씁니다. 항목이 없는데도 이 표시가 계속되면 <code>~/Library/Logs/hswap-keepalive.log</code>를 확인합니다.</p><p>이 명령은 키체인이 열린 맥락에서만 동작합니다. 그 기기의 화면 세션에서 실행하거나, 같은 셸에서 <code>security unlock-keychain</code> 을 먼저 실행합니다. 그 셸에서는 <code>claude</code> 를 실행하지 않습니다.</p><p class="ul-muted">복구한 뒤에도 로그인이 풀려 있으면 아래 순서로 다시 로그인합니다.</p>`;
    const conflict=html`<p class="ul-err">hswap 설정에서 파일 저장소(<code>credentials.store</code>)와 키체인 필수 모드(<code>credentials.requireKeychain</code>) 중 하나만 켭니다. 다시 로그인하지 않아도 됩니다.</p>`;
    const steps=L&&L.state==="config_conflict"?conflict:L&&L.state==="keychain_item_present"?html`${repair}${ssh}`:L&&L.store==="file"?ssh:gui;
    P.render($("#ulDlgB"),html`<div class="ul-login">${steps}<p class="ul-muted">Claude 는 device-code 로그인이 없어 jarvis 가 대신 로그인하지 않습니다.</p></div>`);

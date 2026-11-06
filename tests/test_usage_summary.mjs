@@ -203,9 +203,10 @@ guide = guideOf({ ...fileStore, state: "other_account", slot: null, other: true 
 assert.match(guide, /<code>ssh &lt;그 기기&gt;<\/code>/);
 assert.match(guide, /<p>2\. <code>hswap claude add<\/code> 로 지금 로그인을 새 슬롯에 저장합니다/);
 assert.doesNotMatch(guide, /\/login/);
-// 키체인 항목이 다시 생겼으면 복구 명령과 그 조건이 재로그인보다 먼저 온다
+// 키체인 항목이 있거나 확인하지 못했으면 복구 명령과 그 조건, 항목이 없을 때 볼 로그가 재로그인보다 먼저 온다
 guide = guideOf({ ...fileStore, state: "keychain_item_present" });
 assert.ok(guide.indexOf("hswap claude migrate-store --to file --keep keychain") < guide.indexOf("ssh &lt;그 기기&gt;"));
+assert.match(guide, /<code>hswap claude migrate-store --to file --keep keychain<\/code>은 항목이 있을 때 씁니다\. 항목이 없는데도 이 표시가 계속되면 <code>~\/Library\/Logs\/hswap-keepalive\.log<\/code>를 확인합니다\./);
 assert.match(guide, /<code>security unlock-keychain<\/code> 을 먼저 실행합니다/);
 guide = guideOf({ state: "keychain_item_present", text: "멈춤", store: null }); // store 가 없어도 이 오류는 파일 저장소의 것이다. GUI 안내는 파일을 지울 수 있다
 assert.match(guide, /migrate-store/);

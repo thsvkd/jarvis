@@ -486,7 +486,7 @@ class LoginStateTest(StoreCase):
     def test_file_store_stops_are_reported_with_fixed_text(self):
         """covers: USAGE-7. 이전 계정의 기록이어도, 만료 임박이어도, 사용 중 계정이 재로그인 필요여도 기기의 사실이 먼저다"""
         relogin = [{"active": True, "slot": "2", "note": claude_accounts.STATUS["relogin_required"][0]}]
-        for kind, want in (("keychain_item_present", "키체인에 Claude 로그인이 다시 생겨 자동 갱신을 멈췄습니다"),
+        for kind, want in (("keychain_item_present", "키체인에 Claude 로그인이 있거나 확인하지 못해 자동 갱신을 멈췄습니다"),
                            ("config_conflict", "hswap 설정 충돌(파일 저장소와 키체인 필수 모드)")):
             self.keepalive(store="file", ok=False, error={"type": kind, "message": "x" * 500}, loginExpiresAt=iso(time.time() + 3600))
             for rows in ((), relogin):

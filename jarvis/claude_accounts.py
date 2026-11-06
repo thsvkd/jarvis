@@ -33,7 +33,7 @@ KNOWN_BUCKETS = {"opus", "sonnet", "haiku"}  # 첫 단어가 이것인 이름만
 # keepalive error.type → 화면 문구. 파일의 자유 문구(error.message)는 토큰·조직 UUID 가 들어 있어도 새지 않게 내보내지 않는다
 KEEPALIVE_ERRORS = {"keychain_unavailable": "키체인 접근 불가", "relogin_required": "재로그인 필요", "split_brain": "키체인과 파일의 로그인이 갈라짐",
                     "refresh_failed": "토큰 갱신 실패", "no_credentials": "자격 증명 없음", "locked": "다른 프로세스가 잠금을 쥐고 있음", "unmanaged": "저장 슬롯에 없는 로그인",
-                    "keychain_item_present": "키체인에 Claude 로그인이 다시 생겨 자동 갱신을 멈췄습니다", "config_conflict": "hswap 설정 충돌(파일 저장소와 키체인 필수 모드)"}
+                    "keychain_item_present": "키체인에 Claude 로그인이 있거나 확인하지 못해 자동 갱신을 멈췄습니다", "config_conflict": "hswap 설정 충돌(파일 저장소와 키체인 필수 모드)"}
 LOGIN_WARN_S = 3 * 86400  # 로그인(갱신 토큰) 만료 3일 전부터 '주의 필요'. 새 /login 만이 기한을 늘린다
 CACHE_S = 30  # hswap 자체가 캐시하므로 짧게만 묶는다(요청마다 프로세스를 띄우지 않게)
 READ_BUDGET_S = 40  # 읽기 한 번의 전체 시한. 재시도의 잠금 대기와 hswap 호출이 함께 쓴다. 수집기의 대기(독립 55초, 호환 60초)보다 짧아야 한다
@@ -45,7 +45,7 @@ STATUS = {
     # hswap 은 죽은 갱신 토큰을 슬롯 백업 기준으로 격리한다. Claude Code 에서 다시 로그인만 하면 격리가 남는다
     "relogin_required": ("다시 로그인해야 합니다: 그 계정으로 Claude Code 에서 /login 한 뒤 hswap claude add 를 실행하세요.", True),
     "keychain_unavailable": ("Keychain 을 읽지 못했습니다.", True),
-    "keychain_item_present": ("키체인에 Claude 로그인이 다시 생겨 자동 갱신을 멈췄습니다.", True),
+    "keychain_item_present": ("키체인에 Claude 로그인이 있거나 확인하지 못해 자동 갱신을 멈췄습니다.", True),
     "config_conflict": ("hswap 설정 충돌(파일 저장소와 키체인 필수 모드).", True),
     "foreign_credential": ("지금 로그인이 다른 계정입니다. hswap claude switch 로 맞추세요.", True),
     "no_credentials": ("자격 증명이 없습니다.", True),
@@ -411,7 +411,7 @@ def _is_relogin(a):
 
 def login(rows=(), keychain=False, signed_in=False):
     """기기 단위 로그인 상태 {state, text, note, attention, slot, other, store}. 알릴 것이 없으면 None(keepalive.json 이 없으면 이 기능을 쓰지 않는 기기다).
-    순서: 설정 충돌·키체인 항목 재생성 > 사람이 다시 로그인해야 하는 것 > 키체인 > 만료 임박 > 멈춤 > 이전 계정의 기록 > 그 밖의 실패 > 정상.
+    순서: 설정 충돌·키체인 항목(있거나 확인 실패) > 사람이 다시 로그인해야 하는 것 > 키체인 > 만료 임박 > 멈춤 > 이전 계정의 기록 > 그 밖의 실패 > 정상.
     store: 파일 저장소 기기면 "file", 아니면 None(옛 형식 포함). 파일의 다른 값은 내보내지 않는다. 키체인을 쓰지 않는 기기라 키체인에 닿지 못하는 것은 문제가 아니다.
     rows: 사용 중 계정의 재로그인 판정(저장소의 authDeadStrikes 와 hswap 의 relogin_required 가 같은 문구가 된다)과 사용 중 슬롯.
     keychain: hswap 의 keychainUnavailable. signed_in: 로그인을 읽었다(rows 에 active 가 없으면 저장되지 않은 로그인이다).
