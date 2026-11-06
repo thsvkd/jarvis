@@ -2168,6 +2168,7 @@ class JudgeRowsTest(unittest.TestCase):
         dead = store_value(shown_row(active=True, note=RELOGIN, attention=True))
         cases = (("값이 있는 행", shown_row(), dead, ("ok", True, RELOGIN, None, True)),
                  ("값이 없는 행", shown_row(windows=[]), dead, ("error", True, None, RELOGIN, False)),
+                 ("모델별 한도만 있는 행도 값이 있다", shown_row(windows=[], buckets=[{"name": "Opus", "used": 1}]), dead, ("ok", True, RELOGIN, None, False)),
                  ("이미 재로그인 문구", shown_row(note=RELOGIN), dead, ("ok", False, RELOGIN, None, True)),
                  ("같은 번호의 다른 계정", shown_row(), {**dead, "ids": {"1": "other"}}, ("ok", False, None, None, True)),
                  ("저장소에 실패 없음", shown_row(), store_value(), ("ok", False, None, None, True)))
@@ -2210,6 +2211,8 @@ class JudgeRowsTest(unittest.TestCase):
                 self.assertEqual((a["note"], a["attention"]), want)
         empty = self.judge(cli_answer(shown_row(windows=[], updated_at=None)), None)[1][0]
         self.assertEqual((empty["note"], empty["attention"]), (None, False))  # 값이 없으면 늙을 것도 없다
+        bucket = self.judge(cli_answer(shown_row(windows=[], buckets=[{"name": "Opus", "used": 1}], updated_at=NOW - 9 * 3600)), None)[1][0]
+        self.assertEqual((bucket["note"], bucket["attention"]), ("9시간 전 값입니다.", True))  # 모델별 한도만 있어도 값이다
 
     def test_the_held_answer_is_not_changed(self):
         """covers: USAGE-6"""
@@ -2248,7 +2251,8 @@ class JudgeAskTest(unittest.TestCase):
                  ("모습이 달라졌다", {"store": store, "held": (MONO - 60, fresh, "옛 모습")}, True, True),
                  ("묶음이 기준 밖", {"store": store, "held": old}, True, False),
                  ("묶음에 계정이 없다", {"store": store, "held": (MONO - 60, {"error": "x"}, self.SHAPE)}, True, False),
-                 ("보일 값 중 오래된 것", {"store": store, "held": (MONO - 60, cli_answer(shown_row(updated_at=NOW - STALE - 1)), self.SHAPE)}, True, True))
+                 ("보일 값 중 오래된 것", {"store": store, "held": (MONO - 60, cli_answer(shown_row(updated_at=NOW - STALE - 1)), self.SHAPE)}, True, True),
+                 ("오래된 값이 모델별 한도뿐", {"store": store, "held": (MONO - 60, cli_answer(shown_row(windows=[], buckets=[{"name": "Opus", "used": 1}], updated_at=NOW - STALE - 1)), self.SHAPE)}, True, True))
         for name, kw, ask, reuse in cases:
             with self.subTest(name):
                 asked, recent = self.judge(**kw)
