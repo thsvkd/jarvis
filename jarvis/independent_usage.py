@@ -11,7 +11,8 @@ from .util import which_local
 
 _pool = ThreadPoolExecutor(max_workers=5, thread_name_prefix="jarvis-usage")
 _lock = threading.Lock()
-_tasks = {}  # 이름 → (시작 시각, Future). 늦은 수집을 중복 실행하지 않는다.
+_tasks = {}  # 이름 → (시작 시각, Future, 강제 여부). 늦은 수집을 중복 실행하지 않는다.
+FORCE_WAIT_S = 10  # 새로고침이 진행 중인 보통 읽기를 기다리는 시간. 이어지는 읽기의 시한(40초)과 합쳐 read 의 대기(55초) 안이어야 한다
 _names = {"claude": "Claude", "codex": "Codex", "grok": "Grok", "cursor": "Cursor", "opencodeGo": "OpenCode Go", "antigravity": "Antigravity", "kimi": "Kimi", "zcode": "ZCode", "gemini": "Gemini", "minimax": "MiniMax"}
 
 
@@ -48,6 +49,12 @@ def _claude(force):
     return claude_accounts.read(force)
 
 
+def _claude_after(running):
+    """보통 읽기가 끝나기를 기다린 뒤 강제로 읽는다. 그 읽기는 묶음만 다시 쓸 수 있어 새로고침의 답이 될 수 없다."""
+    wait([running], timeout=FORCE_WAIT_S)
+    return _claude(True)
+
+
 def _orca(force):
     """Orca 로컬 RPC 의 계정만 읽는다(cswap·caam 은 실행하지 않는다). Orca 가 없거나 실패하면 빈 목록."""
     return orca_usage._orca(force).get("providers", [])
@@ -81,7 +88,9 @@ def read(force=False):
             # Claude 는 claude_accounts 가 hswap 을 부를 때를 정하므로 여기서 묶지 않는다. 묶으면 계정 전환 직후에도 이전 '사용 중'을 보인다
             ttl = 0 if name == "claude" else 120
             if previous is None or (previous[1].done() and (force or now - previous[0] >= ttl)):
-                previous = _tasks[name] = (now, _pool.submit(job))
+                previous = _tasks[name] = (now, _pool.submit(job), force)
+            elif force and name == "claude" and not previous[2]:  # 새로고침은 강제 작업에만 얹힌다. 보통 읽기는 어느 쪽에든 얹힌다
+                previous = _tasks[name] = (now, _pool.submit(_claude_after, previous[1]), True)
             selected[name] = previous[1]
         previous = _tasks.get("orca")
         if previous is None or (previous[1].done() and (force or now - previous[0] >= 30)):

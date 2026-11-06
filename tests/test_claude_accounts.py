@@ -1522,6 +1522,118 @@ class ReadDeadlineTest(StoreCase):
         self.assertEqual(out["accounts"][0]["source"], "cswap")
 
 
+class ForcedTaskTest(StoreCase):
+    """새로고침은 보통 읽기에 얹히지 않는다. 보통 읽기는 어느 쪽에든 얹힌다."""
+
+    def setUp(self):
+        super().setUp()
+        self.store(time.time() - 60)
+        self.calls = 0
+        self.cli_gate = None
+        self.entered = threading.Event()
+        self.hswap().side_effect = self.answer
+
+    def answer(self, *args, **kw):
+        self.calls += 1
+        n = self.calls
+        self.entered.set()
+        if self.cli_gate:
+            self.cli_gate.wait(10)
+        return {"accounts": [hswap_row(usage={"fiveHour": {"pct": n * 10}})]}
+
+    def used(self, body):
+        return next(p for p in body["providers"] if p["id"] == "claude")["accounts"][0]["windows"][0]["used"]
+
+    def reader(self, box, key, force):
+        t = threading.Thread(target=lambda: box.update({key: self.used(independent_usage.read(force=force))}))
+        t.start()
+        return t
+
+    def run_page(self):
+        p = self.independent_mocks()
+        independent_usage._tasks.clear()
+        self.addCleanup(independent_usage._tasks.clear)
+        return p
+
+    def test_refresh_does_not_ride_on_an_ordinary_read_of_cached_values(self):
+        """covers: USAGE-6. 묶음만 다시 쓰는 보통 읽기가 진행 중이어도 새로고침은 hswap 에 묻고 새 값을 받는다"""
+        box = {}
+        with self.run_page():
+            self.assertEqual(self.used(independent_usage.read()), 10)
+            self.assertEqual(self.calls, 1)
+            paused, gate, real = threading.Event(), threading.Event(), claude_accounts._store_read
+
+            def hold_the_ordinary_read():
+                paused.set()
+                gate.wait(10)
+                return real()
+            self.addCleanup(gate.set)
+            with mock.patch.object(claude_accounts, "_store_read") as store:
+                def first_read_waits():
+                    store.side_effect = real
+                    return hold_the_ordinary_read()
+                store.side_effect = first_read_waits
+                ordinary = self.reader(box, "ordinary", False)
+                self.assertTrue(paused.wait(5))
+                forced = self.reader(box, "forced", True)
+                time.sleep(.1)  # 새로고침이 진행 중인 보통 읽기를 본다
+                self.assertEqual(self.calls, 1)
+                gate.set()
+                ordinary.join(20)
+                forced.join(20)
+        self.assertFalse(ordinary.is_alive() or forced.is_alive())
+        self.assertEqual(self.calls, 2)
+        self.assertEqual((box["ordinary"], box["forced"]), (10, 20))
+
+    def test_refresh_after_an_ordinary_read_that_is_asking_hswap(self):
+        """covers: USAGE-6. 보통 읽기가 hswap 호출 중이면 끝나기를 기다린 뒤 새로 묻는다"""
+        box = {}
+        self.cli_gate = threading.Event()
+        self.addCleanup(self.cli_gate.set)
+        with self.run_page():
+            ordinary = self.reader(box, "ordinary", False)
+            self.assertTrue(self.entered.wait(5))
+            forced = self.reader(box, "forced", True)
+            time.sleep(.1)
+            self.cli_gate.set()
+            ordinary.join(20)
+            forced.join(20)
+        self.assertEqual(self.calls, 2)
+        self.assertEqual((box["ordinary"], box["forced"]), (10, 20))
+
+    def test_refresh_shares_a_running_refresh(self):
+        """covers: USAGE-6"""
+        box = {}
+        self.cli_gate = threading.Event()
+        self.addCleanup(self.cli_gate.set)
+        with self.run_page():
+            one = self.reader(box, "one", True)
+            self.assertTrue(self.entered.wait(5))
+            two = self.reader(box, "two", True)
+            time.sleep(.1)
+            self.cli_gate.set()
+            one.join(20)
+            two.join(20)
+        self.assertEqual(self.calls, 1)
+        self.assertEqual((box["one"], box["two"]), (10, 10))
+
+    def test_ordinary_read_shares_a_running_refresh(self):
+        """covers: USAGE-6"""
+        box = {}
+        self.cli_gate = threading.Event()
+        self.addCleanup(self.cli_gate.set)
+        with self.run_page():
+            forced = self.reader(box, "forced", True)
+            self.assertTrue(self.entered.wait(5))
+            ordinary = self.reader(box, "ordinary", False)
+            time.sleep(.1)
+            self.cli_gate.set()
+            forced.join(20)
+            ordinary.join(20)
+        self.assertEqual(self.calls, 1)
+        self.assertEqual((box["forced"], box["ordinary"]), (10, 10))
+
+
 class AliasTest(unittest.TestCase):
     def test_old_names_read_and_patch_the_new_module(self):
         """covers: USAGE-6. 옛 이름으로 바꿔 끼운 값이 새 모듈에 그대로 닿고, 끝나면 되돌아간다"""
