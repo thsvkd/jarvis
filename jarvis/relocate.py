@@ -5,6 +5,7 @@ launch.ROOT/app 으로 옮기고 서비스 등록(LaunchAgent·systemd 사용자
 
 - 옛 폴더에 .git 이 있으면(개발 체크아웃) 아무것도 읽거나 부르지 않는다.
 - 등록이 옛 폴더를 가리키지 않으면(pm2·수동 설치) 아무것도 하지 않는다.
+- macOS LaunchDaemon 등록은 root 소유라 고칠 수 없다. 아무것도 쓰지 않고 noop 과 안내를 낸다.
 - 옛 폴더는 지우지 않고 ROOT/workspace-old 로 옮긴다. 서비스 관리자가 실제로 로드한 설정이 app 을 가리키고, 옛 폴더의 코드나
   작업 폴더로 도는 프로세스가 없을 때만 옮긴다.
 - macOS 는 launchd 가 plist 를 다시 읽을 때(로그인·재부팅·사용자의 bootout/bootstrap)까지 로드된 작업 폴더가 옛 폴더다.
@@ -32,6 +33,7 @@ from . import launch
 PLATFORM = sys.platform
 HERE = launch.HERE  # 지금 도는 코드의 저장소(또는 받은 릴리스) 폴더
 LABEL = "dev.jarvis"
+DAEMON = "/Library/LaunchDaemons/dev.jarvis.plist"
 BAK = ".bak-relocate"
 TMP = ".app-tmp-"
 LOCK = ".relocate.lock"
@@ -196,12 +198,16 @@ def _unit_dir(v):
     return v
 
 
+def _agent_plist():
+    return os.path.join(os.path.expanduser("~"), "Library", "LaunchAgents", LABEL + ".plist")
+
+
 def registered():
     """서비스 등록: {"kind", "path", "raw", "wd"(원문), "dir"(실제 경로)} 또는 None(없음·읽지 못함)."""
     home = os.path.expanduser("~")
     try:
         if PLATFORM == "darwin":
-            path = os.path.join(home, "Library", "LaunchAgents", LABEL + ".plist")
+            path = _agent_plist()
             with open(path, "rb") as f:
                 raw = f.read()
             wd = plistlib.loads(raw).get("WorkingDirectory")
@@ -364,6 +370,8 @@ def _skip(o):
         return "개발 체크아웃(.git)이라 건드리지 않습니다"
     if not _code(o):
         return "옛 폴더에 jarvis 코드가 없습니다"
+    if PLATFORM == "darwin" and os.path.exists(DAEMON) and not os.path.exists(_agent_plist()):
+        return f"LaunchDaemon 으로 등록된 기기입니다({DAEMON}): root 소유 등록은 고칠 수 없어 옛 폴더를 남깁니다. 옮기려면 관리자 권한으로 등록을 고칩니다"
     return None
 
 

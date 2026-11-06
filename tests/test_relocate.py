@@ -102,6 +102,7 @@ class Base(unittest.TestCase):
                   mock.patch.multiple(launch, ROOT=self.root, VERSIONS=os.path.join(self.root, "versions"),
                                       CURRENT=os.path.join(self.root, "current.json")),
                   mock.patch.object(relocate, "PLATFORM", self.platform),
+                  mock.patch.object(relocate, "DAEMON", os.path.join(self.tmp, "LaunchDaemons", "dev.jarvis.plist")),
                   mock.patch.object(relocate, "HERE", os.path.join(self.root, "versions", "1.8.0"))):
             p.start()
             self.addCleanup(p.stop)
@@ -161,6 +162,31 @@ class Mac(Base):
     def plist(self):
         with open(self.agent, "rb") as f:
             return plistlib.load(f)
+
+    def test_a_daemon_registration_is_not_touched(self):
+        """covers: DAEMON-11"""
+        os.remove(self.agent)
+        os.makedirs(os.path.dirname(relocate.DAEMON))
+        with open(relocate.DAEMON, "wb") as f:
+            f.write(self.original)
+        for dry_run in (True, False):
+            r = relocate.run(dry_run=dry_run)
+            self.assertEqual(r["state"], "noop")
+            self.assertIn("관리자 권한", r["detail"])
+            self.assertEqual(r["steps"], [])
+        self.assertEqual(self.calls(), [])  # launchctl 도 부르지 않는다
+        self.assertFalse(os.path.exists(self.root))  # 잠금·app·백업을 만들지 않는다
+        self.assertTrue(os.path.isfile(os.path.join(self.old, "jarvis", "__init__.py")))
+        with open(relocate.DAEMON, "rb") as f:
+            self.assertEqual(f.read(), self.original)
+
+    def test_an_agent_plist_next_to_a_daemon_plist_is_still_relocated(self):
+        """covers: DAEMON-11"""
+        os.makedirs(os.path.dirname(relocate.DAEMON))
+        with open(relocate.DAEMON, "wb") as f:
+            f.write(self.original)
+        self.assertEqual(relocate.run()["state"], "pending_reload")
+        self.assertEqual(self.plist()["WorkingDirectory"], self.app)
 
     def test_old_layout_is_copied_and_registered_but_kept_until_launchd_reloads(self):
         """covers: RELOC-1, RELOC-3"""
