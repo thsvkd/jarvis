@@ -35,6 +35,7 @@ KEEPALIVE_ERRORS = {"keychain_unavailable": "키체인 접근 불가", "relogin_
                     "refresh_failed": "토큰 갱신 실패", "no_credentials": "자격 증명 없음", "locked": "다른 프로세스가 잠금을 쥐고 있음", "unmanaged": "저장 슬롯에 없는 로그인"}
 LOGIN_WARN_S = 3 * 86400  # 로그인(갱신 토큰) 만료 3일 전부터 '주의 필요'. 새 /login 만이 기한을 늘린다
 CACHE_S = 30  # hswap 자체가 캐시하므로 짧게만 묶는다(요청마다 프로세스를 띄우지 않게)
+READ_BUDGET_S = 40  # 읽기 한 번의 전체 시한. 재시도의 잠금 대기와 hswap 호출이 함께 쓴다. 수집기의 대기(독립 55초, 호환 60초)보다 짧아야 한다
 TIMEOUT_S = 15  # Orca 와 동시에 돈다. core 의 기기당 시간 제한(70초) 안에 들어와야 한다
 SWITCH_TIMEOUT_S = 30  # switch 는 현재 로그인을 백업하고 macOS 는 Keychain 도 고친다. core 는 40초를 기다린다
 # usageStatus → (화면 문구, 사람이 손봐야 하는가). ok·api_key·unavailable 은 따로 다룬다
@@ -220,7 +221,7 @@ def _json(exe, *args, timeout=TIMEOUT_S):
         p = subprocess.run([exe, "claude", *args, "--json"], capture_output=True, text=True, encoding="utf-8", timeout=timeout,
                            stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except subprocess.TimeoutExpired:  # 메시지에 실행 경로(홈 디렉터리)가 들어 있어 그대로 내보내지 않는다
-        raise RuntimeError(f"hswap 이 {timeout}초 안에 답하지 않았습니다")
+        raise RuntimeError(f"hswap 이 {timeout:.0f}초 안에 답하지 않았습니다")
     except OSError as e:
         raise RuntimeError(f"hswap 을 실행하지 못했습니다({type(e).__name__})")
     try:
@@ -259,12 +260,13 @@ def switch(slot):
         _lock.release()
 
 
-def live(force=False, install=True, shape=None):
+def live(force=False, install=True, shape=None, deadline=None):
     """hswap CLI 어댑터. None(hswap 없음·계정 없음) 또는 {"accounts": [...], "fetched_at": 초, "ids": {슬롯: 신원 지문}} 또는 {"error": "..."}. ids 는 read() 안에서만 쓴다.
     install 이면 hswap 이 없을 때 ensure() 가 설치를 시작하고 그 진행·실패를 error 로 준다(호환 경로만. 독립 경로는 설치하지 않는다).
     hswap 이 답하면 최상위 keychainUnavailable(0.2.2 의 추가 필드. 없으면 아니라고 본다)을 _device 에 적는다. 실패한 조회는 건드리지 않는다.
     force 는 jarvis 의 30초 묶음만 건너뛴다(프로바이더 조회 간격은 hswap 이 정한다).
-    shape: 이 호출을 정한 저장소 모습. 잠금을 기다린 뒤든 포기한 뒤든 모습이 같은 결과만 다시 쓴다(hswap 은 한 번에 하나만 도니 옛 답은 새 답보다 먼저 온다)."""
+    shape: 이 호출을 정한 저장소 모습. 잠금을 기다린 뒤든 포기한 뒤든 모습이 같은 결과만 다시 쓴다(hswap 은 한 번에 하나만 도니 옛 답은 새 답보다 먼저 온다).
+    deadline: 잠금 대기와 hswap 호출이 함께 쓰는 시한(monotonic). 넘기면 hswap 을 부르지 않고 오류를 준다."""
     global _cache, _device, _discovered
     exe = binary()
     if not exe:
@@ -272,7 +274,8 @@ def live(force=False, install=True, shape=None):
         return {"error": msg} if msg else None
     asked = time.monotonic()
     # 동시에 여러 hswap 을 띄우지 않는다. 앞 요청이 끝나지 않으면(멈춘 hswap) 기다리지 않고 마지막 값을 준다
-    if not _lock.acquire(timeout=TIMEOUT_S + 5):
+    left = lambda: float("inf") if deadline is None else deadline - time.monotonic()
+    if not _lock.acquire(timeout=max(0, min(TIMEOUT_S + 5, left()))):
         held = _cache
         return held[1] if held and held[2] == shape else {"error": "hswap 이 응답하지 않습니다"}
     try:
@@ -280,8 +283,10 @@ def live(force=False, install=True, shape=None):
         # 기다리는 동안 앞 요청이 같은 저장소를 보고 새로 읽었으면 강제라도 그 값을 쓴다
         if held and held[2] == shape and (held[0] >= asked or (not force and asked - held[0] < CACHE_S)):
             return held[1]
+        if left() <= 0:
+            return {"error": "hswap 을 기다리다 읽기 시한을 넘겼습니다"}
         try:
-            body = _json(exe, "list")
+            body = _json(exe, "list", timeout=min(TIMEOUT_S, left()))
             raw = [r for r in body.get("accounts") or [] if isinstance(r, dict)]
             accounts = [account(r) for r in raw]
             _device = (time.monotonic(), body.get("keychainUnavailable") is True)
@@ -492,14 +497,18 @@ def read(force=False, install=False):
     (저장소에는 로그인 기한·상태가 없어 만료 경고는 실값에서만 나온다. 예약 실행이 저장소를 늘 새로 써도 경고가 사라지지 않게 한다).
     그 사이에는 마지막 실값을 그대로 준다. 오래된 저장소 값은 실값이 없을 때만 보이므로 따로 보지 않는다. hswap 이 없거나 실패하면 저장소 값을 대체값으로 쓰고 이유를 붙인다.
     install: 호환 경로만 켠다. 저장소가 없어도 묻고, hswap 이 없으면 설치를 시작한다. 독립 경로는 설치하지 않는다(USAGE-3).
-    읽는 사이 switch() 가 끝나거나 저장소 모습이 바뀌면 옛 값을 내지 않고 다시 읽는다(진행 중인 이 읽기를 함께 기다리는 쪽도 옛 값을 받지 않는다). 변경이 쉬지 않고 이어져도 멈추지 않게 횟수는 제한한다."""
+    읽는 사이 switch() 가 끝나거나 저장소 모습이 바뀌면 옛 값을 내지 않고 다시 읽는다(진행 중인 이 읽기를 함께 기다리는 쪽도 옛 값을 받지 않는다).
+    재시도는 2번까지이고 전체 시한은 READ_BUDGET_S 다. 그 안에 확정하지 못하면 CLI 값 대신 지금 저장소 값과 로그인 상태를 준다."""
+    deadline = time.monotonic() + READ_BUDGET_S
     for _ in range(3):
         seen = _switched
-        out, settled = _read(force, install)
+        out, settled = _read(force, install, deadline)
         if settled and seen == _switched:
+            return out
+        if time.monotonic() >= deadline:
             break
         force = False  # 강제는 첫 시도로 지켰다. 다시 읽을 때는 같은 모습의 새 결과를 쓴다
-    return out
+    return _read(False, False, deadline, give_up=True)[0]
 
 
 def _keychain_down():
@@ -508,8 +517,8 @@ def _keychain_down():
     return bool(d and d[1] and time.monotonic() - d[0] < config.CLAUDE_STALE_S)
 
 
-def _read(force, install):
-    """(결과, 답을 받는 동안 저장소 모습이 그대로였는가)."""
+def _read(force, install, deadline, give_up=False):
+    """(결과, 답을 받는 동안 저장소 모습이 그대로였는가). give_up: hswap 을 부르지 않고 지금 저장소로 답한다."""
     settled = True
     store = _store_read()
     held = _cache  # switch() 가 도중에 비워도 같은 값을 본다
@@ -518,7 +527,9 @@ def _read(force, install):
     device = _device
     # 계정을 찾은 적도 저장소도 없는 기기는 묻지 않는다. CLI 로 계정을 찾았거나 경고가 있던 기기는 기준이 지나면 다시 묻는다
     recheck = _discovered or (bool(device and device[1]) and not _keychain_down())
-    if store is None and recent is None and not force and not install and not recheck:
+    if give_up:
+        out = {"error": "저장소가 계속 바뀌어 hswap 값을 확정하지 못했습니다"}
+    elif store is None and recent is None and not force and not install and not recheck:
         out = None
     else:
         shape = _store_shape(store)
@@ -527,7 +538,7 @@ def _read(force, install):
         asked = force or changed or recent is None or any(_old(a) for a in recent["accounts"])
         out = recent
         if asked:
-            out = live(force, install=install, shape=shape)
+            out = live(force, install=install, shape=shape, deadline=deadline)
             store = _store_read()  # 사용 중 판정은 hswap 이 답한 뒤의 로그인으로 한다(잠금을 기다리는 사이 로그인이 바뀌었을 수 있다)
             settled = _store_shape(store) == shape
     rows = (out or {}).get("accounts")

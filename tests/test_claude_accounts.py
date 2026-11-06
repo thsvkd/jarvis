@@ -119,7 +119,8 @@ class FreshnessTest(StoreCase):
         self.store(time.time() - 9 * 3600)
         run = self.hswap(hswap_row())
         a = claude_accounts.read()["accounts"][0]
-        run.assert_called_once_with("/fake/hswap", "list")
+        run.assert_called_once()
+        self.assertEqual(run.call_args.args, ("/fake/hswap", "list"))
         self.assertEqual((a["source"], a["note"], a["attention"]), ("cswap", None, False))
 
     def test_hswap_failure_falls_back_with_the_reason(self):
@@ -1412,6 +1413,113 @@ class StoreShapeTest(StoreCase):
         for _ in range(3):
             self.assertEqual(len(claude_accounts.read()["accounts"]), 1)
         run.assert_called_once()
+
+
+class ReadDeadlineTest(StoreCase):
+    """읽기 한 번의 전체 시한. 가상 시계와 계속 바뀌는 저장소로 잠금 대기와 CLI 호출이 시한을 함께 쓰는지 본다."""
+
+    RELOGIN = claude_accounts.STATUS["relogin_required"][0]
+
+    def setUp(self):
+        super().setUp()
+        self.now = [1000.0]
+        p = mock.patch.object(claude_accounts.time, "monotonic", lambda: self.now[0])
+        p.start()
+        self.addCleanup(p.stop)
+        self.live_identity.return_value = ("u1@example.com", "o1")
+        self.slots = 1
+        self.write_store()
+        self.timeouts = []
+
+    def write_store(self):
+        numbers = range(1, self.slots + 1)
+        self.write("sequence.json", {"sequence": list(numbers), "accounts": {str(n): {"email": f"u{n}@example.com", "organizationUuid": f"o{n}"} for n in numbers}})
+        self.write("cache/usage.json", {"schemaVersion": 2, "accounts": {str(n): {
+            "email": f"u{n}@example.com", "organizationUuid": f"o{n}", "fetchedAt": time.time() - 60, "authDeadStrikes": 1 if n == 1 else 0,
+            "lastGood": {"five_hour": {"pct": 99}}} for n in numbers}})
+
+    def changing_cli(self, takes):
+        """호출마다 takes 초(시한 안에서)가 지나고 그 사이 저장소에 슬롯이 하나 는다. 답은 호출 전 슬롯 구성이다."""
+        run = self.hswap()
+
+        def answer(exe, *args, timeout=None):
+            self.timeouts.append(timeout)
+            self.now[0] += min(takes, timeout)
+            rows = [hswap_row(number=n, email=f"u{n}@example.com", organizationUuid=f"o{n}", active=n == 1) for n in range(1, self.slots + 1)]
+            self.slots += 1
+            self.write_store()
+            return {"accounts": rows}
+        run.side_effect = answer
+        return run
+
+    def assert_store_answer(self, out, run, most_calls):
+        self.assertLessEqual(self.now[0] - 1000.0, claude_accounts.READ_BUDGET_S)
+        self.assertLess(claude_accounts.READ_BUDGET_S, 55)  # independent_usage.read 의 대기 시간 안
+        self.assertLessEqual(run.call_count, most_calls)
+        self.assertEqual([a["label"] for a in out["accounts"]], [f"u{n}@example.com" for n in range(1, self.slots + 1)])  # 지금 저장소
+        self.assertEqual({a["source"] for a in out["accounts"]}, {"cswap-cache"})
+        self.assertEqual((out["accounts"][0]["active"], out["accounts"][0]["attention"], out["login"]["state"]), (True, True, "relogin"))
+        self.assertNotIn("ids", out)
+
+    def test_retries_run_out_on_a_changing_store(self):
+        """covers: USAGE-6. 재시도는 2번까지이고, 확정하지 못한 CLI 값 대신 지금 저장소 값과 로그인 상태를 준다"""
+        run = self.changing_cli(takes=1)
+        out = claude_accounts.read(force=True)
+        self.assertEqual(run.call_count, 3)
+        self.assert_store_answer(out, run, 3)
+        self.assertIn("확정하지 못했습니다", out["accounts"][0]["note"])
+
+    def test_cli_calls_share_the_deadline(self):
+        """covers: USAGE-6. 느린 CLI 는 남은 시간만 받는다"""
+        run = self.changing_cli(takes=15)
+        out = claude_accounts.read(force=True)
+        self.assertEqual(self.timeouts, [15, 15, claude_accounts.READ_BUDGET_S - 30])
+        self.assert_store_answer(out, run, 3)
+
+    def test_lock_waits_share_the_deadline(self):
+        """covers: USAGE-6. 잠금 대기도 같은 시한에서 빠지고, 시한에 닿으면 CLI 를 부르지 않는다"""
+        real, now, waits = claude_accounts._lock, self.now, []
+
+        class WaitsAllItsTimeout:
+            def acquire(self, timeout=-1):
+                waits.append(timeout)
+                now[0] += timeout
+                return real.acquire(timeout=1)
+
+            def release(self):
+                real.release()
+        run = self.changing_cli(takes=15)
+        with mock.patch.object(claude_accounts, "_lock", WaitsAllItsTimeout()):
+            out = claude_accounts.read(force=True)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(waits, [claude_accounts.TIMEOUT_S + 5, claude_accounts.READ_BUDGET_S - claude_accounts.TIMEOUT_S - claude_accounts.TIMEOUT_S - 5])
+        self.assert_store_answer(out, run, 3)
+
+    def test_deadline_reached_without_a_store(self):
+        """covers: USAGE-6. 대체값이 없으면 오류와 로그인 상태만 준다"""
+        os.chmod(os.path.join(self.root, "sequence.json"), 0o644)
+        self.keepalive(activeSlot=None, ok=False, error={"type": "relogin_required"})
+        real, now = claude_accounts._lock, self.now
+
+        class Stuck:
+            def acquire(self, timeout=-1):
+                now[0] += timeout
+                return False
+
+            def release(self):
+                real.release()
+        self.changing_cli(takes=1)
+        with mock.patch.object(claude_accounts, "_lock", Stuck()):
+            out = claude_accounts.read(force=True)
+        self.assertEqual((out["accounts"], out["login"]["state"]), ([], "relogin"))
+        self.assertIn("error", out)
+
+    def test_settled_answer_is_still_the_cli_answer(self):
+        """covers: USAGE-6"""
+        run = self.hswap(hswap_row(email="u1@example.com", organizationUuid="o1"))
+        out = claude_accounts.read(force=True)
+        run.assert_called_once()
+        self.assertEqual(out["accounts"][0]["source"], "cswap")
 
 
 class AliasTest(unittest.TestCase):
