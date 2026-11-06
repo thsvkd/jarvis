@@ -25,6 +25,10 @@ WRAPPER = 'exec "$@" >>"$JARVIS_LOG" 2>&1 </dev/null'
 # /Library/LaunchDaemons 의 plist 는 누구나 읽는다
 # shortcut: 이름과 인자만 보므로 평범한 이름에 든 비밀은 못 잡는다. 더 잡아야 하면 값의 형태까지 본다
 SECRET = re.compile(r"TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|APIKEY|COOKIE|(^|_)(PASS|KEY|PAT)($|_)|AUTH$", re.I)
+# 이 키만 daemon 으로 옮긴다. Sockets·MachServices·UserName 같은 나머지 키는 root 가 읽는 plist 에 들어가면 안 된다
+KEEP = {"Label", "ProgramArguments", "WorkingDirectory", "EnvironmentVariables", "RunAtLoad", "KeepAlive", "ThrottleInterval",
+        "ExitTimeOut", "ProcessType", "SoftResourceLimits", "HardResourceLimits", "Nice"}
+REPLACED = {"Program", "StandardOutPath", "StandardErrorPath"}  # 아래에서 대신 쓰므로 버려도 알리지 않는다
 
 
 def _program(agent):
@@ -38,7 +42,7 @@ def _program(agent):
 
 
 def render(agent, user, group, home, log):
-    """LaunchAgent plist(dict) → LaunchDaemon plist(dict). 사용자가 고친 나머지 값은 그대로 둔다."""
+    """LaunchAgent plist(dict) → LaunchDaemon plist(dict). KEEP 의 값은 사용자가 고친 그대로 두고, 나머지 키는 버리고 stderr 로 알린다."""
     env = dict(agent.get("EnvironmentVariables") or {})
     secrets = sorted(k for k in env if SECRET.search(k))
     if secrets:
@@ -48,7 +52,10 @@ def render(agent, user, group, home, log):
     env.pop("JARVIS_TRAY", None)  # GUI 세션이 없으면 AppKit 이 프로세스를 죽일 수 있다
     env.update(HOME=home, USER=user, LOGNAME=user, JARVIS_LOG=log)
     env.setdefault("LANG", "en_US.UTF-8")
-    data = {k: v for k, v in agent.items() if k != "Program"}
+    dropped = sorted(set(agent) - KEEP - REPLACED)
+    if dropped:
+        print(f"LaunchDaemon plist 에 넣지 않는 키를 버립니다: {', '.join(dropped)}", file=sys.stderr)
+    data = {k: v for k, v in agent.items() if k in KEEP}
     data.update(UserName=user, GroupName=group, InitGroups=True, EnvironmentVariables=env,
                 ProgramArguments=["/bin/sh", "-c", WRAPPER, "sh", *_program(agent)],
                 RunAtLoad=True, KeepAlive=True, StandardOutPath="/dev/null", StandardErrorPath="/dev/null")

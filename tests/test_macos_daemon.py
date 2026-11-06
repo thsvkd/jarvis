@@ -1,5 +1,6 @@
 """macOS LaunchDaemon 모드: 렌더(jarvis/macos_daemon.py)와 전환 스크립트(deploy/macos-daemon.sh).
 임시 HOME 과 가짜 launchctl·sudo·plutil·curl·lsof 로 돌린다. 실제 launchd·sudo·/Library 는 건드리지 않는다."""
+import contextlib
 import hashlib
 import io
 import json
@@ -138,6 +139,33 @@ class Render(unittest.TestCase):
         self.assertEqual((env["HOME"], env["USER"], env["LOGNAME"]), ("/Users/someone", "someone", "someone"))
         self.assertEqual(env["LANG"], "en_US.UTF-8")
         self.assertEqual(self.AGENT["EnvironmentVariables"]["JARVIS_TRAY"], "1")  # 입력을 고치지 않는다
+
+    def test_only_the_allowed_keys_reach_the_daemon(self):
+        """covers: DAEMON-1"""
+        allowed = {"ProcessType": "Background", "SoftResourceLimits": {"NumberOfFiles": 4096}, "HardResourceLimits": {"NumberOfFiles": 8192},
+                   "Nice": 5, "ExitTimeOut": 8}
+        extra = {"Sockets": {"a": {"SockServiceName": "22"}}, "MachServices": {"x": True}, "UserName": "root", "GroupName": "wheel",
+                 "Umask": 0, "RootDirectory": "/tmp", "LaunchOnlyOnce": True}
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            d = self.render({**self.AGENT, **allowed, **extra})
+        for k, v in allowed.items():
+            self.assertEqual(d[k], v)
+        for k in ("Sockets", "MachServices", "Umask", "RootDirectory", "LaunchOnlyOnce"):
+            self.assertNotIn(k, d)
+            self.assertIn(k, err.getvalue())
+        self.assertEqual((d["UserName"], d["GroupName"]), ("someone", "staff"))  # 입력의 값이 아니다
+        self.assertIn("UserName", err.getvalue())
+        self.assertLessEqual(set(d), macos_daemon.KEEP | {"UserName", "GroupName", "InitGroups", "StandardOutPath", "StandardErrorPath"})
+
+    def test_keys_a_normal_agent_plist_has_are_dropped_silently(self):
+        """covers: DAEMON-1"""
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.render()
+            self.render(macos_daemon.template("/Users/someone"))
+            self.render({"Label": "dev.jarvis", "Program": "/custom/python"})
+        self.assertEqual(err.getvalue(), "")
 
     def test_an_existing_lang_is_kept(self):
         """covers: DAEMON-1"""
