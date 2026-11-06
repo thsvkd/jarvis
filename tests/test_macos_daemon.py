@@ -64,7 +64,7 @@ case "$1" in
     esac ;;
   bootout)
     case "$2" in
-      system/*) [ -n "${AS_ROOT:-}" ] || exit 1; rm -f "$S/daemon" ;;
+      system/*) [ -n "${AS_ROOT:-}" ] || exit 1; [ ! -f "$S/daemon-bootout-fails" ] || exit 1; rm -f "$S/daemon" ;;
       gui/*) [ ! -f "$S/agent-bootout-fails" ] || exit 1; rm -f "$S/agent" ;;
     esac ;;
 esac''',
@@ -591,6 +591,30 @@ exec "$TEST_PY" "$@"
         self.assertFalse(self.has("daemon"))
         self.assertTrue(self.has("agent"))
         self.assertEqual(self.read(self.agent), self.original)
+
+    def test_a_failed_daemon_bootout_keeps_the_plist_and_the_agent_down(self):
+        """covers: DAEMON-4"""
+        self.set("daemon-bootout-fails", "daemon-unhealthy")  # sudo 는 살아 있고 bootout 만 실패한다
+        r = self.run_script("install")
+        self.assertEqual(r.returncode, 1)
+        self.assertTrue(self.has("daemon"))
+        self.assertTrue(os.path.exists(self.daemon))  # 재부팅해도 daemon 이 다시 뜬다
+        calls = self.calls()
+        self.assertIn("sudo -n /bin/launchctl bootout system/dev.jarvis", calls)
+        self.assertFalse([c for c in calls if c.startswith("sudo -n /bin/rm")], calls)
+        self.assertFalse(self.has("agent"))
+        self.assertFalse([c for c in calls if "bootstrap gui" in c], calls)
+        self.assertFalse(os.path.exists(self.agent))
+        self.assertEqual(self.read(self.kept), self.original)
+        self.assertIn("uninstall", r.stdout)
+        os.remove(os.path.join(self.state, "daemon-bootout-fails"))
+        os.remove(self.log)
+        r = self.run_script("uninstall")  # 안내대로 다시 실행하면 지운다
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(os.path.exists(self.daemon))
+        self.assertEqual(self.read(self.agent), self.original)
+        self.assertLess(self.calls().index("sudo -n /bin/launchctl bootout system/dev.jarvis"),
+                        self.calls().index(f"sudo -n /bin/rm -f {self.daemon}"))
 
     def test_a_port_held_by_something_else_is_refused_before_sudo(self):
         """covers: DAEMON-4"""

@@ -101,7 +101,8 @@ rollback() {  # daemon 을 내리고 LaunchAgent 로 되돌린다. 0 = 에이전
   local ok=0
   say "LaunchAgent 로 되돌립니다"
   if loaded system; then "$SUDO" -n /bin/launchctl bootout "system/$LABEL" 2>/dev/null; wait_unloaded system; fi
-  if [ -f "$DAEMON" ]; then "$SUDO" -n /bin/rm -f "$DAEMON" 2>/dev/null; fi
+  # 내려간 것을 확인한 뒤에만 지운다: 로드된 채 plist 만 지우면 재부팅 뒤에 아무것도 뜨지 않는다
+  if ! loaded system && [ -f "$DAEMON" ]; then "$SUDO" -n /bin/rm -f "$DAEMON" 2>/dev/null; fi
   if loaded system || [ -f "$DAEMON" ]; then
     # 에이전트까지 올리면 두 벌이 같은 포트를 두고 KeepAlive 재시작을 되풀이한다
     if [ -f "$AGENT" ]; then mv "$AGENT" "$KEPT"; fi
