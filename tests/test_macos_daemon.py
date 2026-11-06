@@ -48,6 +48,9 @@ case "$1" in
   print)
     case "$2" in
       system/dev.jarvis) [ -f "$S/daemon" ] || exit 113
+        # 실제 출력처럼 작업의 path 가 먼저, 안쪽 블록의 path 가 뒤에 나온다
+        if [ -f "$S/daemon-path" ]; then cat "$S/daemon-path"; else printf '\tpath = %s\n' "$JARVIS_DAEMON_PLIST"; fi
+        printf '\t\tpath = /somewhere/nested\n'
         if [ -f "$S/daemon-not-running" ]; then printf '\\tstate = spawn scheduled\\n'; else printf '\\tstate = running\\n'; fi ;;
       gui/*/dev.jarvis) [ -f "$S/agent" ] || exit 113 ;;
     esac ;;
@@ -825,7 +828,42 @@ exec "$TEST_PY" "$@"
                     self.assertEqual(self.read(self.daemon), body)
                     self.assertEqual(self.read(self.agent), self.original)
                     self.assertTrue(self.has("daemon") and self.has("agent"))
-                    self.assertEqual(self.calls(), [])
+                    self.assert_only_looked()
+
+    def assert_only_looked(self):
+        self.assertFalse([c for c in self.calls() if not c.startswith("launchctl print")], self.calls())
+
+    def test_a_loaded_job_that_does_not_come_from_the_plist_is_refused(self):
+        """covers: DAEMON-14"""
+        mine = plistlib.dumps({"Label": "dev.jarvis", "UserName": subprocess.check_output(["id", "-un"], text=True).strip()})
+        other = "\tpath = /Users/someone-else/dev.jarvis.plist\n"
+        for name, body, printed in (("plist 없음", None, None), ("다른 path", mine, other),
+                                    ("path 줄 없음", mine, "\ttype = LaunchDaemon\n")):
+            if body is None:
+                if os.path.exists(self.daemon):
+                    os.remove(self.daemon)
+            else:
+                with open(self.daemon, "wb") as f:
+                    f.write(body)
+            if printed is not None:
+                self.put("daemon-path", printed)
+            self.set("daemon")
+            for args in (("install",), ("install", "--dry-run"), ("uninstall",), ("uninstall", "--dry-run")):
+                with self.subTest(name, args=args):
+                    r = self.run_script(*args)
+                    self.assertEqual(r.returncode, 1, r.stdout)
+                    self.assertIn("소유를 모르는 작업", r.stderr)
+                    self.assertTrue(self.has("daemon") and self.has("agent"))
+                    self.assertEqual(self.read(self.agent), self.original)
+                    self.assert_only_looked()  # sudo 를 묻지 않는다
+
+    def test_a_loaded_job_from_this_users_plist_is_still_replaced(self):
+        """covers: DAEMON-14"""
+        self.assertEqual(self.run_script("install").returncode, 0)
+        self.assertTrue(self.has("daemon"))
+        r = self.run_script("uninstall")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(self.has("daemon"))
 
     def test_status_names_what_is_loaded_and_the_health(self):
         """covers: DAEMON-8"""
@@ -882,6 +920,16 @@ if [ "$1" = venv ]; then mkdir -p "$4/bin" && printf '#!/bin/sh\\nexec "%s" "$@"
 
     def install(self, *args):
         return subprocess.run(["sh", os.path.join(ROOT, "install.sh"), *args], env=self.env, capture_output=True, text=True, timeout=120)
+
+    def test_daemon_flag_stops_at_a_loaded_job_of_unknown_owner(self):
+        """covers: DAEMON-14"""
+        self.set("daemon")  # plist 없이 로드된 작업
+        r = self.install("--core", "100.64.0.1", "--daemon")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("소유를 모르는 작업", r.stderr)
+        self.assertIn("LaunchDaemon 으로 옮기지 못했습니다", r.stderr)
+        self.assertTrue(self.has("daemon"))
+        self.assertFalse([c for c in self.calls() if c.startswith("sudo") or "bootout" in c or "bootstrap" in c], self.calls())
 
     def test_a_fresh_ssh_install_ends_as_a_daemon_and_a_rerun_changes_nothing(self):
         """covers: DAEMON-9"""

@@ -92,8 +92,15 @@ verify_installed() {
 
 # 시스템 도메인의 dev.jarvis 는 기기에 하나다. 다른 사용자의 등록은 채택·교체·삭제하지 않는다
 refuse_foreign() {
+  local owner path
+  # 로드된 작업이 이 plist 에서 온 것이 아니면 UserName 을 읽을 곳이 없다: 소유를 모르는 작업은 내리지 않는다
+  if loaded system; then
+    path=$("$LAUNCHCTL" print "system/$LABEL" 2>/dev/null | sed -n 's/^[[:space:]]*path = //p' | head -n 1)
+    if [ ! -f "$DAEMON" ] || [ "$path" != "$DAEMON" ]; then
+      die "system/$LABEL 이 로드돼 있지만(path: ${path:-알 수 없음}) $DAEMON 에서 온 작업인지 확인할 수 없습니다. 소유를 모르는 작업이라 아무것도 바꾸지 않았습니다"
+    fi
+  fi
   [ -f "$DAEMON" ] || return 0
-  local owner
   owner=$(field UserName)
   [ "$owner" = "$(id -un)" ] || die "$DAEMON 은 다른 사용자(${owner:-알 수 없음})의 LaunchDaemon 입니다. 아무것도 바꾸지 않았습니다"
 }
