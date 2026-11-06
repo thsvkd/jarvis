@@ -1,6 +1,7 @@
 """macOS LaunchDaemon 모드: 렌더(jarvis/macos_daemon.py)와 전환 스크립트(deploy/macos-daemon.sh).
 임시 HOME 과 가짜 launchctl·sudo·plutil·curl·lsof 로 돌린다. 실제 launchd·sudo·/Library 는 건드리지 않는다."""
 import hashlib
+import io
 import os
 import plistlib
 import re
@@ -12,7 +13,9 @@ import sys
 import tarfile
 import tempfile
 import time
+import types
 import unittest
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -116,6 +119,31 @@ class Render(unittest.TestCase):
         """covers: DAEMON-1"""
         agent = {**self.AGENT, "EnvironmentVariables": {"LANG": "ko_KR.UTF-8"}}
         self.assertEqual(self.render(agent)["EnvironmentVariables"]["LANG"], "ko_KR.UTF-8")
+
+    def test_home_and_log_come_from_the_account_not_from_the_shell(self):
+        """covers: DAEMON-1"""
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        agent = {**self.AGENT, "ProgramArguments": ["/home/someone/venv/bin/python", "-m", "jarvis"],
+                 "WorkingDirectory": "/home/someone/app", "EnvironmentVariables": {"PATH": "/home/someone/bin"}}
+        path = os.path.join(tmp, "agent.plist")
+        with open(path, "wb") as f:
+            plistlib.dump(agent, f)
+        stdout = io.TextIOWrapper(io.BytesIO())
+        account = types.SimpleNamespace(pw_name="someone", pw_dir="/Users/someone")
+        # 셸의 HOME 은 autofs 경로다(macOS auto_home)
+        with mock.patch.dict(os.environ, {"HOME": "/home/someone"}), mock.patch("pwd.getpwuid", return_value=account), \
+                mock.patch.object(sys, "stdout", stdout):
+            self.assertEqual(macos_daemon.main(["render", "--agent", path]), 0)
+        stdout.flush()
+        d = plistlib.loads(stdout.buffer.getvalue())
+        env = d["EnvironmentVariables"]
+        self.assertEqual((env["HOME"], env["JARVIS_LOG"]), ("/Users/someone", "/Users/someone/Library/Logs/jarvis.log"))
+        self.assertEqual((env["USER"], env["LOGNAME"], d["UserName"]), ("someone", "someone", "someone"))
+        # 에이전트 plist 의 다른 값은 손대지 않는다
+        self.assertEqual(env["PATH"], "/home/someone/bin")
+        self.assertEqual(d["WorkingDirectory"], "/home/someone/app")
+        self.assertEqual(d["ProgramArguments"][4:], agent["ProgramArguments"])
 
     def test_a_plist_round_trip_is_identical(self):
         """covers: DAEMON-1"""
@@ -289,7 +317,7 @@ class Script(Harness):
         import pwd  # Windows 에는 없다
         self.assertEqual(d["UserName"], pwd.getpwuid(os.getuid()).pw_name)
         self.assertEqual(d["ProgramArguments"][4:], [os.path.join(self.share, "venv/bin/python"), "-m", "jarvis"])
-        self.assertEqual(d["EnvironmentVariables"]["JARVIS_LOG"], os.path.join(self.home, "Library/Logs/jarvis.log"))
+        self.assertEqual(d["EnvironmentVariables"]["JARVIS_LOG"], os.path.join(pwd.getpwuid(os.getuid()).pw_dir, "Library/Logs/jarvis.log"))
         self.assertTrue(os.path.isdir(os.path.join(self.home, "Library", "Logs")))
         calls = [c for c in self.calls() if not c.startswith(("launchctl print", "lsof", "curl"))]
         self.assertRegex(calls[2], r"^sudo -n install -m 0644 -o root -g wheel \S+/dev\.jarvis\.plist " + re.escape(self.daemon) + "$")

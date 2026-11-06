@@ -17,7 +17,7 @@ import tomllib
 
 LABEL = "dev.jarvis"
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LOG_PATH = "~/Library/Logs/jarvis.log"  # tray.LOG 와 같은 파일
+LOG_PATH = os.path.join("Library", "Logs", "jarvis.log")  # 홈 아래. tray.LOG 와 같은 파일
 DEFAULT_PORT = "9300"  # config.PORT 의 기본값
 # launchd 는 Standard*Path 를 root 로 열 수 있어 사용자 폴더를 줄 수 없다. 사용자 권한으로 바뀐 뒤 셸이 로그를 연다.
 # exec 이라 최종 명령줄은 `<python> -m jarvis` 그대로다(core 의 SSH 갱신이 ps 로 이 끝을 확인한다)
@@ -114,8 +114,9 @@ def main(argv=None):
     try:
         data = base(args.agent, home)
         if args.command == "render":
-            out = render(data, pwd.getpwuid(os.getuid()).pw_name, grp.getgrgid(os.getgid()).gr_name, home,
-                         os.path.expanduser(LOG_PATH))
+            # $HOME 은 autofs 경로(/home/<user>)일 수 있다. daemon 은 부팅 직후 autofs 에 기대면 안 된다
+            pw = pwd.getpwuid(os.getuid())
+            out = render(data, pw.pw_name, grp.getgrgid(os.getgid()).gr_name, pw.pw_dir, os.path.join(pw.pw_dir, LOG_PATH))
             sys.stdout.buffer.write(plistlib.dumps(out, sort_keys=False))
         elif args.command == "port":
             print(port(data, home))
