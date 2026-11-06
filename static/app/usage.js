@@ -49,7 +49,7 @@
  const loginHot=p=>!!(p.login&&p.login.attention); // 기기 단위 로그인 상태(Claude). 계정이 아니라 기기마다 센다
  const loginShown=p=>S.hot?loginHot(p):!!p.login; // 계정이 하나도 없어도 칸에 보인다
  // 같은 구독 계정(이메일·조직)은 어느 기기에서 보든 한도가 같다. 이메일이 없는 '기본 계정'은 기기마다 따로 센다.
- const keyOf=(d,p,a,index)=>p.id+":"+(a.label.includes("@")?a.label.toLowerCase()+"\n"+(a.org||""):d.id+":"+index);
+ const keyOf=(d,p,a,index)=>p.id+":"+(a.label.includes("@")?a.label.trim().toLowerCase()+"\n"+(a.org||""):d.id+":"+index);
  // 여러 기기에 같은 계정이 있으면 사용량을 읽은 쪽, 그중 최근 것을 쓴다(사용 중이 아닌 기기는 아직 안 읽었을 수 있다)
  const rank=a=>[a.windows.length||a.buckets.length?1:0,a.updated_at||0];
  const better=(x,y)=>{const [a,b]=[rank(x),rank(y)];return a[0]!==b[0]?a[0]>b[0]:a[1]>b[1];};

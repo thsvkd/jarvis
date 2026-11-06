@@ -12,6 +12,7 @@ from unittest import mock
 from jarvis import caam_usage, claude_accounts, cswap_cached_usage, cswap_usage, independent_usage, orca_usage, util
 
 _GUARDS = []
+LIVE_IDENTITY = claude_accounts._live_identity  # StoreCase 가 가짜로 바꾸기 전의 실제 함수
 
 
 def setUpModule():
@@ -1632,6 +1633,148 @@ class ForcedTaskTest(StoreCase):
             ordinary.join(20)
         self.assertEqual(self.calls, 1)
         self.assertEqual((box["forced"], box["ordinary"]), (10, 10))
+
+
+class IdentityNormalizationTest(StoreCase):
+    """신원 비교는 한 규칙을 지난다: 조직 UUID 의 null·누락·빈 문자열은 같고, 이메일은 앞뒤 공백과 대소문자를 보지 않는다."""
+
+    RELOGIN = claude_accounts.STATUS["relogin_required"][0]
+    MISSING = object()
+
+    def setUp(self):
+        super().setUp()
+        self.config_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.config_dir.cleanup)
+        p = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.config_dir.name})
+        p.start()
+        self.addCleanup(p.stop)
+        self.live_identity.side_effect = LIVE_IDENTITY  # 임시 .claude.json 을 읽는 실제 규칙
+
+    def with_uuid(self, body, uuid):
+        return body if uuid is self.MISSING else {**body, "organizationUuid": uuid}
+
+    def logged_in(self, email="a@example.com", uuid=None):
+        with open(os.path.join(self.config_dir.name, ".claude.json"), "w", encoding="utf-8") as f:
+            json.dump({"oauthAccount": self.with_uuid({"emailAddress": email}, uuid)}, f)
+
+    def roster(self, email="a@example.com", uuid=None, usage_uuid=MISSING, strikes=0):
+        """저장소 슬롯 1. usage_uuid 를 주지 않으면 사용량 캐시도 같은 값을 쓴다."""
+        usage_uuid = uuid if usage_uuid is self.MISSING else usage_uuid
+        self.write("sequence.json", {"sequence": [1], "accounts": {"1": self.with_uuid({"email": email, "organizationName": "Org"}, uuid)}})
+        self.write("cache/usage.json", {"schemaVersion": 2, "accounts": {"1": self.with_uuid(
+            {"email": email, "fetchedAt": time.time() - 60, "authDeadStrikes": strikes, "lastGood": {"five_hour": {"pct": 33}}}, usage_uuid)}})
+
+    def cli_row(self, email="a@example.com", uuid=None, active=True):
+        row = hswap_row(email=email, active=active)
+        del row["organizationUuid"]
+        return self.with_uuid(row, uuid)
+
+    def compat(self):
+        with mock.patch.object(orca_usage, "_orca", return_value={"installed": False, "providers": []}), \
+                mock.patch.object(orca_usage.caam_usage, "read", return_value=None), \
+                mock.patch.object(orca_usage.cli_login, "available", return_value=[]), \
+                mock.patch.object(orca_usage.cli_login, "fresh", return_value=[]):
+            return next(p for p in orca_usage.read()[1]["providers"] if p["id"] == "claude")
+
+    def test_null_org_account_stays_active_without_keepalive(self):
+        """covers: USAGE-6, USAGE-7. 저장소의 organizationUuid 가 null 이어도 hswap 의 active 를 지우지 않는다. 두 경로 모두"""
+        self.roster(uuid=None)
+        self.logged_in(uuid=None)
+        self.hswap(self.cli_row(uuid=None))
+        out = claude_accounts.read(force=True)
+        self.assertTrue(out["accounts"][0]["active"])
+        self.assertNotIn("login", out)
+        claude_accounts._cache = None
+        self.assertTrue(self.compat()["accounts"][0]["active"])
+
+    def test_null_org_account_keeps_login_and_slot_with_keepalive(self):
+        """covers: USAGE-7. 사용 중 슬롯이 맞으면 keepalive 기록은 이 계정의 것이다: 이전 계정의 기록으로 보거나(/login 을 빼는 안내) 슬롯을 빼지 않는다"""
+        self.roster(uuid=None)
+        self.logged_in(uuid=None)
+        self.hswap(self.cli_row(uuid=None))
+        self.keepalive(activeSlot=1)
+        s = claude_accounts.read(force=True)["login"]
+        self.assertEqual((s["state"], s["slot"], s["other"]), ("ok", "1", False))
+        self.keepalive(activeSlot=1, ok=False, error={"type": "no_credentials", "message": "m"})
+        s = claude_accounts.read()["login"]
+        self.assertEqual((s["state"], s["slot"], s["other"], s["text"]), ("failed", "1", False, "자동 갱신 실패(자격 증명 없음)"))
+        self.keepalive(activeSlot=2)
+        self.assertEqual(claude_accounts.read()["login"]["state"], "other_account")  # 정말 다른 슬롯의 기록은 그대로 가린다
+
+    def test_null_org_account_gets_relogin_from_the_store(self):
+        """covers: USAGE-7. CLI 행과 저장소의 신원이 맞아 인증 실패가 옮겨 가고 기기 상태가 재로그인이 된다"""
+        self.roster(uuid=None, strikes=1)
+        self.logged_in(uuid=None)
+        self.hswap(self.cli_row(uuid=None))
+        out = claude_accounts.read(force=True)
+        a = out["accounts"][0]
+        self.assertEqual((a["active"], a["note"], a["attention"]), (True, self.RELOGIN, True))
+        self.assertEqual((out["login"]["state"], out["login"]["slot"], out["login"]["other"]), ("relogin", "1", False))
+
+    def test_null_org_account_stays_active_on_the_store_path(self):
+        """covers: USAGE-6. hswap 없이 저장소만 읽어도 같다"""
+        self.roster(uuid=None)
+        self.logged_in(uuid=None)
+        a = claude_accounts.read()["accounts"][0]
+        self.assertEqual((a["active"], a["source"]), (True, "cswap-cache"))
+
+    def test_null_missing_and_empty_uuid_are_the_same_account(self):
+        """covers: USAGE-6. 저장소·사용량 캐시·CLI·.claude.json 의 어떤 조합이든 같은 계정이다"""
+        forms = (None, self.MISSING, "", "  ")
+        for stored in forms:
+            for cached in forms:
+                for live in forms:
+                    for cli in forms:
+                        where = (stored, cached, live, cli)
+                        self.roster(uuid=stored, usage_uuid=cached)
+                        self.logged_in(uuid=live)
+                        direct = claude_accounts._store_read()["accounts"][0]
+                        self.assertEqual((direct["active"], [w["used"] for w in direct["windows"]]), (True, [33]), where)  # 저장소↔로그인, 저장소↔사용량 캐시
+                        run = self.hswap(self.cli_row(uuid=cli, active=False))
+                        claude_accounts._cache = None
+                        for _ in range(2):
+                            self.assertTrue(claude_accounts.read()["accounts"][0]["active"], where)  # CLI↔저장소
+                        run.assert_called_once()  # 모습이 달라졌다고 보아 다시 부르지 않는다
+
+    def test_email_ignores_case_and_surrounding_space(self):
+        """covers: USAGE-6, USAGE-7"""
+        self.roster(email="A@Example.com", uuid="ORG-1", strikes=1)
+        self.logged_in(email=" a@EXAMPLE.com\n", uuid="org-1 ")
+        self.hswap(self.cli_row(email="a@example.COM ", uuid="org-1", active=False))
+        out = claude_accounts.read(force=True)
+        a = out["accounts"][0]
+        self.assertEqual((a["active"], a["note"]), (True, self.RELOGIN))
+        self.assertEqual(out["login"]["state"], "relogin")
+
+    def test_different_accounts_still_differ(self):
+        """covers: USAGE-6. 규칙이 다른 계정을 같게 만들지 않는다"""
+        self.roster(uuid=None, strikes=1)
+        for email, uuid in (("other@example.com", None), ("a@example.com", "org-1")):
+            self.logged_in(email=email, uuid=uuid)
+            self.assertFalse(claude_accounts._store_read()["accounts"][0]["active"], (email, uuid))
+            self.assertNotEqual(claude_accounts._fingerprint("a@example.com", None), claude_accounts._fingerprint(email, uuid or "x@"))
+        self.logged_in(uuid=None)
+        self.hswap(self.cli_row(uuid="org-1"))
+        claude_accounts._cache = None
+        a = claude_accounts.read(force=True)["accounts"][0]
+        self.assertEqual((a["active"], a["note"]), (False, None))  # 같은 슬롯이라도 조직이 다른 CLI 행에 옮기지 않는다
+
+    def test_orca_default_account_borrows_the_org_by_the_same_rule(self):
+        """covers: USAGE-6. 시스템 기본 계정의 조직 이름을 같은 규칙의 UUID 로 빌린다. 빈 UUID 로는 빌리지 않는다"""
+        limits = {"claude": {"status": "ok", "fiveHour": None}}
+        org_of = lambda default_uuid, stored: orca_usage._managed(
+            {"claude": {"accounts": [{"id": "x", "email": "m@example.com", "organizationName": "Team", "organizationUuid": stored}],
+                        "systemDefaultEmail": "d@example.com", "systemDefaultOrganizationUuid": default_uuid}}, "claude", limits)[0]["org"]
+        self.assertEqual(org_of("org-1 ", "ORG-1"), "Team")
+        self.assertIsNone(org_of("org-2", "ORG-1"))
+        self.assertIsNone(org_of(None, None))
+        self.assertIsNone(org_of("", ""))
+
+    def test_orca_merge_uses_the_same_email_rule(self):
+        """covers: USAGE-6. 공백·대소문자만 다른 Orca 행은 같은 계정이다. 다른 조직은 남는다"""
+        mine = [{"label": "a@example.com", "org": "Team", "active": True}]
+        orca = [{"label": " A@EXAMPLE.com ", "org": "Team"}, {"label": "A@example.com ", "org": None}, {"label": "a@example.COM", "org": "Other"}]
+        self.assertEqual([a["org"] for a in claude_accounts.merge_orca(mine, orca)], ["Team", "Other"])
 
 
 class AliasTest(unittest.TestCase):

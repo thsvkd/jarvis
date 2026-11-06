@@ -234,9 +234,14 @@ def _json(exe, *args, timeout=TIMEOUT_S):
     return body
 
 
+def _identity(email, org_uuid=None):
+    """계정 신원 비교의 유일한 규칙. 개인 계정의 UUID 는 null·누락·빈 문자열로 온다: 모두 같은 값이고, 앞뒤 공백과 대소문자는 보지 않는다."""
+    return str(email or "").strip().lower(), str(org_uuid or "").strip().lower()
+
+
 def _fingerprint(email, org_uuid):
-    """슬롯의 계정 신원 지문(이메일 + 조직 UUID). 비교에만 쓰고 응답으로 내보내지 않는다. 개인 계정의 UUID 는 비어 있거나 null 이다."""
-    return hashlib.sha256(f"{email}\0{org_uuid or ''}".encode("utf-8", "replace")).hexdigest()
+    """슬롯의 계정 신원 지문(이메일 + 조직 UUID). 비교에만 쓰고 응답으로 내보내지 않는다."""
+    return hashlib.sha256("\0".join(_identity(email, org_uuid)).encode("utf-8", "replace")).hexdigest()
 
 
 def switch(slot):
@@ -359,8 +364,8 @@ def _store_read():
             if not isinstance(ident, dict):
                 continue
             ids[str(number)] = _fingerprint(ident.get("email"), ident.get("organizationUuid"))
-            valid = (isinstance(row, dict) and row.get("email") == ident.get("email")
-                     and row.get("organizationUuid", "") == ident.get("organizationUuid", ""))
+            who = _identity(ident.get("email"), ident.get("organizationUuid"))
+            valid = isinstance(row, dict) and _identity(row.get("email"), row.get("organizationUuid")) == who
             usage = row.get("lastGood") if valid else None
             usage = usage if isinstance(usage, dict) else {}
             fetched = row.get("fetchedAt") if valid else None
@@ -372,7 +377,7 @@ def _store_read():
             # 저장소 값도 hswap 한 줄 모양으로 바꿔 account() 의 규칙을 그대로 태운다. 조직 UUID·별칭은 넘기지 않는다
             a = account({"number": number, "email": provider_usage._email(ident), "organizationName": name if isinstance(name, str) else None,
                          # 사용 중: 실제 로그인과 이메일·조직 UUID 가 같은 슬롯(엔진의 _find_account_slot 과 같은 비교)
-                         "active": identity is not None and (ident.get("email"), ident.get("organizationUuid", "")) == identity,
+                         "active": identity is not None and _identity(*identity) == who,
                          "usageStatus": "relogin_required" if dead else "ok" if any(_windows(usage)) else "no_saved_usage",
                          "usage": usage, "usageFetchedAt": fetched, "lastGoodUsage": usage, "lastGoodFetchedAt": fetched}, "cswap-cache")
             # 화면은 이메일+조직 이름으로 같은 계정을 묶는다. Orca 경로와 같은 규칙으로 개인 조직("<email>'s Organization")은 None
@@ -562,12 +567,13 @@ def _read(force, install, deadline, give_up=False):
 
 def merge_orca(mine, orca_rows):
     """두 경로의 공용 병합: read() 의 계정 + Orca 에만 있는 관리 계정(같은 이메일의 다른 조직 포함)."""
-    seen = {(a["label"].lower(), a.get("org")) for a in mine}
-    emails = {a["label"].lower() for a in mine}
+    email = lambda a: _identity(a["label"])[0]
+    seen = {(email(a), a.get("org")) for a in mine}
+    emails = {email(a) for a in mine}
     # Orca 의 '시스템 기본 계정'은 hswap 의 사용 중 계정과 같은 로그인이다(hswap 에 사용 중 계정이 있을 때만 뺀다).
     # 조직을 모르는 Orca 줄(시스템 기본 계정이 조직 이름을 못 빌린 경우)은 같은 이메일이면 같은 로그인으로 본다
-    extra = [a for a in orca_rows if (a["label"].lower(), a.get("org")) not in seen
-             and not (a.get("org") is None and a["label"].lower() in emails)
+    extra = [a for a in orca_rows if (email(a), a.get("org")) not in seen
+             and not (a.get("org") is None and email(a) in emails)
              and not (a["label"] == "시스템 기본 계정" and any(m.get("active") for m in mine))]
     return mine + extra
 

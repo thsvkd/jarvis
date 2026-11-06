@@ -135,7 +135,7 @@ def _managed(snap, pid, rl):
         default = st.get("systemDefaultEmail") or _dict(st.get("systemDefault")).get("email")
         # 시스템 기본 계정의 조직 이름은 같은 조직 UUID 의 관리 계정에서 빌린다(UUID 는 내보내지 않는다)
         org_name = (act or next((a for a in accs if st.get("systemDefaultOrganizationUuid")
-                            and a.get("organizationUuid") == st["systemDefaultOrganizationUuid"]), {})).get("organizationName")
+                            and claude_accounts._identity(None, a.get("organizationUuid")) == claude_accounts._identity(None, st["systemDefaultOrganizationUuid"])), {})).get("organizationName")
         out.append({"label": _text((act or {}).get("email"), 200) or _text(default, 200) or "시스템 기본 계정",
                     "org": org(org_name, (act or {}).get("email") or default), "active": True, **(active or limits({"status": "idle"}))})
     for a in accs:

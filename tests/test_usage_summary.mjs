@@ -39,7 +39,14 @@ assert.match(initial, /프로바이더별 계정 사용량/);
 assert.match(initial, /Claude/);
 assert.match(initial, /Codex/);
 assert.equal((initial.match(/a@example\.com/g) || []).length, 1);
-// 같은 이메일·조직은 기기가 달라도 한 번, 조직이 다르면 따로 센다
+// 같은 이메일·조직은 기기가 달라도 한 번, 조직이 다르면 따로 센다. 이메일의 대소문자와 앞뒤 공백은 보지 않는다(서버의 신원 규칙과 같다)
+{
+  devices[1].providers[0].accounts.push(account(" ORG@example.com ", 11, 500, { org: "Org A" })); // 더 오래된 값이라 고르지 않는다
+  element("usage").click({ target: { closest: () => ({ dataset: { prov: "all" }, id: "", getAttribute: () => null }) } });
+  assert.doesNotMatch(summary(), /ORG@example\.com/);
+  devices[1].providers[0].accounts.pop();
+  element("usage").click({ target: { closest: () => ({ dataset: { prov: "all" }, id: "", getAttribute: () => null }) } });
+}
 assert.equal((initial.match(/org@example\.com/g) || []).length, 2);
 assert.equal((initial.match(/Org A/g) || []).length, 1);
 assert.match(initial, /80%/);
@@ -204,6 +211,13 @@ for (const other of [false, true]) {
   assert.doesNotMatch(guide, /--slot \d/);
   guideDialog.close();
 }
+// covers: USAGE-7. organizationUuid 가 null 인 사용 중 계정의 재로그인(서버가 slot 을 준다): /login 으로 시작하고 그 슬롯에 저장한다
+claudeOf(devices[0]).login = { state: "relogin", text: "재로그인 필요", note: null, attention: true, slot: "1", other: false };
+click({ guide: "first" });
+guide = element("ulDlgB").innerHTML;
+assert.ok(guide.includes("<code>/login</code>"));
+assert.ok(guide.indexOf("<code>/login</code>") < guide.indexOf("<code>hswap claude add --slot 1</code>"));
+guideDialog.close();
 delete claudeOf(devices[0]).login;
 click({ prov: "all" });
 assert.equal(hotNow(), hotBase); // 상태가 없으면(keepalive 를 쓰지 않는 기기) 세지 않는다
