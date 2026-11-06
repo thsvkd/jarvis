@@ -49,7 +49,7 @@ class StoreCase(unittest.TestCase):
         self.root = tmp.name
         os.mkdir(os.path.join(self.root, "cache"), 0o700)
         for name, kw in (("_root", {"return_value": self.root}), ("_live_identity", {"return_value": ("a@example.com", "o1")}),
-                         ("binary", {"return_value": None}), ("_cache", {"new": None}), ("_device", {"new": None}), ("_discovered", {"new": False}),
+                         ("binary", {"return_value": None}), ("_cache", {"new": None}), ("_device", {"new": None}), ("_discovered", {"new": False}), ("_fatal", {"new": None}),
                          ("ensure", {"side_effect": AssertionError("독립 경로는 설치하지 않는다")})):
             p = mock.patch.object(claude_accounts, name, **kw)
             setattr(self, name.strip("_"), p.start())
@@ -517,6 +517,40 @@ class LoginStateTest(StoreCase):
             self.assertIn(want, answer["error"])
             self.assertNotIn("SECRET", answer["error"])
             os.remove(os.path.join(self.root, "sequence.json"))
+
+    def test_fatal_hswap_errors_reach_the_login_state_over_an_old_record(self):
+        """covers: USAGE-7. keepalive 기록이 정상이어도 치명적 type 은 바로 attention 이다. hswap 이 다시 답하면 사라진다"""
+        self.store(time.time() - 60)
+        for kind, want in (("config_conflict", "config_conflict"), ("keychain_item_present", "keychain_item_present"), ("relogin_required", "relogin")):
+            self.keepalive()
+            self.reply(error={"type": kind, "message": "m"})
+            s = claude_accounts.read(force=True)["login"]
+            self.assertEqual((s["state"], s["attention"]), (want, True), kind)
+            self.assertEqual(claude_accounts.read()["login"]["state"], want, kind)  # 보통 읽기에서도 남는다
+            self.reply(hswap_row())
+            s = claude_accounts.read(force=True)["login"]
+            self.assertEqual((s["state"], s["attention"]), ("ok", False), kind)
+        # 파일이 없어도 보인다. 답이 없는 실패는 판정을 지우지 않고, 치명적이지 않은 답은 지운다
+        os.remove(os.path.join(self.root, "cache", "keepalive.json"))
+        self.reply(error={"type": "config_conflict"})
+        self.assertEqual(claude_accounts.read(force=True)["login"]["state"], "config_conflict")
+        with mock.patch.object(claude_accounts.subprocess, "run", side_effect=subprocess.TimeoutExpired("x", 1)):
+            self.assertEqual(claude_accounts.read(force=True)["login"]["state"], "config_conflict")
+        self.reply(error={"type": "LockError"})
+        self.assertNotIn("login", claude_accounts.read(force=True))
+        # 다시 확인하지 못한 옛 답은 쓰지 않는다
+        claude_accounts._fatal = (time.monotonic() - claude_accounts.config.CLAUDE_STALE_S - 1, "config_conflict")
+        self.assertIsNone(claude_accounts._fatal_kind())
+
+    def test_fatal_error_without_a_store_is_asked_again(self):
+        """covers: USAGE-7. 저장소도 계정도 없는 기기에서도 보통 읽기로 사라지지 않고, 고쳐지면 다시 물어 지운다"""
+        self.reply(error={"type": "config_conflict"})
+        self.assertEqual(claude_accounts.read(force=True)["login"]["state"], "config_conflict")
+        self.assertEqual(claude_accounts.read()["login"]["state"], "config_conflict")
+        self.reply()
+        claude_accounts._cache = None
+        self.assertIsNone(claude_accounts.read())
+        self.assertIsNone(claude_accounts._fatal)
 
     def test_file_store_stops_are_reported_with_fixed_text(self):
         """covers: USAGE-7. 이전 계정의 기록이어도, 만료 임박이어도, 사용 중 계정이 재로그인 필요여도 기기의 사실이 먼저다"""

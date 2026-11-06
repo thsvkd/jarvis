@@ -38,6 +38,7 @@ KEEPALIVE_ERRORS = {"keychain_unavailable": "키체인 접근 불가", "relogin_
 HSWAP_ERRORS = {**KEEPALIVE_ERRORS, "stores_disagree": KEEPALIVE_ERRORS["split_brain"], "required_mode_unsupported": "hswap 이 이 저장소 모드에서 지원하지 않는 명령",
                 "stash_manifest_corrupt": "hswap 보관 목록 손상", "AccountNotFoundError": "저장 슬롯에 없는 계정", "LockError": KEEPALIVE_ERRORS["locked"],
                 "ClaudeCodeLockTimeout": KEEPALIVE_ERRORS["locked"], "SwitchError": "계정 전환 실패"}
+FATAL_ERRORS = ("config_conflict", "keychain_item_present", "relogin_required")  # keepalive 기록이 옛것이어도 기기 상태에 바로 보이는 type
 LOGIN_WARN_S = 3 * 86400  # 로그인(갱신 토큰) 만료 3일 전부터 '주의 필요'. 새 /login 만이 기한을 늘린다
 CACHE_S = 30  # hswap 자체가 캐시하므로 짧게만 묶는다(요청마다 프로세스를 띄우지 않게)
 READ_BUDGET_S = 40  # 읽기 한 번의 전체 시한. 재시도의 잠금 대기와 hswap 호출이 함께 쓴다. 수집기의 대기(독립 55초, 호환 60초)보다 짧아야 한다
@@ -59,6 +60,7 @@ _lock = threading.Lock()
 _cache = None  # (monotonic, 결과, 물을 때의 저장소 모습 _store_shape). 잠금 안에서 한 값으로 바꾼다. 모습이 지금 저장소와 같을 때만 다시 쓴다
 _discovered = False  # hswap 이 마지막으로 답한 때 계정을 주었다. 저장소를 읽지 못해도 기준이 지나면 다시 묻는 근거다
 _device = None  # (monotonic, 키체인에 닿지 못함). hswap 이 답한 기기 상태. 계정 행과 따로 두어 계정이 없거나 다음 조회가 실패해도 남는다
+_fatal = None  # (monotonic, type). hswap 이 최상위 오류로 답한 FATAL_ERRORS. hswap 이 다시 답하면 지운다
 _switched = 0  # switch() 가 끝난 횟수. 이것이 바뀌면 그 전에 시작한 읽기의 값은 전환 전 값일 수 있다
 # 자동 설치·올리기: 검증한 버전으로 고정한다(서비스가 최신판을 저절로 받아 실행하지 않게). PyPI 배포본이 그 태그의 소스와 같은지
 # 대조한 뒤 여기 버전을 올려 릴리스하면, 게이트웨이(maintain)가 이보다 낮은 hswap 을 이 버전으로 올린다
@@ -224,11 +226,12 @@ def account(row, source="cswap"):
 
 
 class _HswapError(RuntimeError):
-    """hswap 이 최상위 오류로 답했다. 문구는 고정 문구다."""
+    """hswap 이 최상위 오류로 답했다. 문구는 고정 문구이고 kind 는 응답의 값 그대로라 비교에만 쓴다."""
 
     def __init__(self, kind):
         safe = kind if isinstance(kind, str) and re.fullmatch(r"[a-z_]{1,40}", kind) else "알 수 없음"
         super().__init__((HSWAP_ERRORS.get(kind) if isinstance(kind, str) else None) or f"hswap 오류(종류: {safe})")
+        self.kind = kind
 
 
 def _json(exe, *args, timeout=TIMEOUT_S):
@@ -287,7 +290,7 @@ def live(force=False, install=True, shape=None, deadline=None):
     force 는 jarvis 의 30초 묶음만 건너뛴다(프로바이더 조회 간격은 hswap 이 정한다).
     shape: 이 호출을 정한 저장소 모습. 잠금을 기다린 뒤든 포기한 뒤든 모습이 같은 결과만 다시 쓴다(hswap 은 한 번에 하나만 도니 옛 답은 새 답보다 먼저 온다).
     deadline: 잠금 대기와 hswap 호출이 함께 쓰는 시한(monotonic). 넘기면 hswap 을 부르지 않고 오류를 준다."""
-    global _cache, _device, _discovered
+    global _cache, _device, _discovered, _fatal
     exe = binary()
     if not exe:
         msg = ensure() if install else None
@@ -311,9 +314,12 @@ def live(force=False, install=True, shape=None, deadline=None):
             accounts = [account(r) for r in raw]
             _device = (time.monotonic(), body.get("keychainUnavailable") is True)
             _discovered = bool(accounts)  # 실패한 조회는 건드리지 않는다: 일시 실패로 계정을 잊지 않게
+            _fatal = None
             out = {"accounts": accounts, "fetched_at": time.time(),
                    "ids": {str(r.get("number")): _fingerprint(r.get("email"), r.get("organizationUuid")) for r in raw}} if accounts else None
         except Exception as e:
+            if isinstance(e, _HswapError):  # 시간 초과처럼 답이 없는 실패는 이전 판정을 지우지 않는다
+                _fatal = (time.monotonic(), e.kind) if e.kind in FATAL_ERRORS else None
             out = {"error": scrub_home(str(e))[:200] or type(e).__name__}
         _cache = (time.monotonic(), out, shape)
         return out
@@ -421,12 +427,13 @@ def _is_relogin(a):
     return STATUS["relogin_required"][0] in (a.get("note"), a.get("error"))
 
 
-def login(rows=(), keychain=False, signed_in=False):
+def login(rows=(), keychain=False, signed_in=False, fatal=None):
     """기기 단위 로그인 상태 {state, text, note, attention, slot, other, store}. 알릴 것이 없으면 None(keepalive.json 이 없으면 이 기능을 쓰지 않는 기기다).
     순서: 설정 충돌·키체인 항목(있거나 확인 실패) > 사람이 다시 로그인해야 하는 것 > 키체인 > 만료 임박 > 멈춤 > 이전 계정의 기록 > 그 밖의 실패 > 정상.
     store: 파일 저장소 기기면 "file", 아니면 None(옛 형식 포함). 파일의 다른 값은 내보내지 않는다. 키체인을 쓰지 않는 기기라 키체인에 닿지 못하는 것은 문제가 아니다.
     rows: 사용 중 계정의 재로그인 판정(저장소의 authDeadStrikes 와 hswap 의 relogin_required 가 같은 문구가 된다)과 사용 중 슬롯.
     keychain: hswap 의 keychainUnavailable. signed_in: 로그인을 읽었다(rows 에 active 가 없으면 저장되지 않은 로그인이다).
+    fatal: hswap 이 최상위 오류로 답한 FATAL_ERRORS. keepalive 기록보다 새로운 사실이라 기록과 상관없이 쓴다.
     other: keepalive 기록의 activeSlot 이 지금 로그인의 슬롯과 다르다고 확인됐다. 만료·오류·접근 토큰은 그 계정의 사실이라 쓰지 않고, 키체인·멈춤·자격 부재는 기기의 사실이라 그대로 쓴다.
     activeSlot 이 없으면 슬롯을 모르는 것이지 다른 계정이라는 증거가 아니다: 판정은 그대로 두고 slot 만 뺀다.
     슬롯은 맞다고 확인될 때만 준다(다른 계정의 슬롯에 add 하면 저장 로그인을 덮을 수 있다). 파일이 없으면 기록과 비교할 것이 없어 사용 중 슬롯을 준다."""
@@ -440,10 +447,10 @@ def login(rows=(), keychain=False, signed_in=False):
     # 사용 중 슬롯을 모르고 저장되지 않은 로그인도 아니면 맞는지 알 수 없다: 경고는 남기고 슬롯만 권하지 않는다
     other = recorded is not None and bool(current or signed_in) and current != recorded
     file_store = k.get("store") == "file"
-    blocked = kind if kind in ("config_conflict", "keychain_item_present") else "keychain_item_present" if file_store and k.get("keychainItemPresent") is True else None
+    blocked = next((x for x in (fatal, kind) if x in ("config_conflict", "keychain_item_present")), "keychain_item_present" if file_store and k.get("keychainItemPresent") is True else None)
     if blocked:  # 기기의 사실이다. 항목이 남아 있으면 SSH 의 /login 이 저장되지 않을 수 있어 재로그인보다 먼저 보인다
         state, text = blocked, KEEPALIVE_ERRORS[blocked]
-    elif (kind == "relogin_required" and not other) or any(a.get("active") and _is_relogin(a) for a in rows):
+    elif fatal == "relogin_required" or (kind == "relogin_required" and not other) or any(a.get("active") and _is_relogin(a) for a in rows):
         state, text = "relogin", "재로그인 필요"
     elif not file_store and (kind == "keychain_unavailable" or keychain):
         state, text = "keychain", "키체인 접근 불가: 키체인에 접근할 수 없는 곳에서 실행됨"
@@ -549,6 +556,12 @@ def _keychain_down():
     return bool(d and d[1] and time.monotonic() - d[0] < config.CLAUDE_STALE_S)
 
 
+def _fatal_kind():
+    """hswap 이 신선도 기준 안에 답한 치명적 오류 type. 다시 확인하지 못한 옛 답은 쓰지 않는다."""
+    f = _fatal
+    return f[1] if f and time.monotonic() - f[0] < config.CLAUDE_STALE_S else None
+
+
 def _read(force, install, deadline, give_up=False):
     """(결과, 답을 받는 동안 저장소 모습이 그대로였는가). give_up: hswap 을 부르지 않고 지금 저장소로 답한다."""
     settled = True
@@ -558,7 +571,7 @@ def _read(force, install, deadline, give_up=False):
     recent = recent if recent and recent.get("accounts") else None
     device = _device
     # 계정을 찾은 적도 저장소도 없는 기기는 묻지 않는다. CLI 로 계정을 찾았거나 경고가 있던 기기는 기준이 지나면 다시 묻는다
-    recheck = _discovered or (bool(device and device[1]) and not _keychain_down())
+    recheck = _discovered or bool(_fatal) or (bool(device and device[1]) and not _keychain_down())
     if give_up:
         out = {"error": "저장소가 계속 바뀌어 hswap 값을 확정하지 못했습니다"}
     elif store is None and recent is None and not force and not install and not recheck:
@@ -583,9 +596,9 @@ def _read(force, install, deadline, give_up=False):
         reason = (out or {}).get("error") or ("hswap 이 없습니다" if not binary() else "hswap 이 계정을 주지 않았습니다")
         why = reason.rstrip(".") + ". 저장된 값을 보입니다."
     else:
-        state = login((), _keychain_down())
+        state = login((), _keychain_down(), fatal=_fatal_kind())
         return ({**(out or {}), "accounts": [], "login": state} if state else out), settled
-    state = login(rows, _keychain_down(), bool(store and store.get("signed_in")))
+    state = login(rows, _keychain_down(), bool(store and store.get("signed_in")), _fatal_kind())
     result = {"accounts": [_aged(a, why) for a in rows]}
     if (out or {}).get("fetched_at"):
         result["fetched_at"] = out["fetched_at"]
