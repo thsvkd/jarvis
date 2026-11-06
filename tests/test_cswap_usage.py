@@ -80,7 +80,7 @@ class RunTest(unittest.TestCase):
 
     def test_errors_hide_home(self, _):
         cases = ((proc("nope", 2), "종료 코드 2"),
-                 (proc({"schemaVersion": 1, "error": {"message": "locked /home/alice/.claude-swap"}}, 1), "locked /home/~/"),
+                 (proc({"schemaVersion": 1, "error": {"message": "locked /home/alice/.claude-swap"}}, 1), "hswap 오류(종류: 알 수 없음)"),
                  (subprocess.TimeoutExpired(["/home/alice/.local/bin/cswap"], 15), "15초"),
                  (PermissionError(13, "denied", "C:\\Users\\alice\\x"), "PermissionError"))
         for result, want in cases:

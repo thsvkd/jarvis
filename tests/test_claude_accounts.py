@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import types
 import unittest
 import urllib.request
 from unittest import mock
@@ -482,6 +483,40 @@ class LoginStateTest(StoreCase):
         # 다른 실패는 파일 저장소에서도 그대로 실패다
         self.keepalive(store="file", ok=False, error={"type": "refresh_failed"})
         self.assertEqual(claude_accounts.login()["text"], "자동 갱신 실패(토큰 갱신 실패)")
+
+    def reply(self, *rows, error=None):
+        """가짜 hswap 프로세스: 실제 _json 을 거친다."""
+        self.binary.return_value = "/fake/hswap"
+        body = {"schemaVersion": 1, "error": error} if error is not None else {"schemaVersion": 1, "accounts": list(rows)}
+        p = mock.patch.object(claude_accounts.subprocess, "run", return_value=types.SimpleNamespace(stdout=json.dumps(body), returncode=1 if error is not None else 0))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_top_level_hswap_error_shows_only_fixed_text(self):
+        """covers: USAGE-6. error.message 원문은 어느 응답에도 나오지 않는다. 표에 없는 type 은 소문자·밑줄 40자까지만 보인다"""
+        secrets = ("sk-ant-oat01-SECRET", "Bearer abc.def", "/Users/alice/.claude", "C:\\Users\\alice\\x", "/opt/private/token.json")
+        leak = " ".join(secrets)
+        for error, want in (({"type": "config_conflict", "message": leak}, "hswap 설정 충돌"), ({"type": "LockError", "message": leak}, "잠금을 쥐고 있음"),
+                            ({"type": "brand_new_error", "message": leak}, "hswap 오류(종류: brand_new_error)"),
+                            ({"type": leak, "message": leak}, "hswap 오류(종류: 알 수 없음)"), ({"type": "A" * 10, "message": leak}, "hswap 오류(종류: 알 수 없음)"),
+                            ({"type": "a" * 41, "message": leak}, "hswap 오류(종류: 알 수 없음)"), ({"type": ["list"], "message": leak}, "hswap 오류(종류: 알 수 없음)"),
+                            ({"message": leak}, "hswap 오류(종류: 알 수 없음)"), (leak, "hswap 오류(종류: 알 수 없음)")):
+            self.reply(error=error)
+            for stored in (False, True):
+                if stored:
+                    self.store(time.time() - 60)
+                claude_accounts._cache = None
+                body = claude_accounts.read(force=True)
+                claude_accounts._cache = None
+                text = json.dumps([body, self.compat_body()], ensure_ascii=False)
+                self.assertIn(want, text, error)
+                for s in (*secrets, "alice", "SECRET"):
+                    self.assertNotIn(s, text, error)
+            code, answer = claude_accounts.switch("1")
+            self.assertEqual(code, 409)
+            self.assertIn(want, answer["error"])
+            self.assertNotIn("SECRET", answer["error"])
+            os.remove(os.path.join(self.root, "sequence.json"))
 
     def test_file_store_stops_are_reported_with_fixed_text(self):
         """covers: USAGE-7. 이전 계정의 기록이어도, 만료 임박이어도, 사용 중 계정이 재로그인 필요여도 기기의 사실이 먼저다"""

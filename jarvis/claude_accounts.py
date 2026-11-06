@@ -34,6 +34,10 @@ KNOWN_BUCKETS = {"opus", "sonnet", "haiku"}  # 첫 단어가 이것인 이름만
 KEEPALIVE_ERRORS = {"keychain_unavailable": "키체인 접근 불가", "relogin_required": "재로그인 필요", "split_brain": "키체인과 파일의 로그인이 갈라짐",
                     "refresh_failed": "토큰 갱신 실패", "no_credentials": "자격 증명 없음", "locked": "다른 프로세스가 잠금을 쥐고 있음", "unmanaged": "저장 슬롯에 없는 로그인",
                     "keychain_item_present": "키체인에 Claude 로그인이 있거나 확인하지 못해 자동 갱신을 멈췄습니다", "config_conflict": "hswap 설정 충돌(파일 저장소와 키체인 필수 모드)"}
+# hswap 최상위 오류 type → 화면 문구(hswap 의 json_type 또는 예외 클래스 이름, claude_swap/exceptions.py). error.message 는 토큰·경로가 들어 있어도 새지 않게 쓰지 않는다
+HSWAP_ERRORS = {**KEEPALIVE_ERRORS, "stores_disagree": KEEPALIVE_ERRORS["split_brain"], "required_mode_unsupported": "hswap 이 이 저장소 모드에서 지원하지 않는 명령",
+                "stash_manifest_corrupt": "hswap 보관 목록 손상", "AccountNotFoundError": "저장 슬롯에 없는 계정", "LockError": KEEPALIVE_ERRORS["locked"],
+                "ClaudeCodeLockTimeout": KEEPALIVE_ERRORS["locked"], "SwitchError": "계정 전환 실패"}
 LOGIN_WARN_S = 3 * 86400  # 로그인(갱신 토큰) 만료 3일 전부터 '주의 필요'. 새 /login 만이 기한을 늘린다
 CACHE_S = 30  # hswap 자체가 캐시하므로 짧게만 묶는다(요청마다 프로세스를 띄우지 않게)
 READ_BUDGET_S = 40  # 읽기 한 번의 전체 시한. 재시도의 잠금 대기와 hswap 호출이 함께 쓴다. 수집기의 대기(독립 55초, 호환 60초)보다 짧아야 한다
@@ -219,6 +223,14 @@ def account(row, source="cswap"):
             "windows": windows, "buckets": buckets[:12], "extra": None, "credits": None, "source": source}
 
 
+class _HswapError(RuntimeError):
+    """hswap 이 최상위 오류로 답했다. 문구는 고정 문구다."""
+
+    def __init__(self, kind):
+        safe = kind if isinstance(kind, str) and re.fullmatch(r"[a-z_]{1,40}", kind) else "알 수 없음"
+        super().__init__((HSWAP_ERRORS.get(kind) if isinstance(kind, str) else None) or f"hswap 오류(종류: {safe})")
+
+
 def _json(exe, *args, timeout=TIMEOUT_S):
     try:
         p = subprocess.run([exe, "claude", *args, "--json"], capture_output=True, text=True, encoding="utf-8", timeout=timeout,
@@ -233,7 +245,7 @@ def _json(exe, *args, timeout=TIMEOUT_S):
         raise RuntimeError(f"hswap claude {args[0]} --json 응답을 읽지 못했습니다(종료 코드 {p.returncode})")
     if not isinstance(body, dict) or body.get("error"):
         err = body.get("error") if isinstance(body, dict) else None
-        raise RuntimeError(scrub_home(str((err.get("message") if isinstance(err, dict) else err) or "알 수 없는 응답"))[:200])
+        raise _HswapError(err.get("type") if isinstance(err, dict) else None)
     return body
 
 
