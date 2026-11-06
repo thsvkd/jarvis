@@ -2112,5 +2112,258 @@ class AliasTest(unittest.TestCase):
         self.assertNotEqual(claude_accounts._root(), "/none")
 
 
+NOW, MONO = 1_800_000_000.0, 5000.0
+STALE, KEEPALIVE_STALE = claude_accounts.config.CLAUDE_STALE_S, claude_accounts.config.CLAUDE_KEEPALIVE_STALE_S
+RELOGIN = claude_accounts.STATUS["relogin_required"][0]
+
+
+def shown_row(slot="1", **kw):
+    """화면 행 하나. 값이 있고 1분 전에 읽었다."""
+    return {"slot": slot, "label": f"u{slot}@example.com", "org": "Org", "active": False, "status": "ok", "attention": False,
+            "note": None, "error": None, "windows": [{"key": "session", "used": 1}], "buckets": [], "updated_at": NOW - 60, **kw}
+
+
+def store_value(*rows, **kw):
+    """_store_read() 의 값 모양. 슬롯 1·2 의 지문이 답과 같고 로그인을 읽었다."""
+    return {"accounts": list(rows) or [shown_row(active=True), shown_row("2")], "signed_in": True, "ids": {"1": "f1", "2": "f2"}, "orgs": {}, **kw}
+
+
+def cli_answer(*rows, **kw):
+    return {"accounts": list(rows) or [shown_row(active=True), shown_row("2")], "fetched_at": NOW, "ids": {"1": "f1", "2": "f2"}, **kw}
+
+
+def keepalive_value(**kw):
+    return {"schemaVersion": 1, "checkedAt": NOW - 300, "ok": True, "activeSlot": 1, "accessExpiresAt": NOW + 3 * 3600 + 30, "loginExpiresAt": NOW + 30 * 86400, "error": None, **kw}
+
+
+class JudgeRowsTest(unittest.TestCase):
+    """행 판정을 값만으로 본다: 패치도 파일도 없다."""
+
+    def judge(self, out, store, hswap=True):
+        return claude_accounts._judge_rows(out, store, hswap, NOW)
+
+    def test_nothing_to_show(self):
+        """covers: USAGE-6"""
+        for out in (None, {"error": "locked"}):
+            self.assertEqual(self.judge(out, None), ([], None), out)
+
+    def test_in_use_row(self):
+        """covers: USAGE-6. 표의 칸: 답, 저장소, 슬롯 1·2 의 사용 중"""
+        unread = store_value(signed_in=False)
+        other_id = store_value(ids={"1": "other", "2": "f2"})
+        cases = (("실제 로그인의 슬롯", cli_answer(), store_value(), [True, False]),
+                 ("답과 달라도 실제 로그인을 따른다", cli_answer(shown_row(active=False), shown_row("2", active=True)), store_value(), [True, False]),
+                 ("슬롯 번호만 같고 신원이 다르다", cli_answer(), other_id, [False, False]),
+                 ("저장되지 않은 로그인", cli_answer(), store_value(shown_row(), shown_row("2")), [False, False]),
+                 ("로그인을 읽지 못하면 hswap 의 값", cli_answer(shown_row(), shown_row("2", active=True)), unread, [False, True]),
+                 ("저장소가 없으면 hswap 의 값", cli_answer(), None, [True, False]))
+        for name, out, store, want in cases:
+            with self.subTest(name):
+                rows, accounts = self.judge(out, store)
+                self.assertEqual([a["active"] for a in rows], want)
+                self.assertEqual([a["active"] for a in accounts], want)
+
+    def test_store_auth_failure_moves_to_the_same_login_only(self):
+        """covers: USAGE-7. 표의 칸: 답의 행, 저장소의 지문, 기대하는 (status, attention, note, error, 값 유지)"""
+        dead = store_value(shown_row(active=True, note=RELOGIN, attention=True))
+        cases = (("값이 있는 행", shown_row(), dead, ("ok", True, RELOGIN, None, True)),
+                 ("값이 없는 행", shown_row(windows=[]), dead, ("error", True, None, RELOGIN, False)),
+                 ("이미 재로그인 문구", shown_row(note=RELOGIN), dead, ("ok", False, RELOGIN, None, True)),
+                 ("같은 번호의 다른 계정", shown_row(), {**dead, "ids": {"1": "other"}}, ("ok", False, None, None, True)),
+                 ("저장소에 실패 없음", shown_row(), store_value(), ("ok", False, None, None, True)))
+        for name, row, store, want in cases:
+            with self.subTest(name):
+                a = self.judge(cli_answer(row), store)[0][0]
+                self.assertEqual((a["status"], a["attention"], a["note"], a["error"], bool(a["windows"])), want)
+
+    def test_org_comes_from_the_store_for_the_same_login(self):
+        """covers: USAGE-1, USAGE-6. 묶어 둔 답의 옛 이름을 저장소의 이름과 시각이 대신하고, 신원이 다른 행에는 붙지 않는다"""
+        orgs = {"1": {"org": "새 이름", "org_key": "k", "org_at": 5.0}}
+        cases = (("같은 신원", store_value(orgs=orgs), ("새 이름", "k", 5.0)),
+                 ("다른 신원", store_value(orgs=orgs, ids={"1": "other"}), ("Org", None, None)),
+                 ("저장소 없음", None, ("Org", None, None)))
+        for name, store, want in cases:
+            with self.subTest(name):
+                a = self.judge(cli_answer(shown_row()), store)[1][0]
+                self.assertEqual((a["org"], a.get("org_key"), a.get("org_at")), want)
+        personal = shown_row(label="me@example.com", org="me@example.com's Organization")
+        self.assertIsNone(self.judge(cli_answer(personal), None)[0][0]["org"])
+
+    def test_store_rows_say_why_they_are_shown(self):
+        """covers: USAGE-6. 표의 칸: 답, hswap 있음, 문구"""
+        cases = ((None, False, "hswap 이 없습니다. 저장된 값을 보입니다."), (None, True, "hswap 이 계정을 주지 않았습니다. 저장된 값을 보입니다."),
+                 ({"error": "locked."}, True, "locked. 저장된 값을 보입니다."))
+        for out, hswap, want in cases:
+            with self.subTest(want):
+                rows, accounts = self.judge(out, store_value(shown_row(active=True)), hswap)
+                self.assertEqual(accounts[0]["note"], want)
+                self.assertIsNone(rows[0]["note"])  # login 판정은 이유가 붙기 전의 행을 본다
+                self.assertFalse(accounts[0]["attention"])
+
+    def test_age_is_measured_from_the_given_time(self):
+        """covers: USAGE-6. 표의 칸: updated_at, 기대하는 (note, attention)"""
+        cases = ((NOW - STALE, (None, False)), (NOW - STALE - 1, ("15분 전 값입니다.", True)), (NOW - 9 * 3600, ("9시간 전 값입니다.", True)),
+                 (None, ("저장 시각을 모르는 값입니다.", True)))
+        for at, want in cases:
+            with self.subTest(at=at):
+                a = self.judge(cli_answer(shown_row(updated_at=at)), None)[1][0]
+                self.assertEqual((a["note"], a["attention"]), want)
+        empty = self.judge(cli_answer(shown_row(windows=[], updated_at=None)), None)[1][0]
+        self.assertEqual((empty["note"], empty["attention"]), (None, False))  # 값이 없으면 늙을 것도 없다
+
+    def test_the_held_answer_is_not_changed(self):
+        """covers: USAGE-6"""
+        out = cli_answer(shown_row(updated_at=None))
+        before = json.dumps(out)
+        self.judge(out, store_value(shown_row(active=True, note=RELOGIN)))
+        self.assertEqual(json.dumps(out), before)
+
+
+class JudgeAskTest(unittest.TestCase):
+    """묶음을 다시 쓸지 hswap 에 물을지를 값만으로 본다."""
+
+    SHAPE = "지금 모습"
+
+    def judge(self, force=False, install=False, store=None, held=None, discovered=False, fatal=None, device=None):
+        return claude_accounts._judge_ask(force, install, store, self.SHAPE, held, discovered, fatal, device, MONO, NOW)
+
+    def test_table(self):
+        """covers: USAGE-6. 표의 칸: 이름, 입력, 물을까, 묶음을 돌려주는가"""
+        fresh = cli_answer()
+        held = (MONO - 60, fresh, self.SHAPE)
+        old = (MONO - STALE, fresh, self.SHAPE)
+        store = store_value()
+        cases = (("찾은 적도 저장소도 없음", {}, False, False),
+                 ("강제", {"force": True}, True, False),
+                 ("설치 경로", {"install": True}, True, False),
+                 ("저장소가 있다", {"store": store}, True, False),
+                 ("계정을 찾은 적이 있다", {"discovered": True}, True, False),
+                 ("치명적 오류를 기억한다", {"fatal": (MONO - 1, "config_conflict")}, True, False),
+                 ("키체인 답이 기준 안", {"device": (MONO - 1, True)}, False, False),
+                 ("키체인 답이 기준 밖", {"device": (MONO - STALE, True)}, True, False),
+                 ("키체인에 닿는다는 옛 답", {"device": (MONO - STALE, False)}, False, False),
+                 ("묶음이 신선하고 모습이 같다", {"store": store, "held": held}, False, True),
+                 ("저장소를 잃어도 묶음을 쓴다", {"held": held}, False, True),
+                 ("강제면 묶음이 있어도 묻는다", {"store": store, "held": held, "force": True}, True, True),
+                 ("모습이 달라졌다", {"store": store, "held": (MONO - 60, fresh, "옛 모습")}, True, True),
+                 ("묶음이 기준 밖", {"store": store, "held": old}, True, False),
+                 ("묶음에 계정이 없다", {"store": store, "held": (MONO - 60, {"error": "x"}, self.SHAPE)}, True, False),
+                 ("보일 값 중 오래된 것", {"store": store, "held": (MONO - 60, cli_answer(shown_row(updated_at=NOW - STALE - 1)), self.SHAPE)}, True, True))
+        for name, kw, ask, reuse in cases:
+            with self.subTest(name):
+                asked, recent = self.judge(**kw)
+                self.assertEqual(bool(asked), ask)
+                self.assertEqual(recent is not None, reuse)
+
+    def test_recent_fact_expires_at_the_threshold(self):
+        """covers: USAGE-7"""
+        self.assertEqual(claude_accounts._recent((MONO - STALE + 1, "config_conflict"), MONO), "config_conflict")
+        self.assertIsNone(claude_accounts._recent((MONO - STALE, "config_conflict"), MONO))
+        self.assertIsNone(claude_accounts._recent(None, MONO))
+
+
+class JudgeShapeTest(unittest.TestCase):
+    """묶음의 유효성을 가르는 값을 파일 없이 본다."""
+
+    def test_only_meaningful_changes_change_the_shape(self):
+        """covers: USAGE-6. 표의 칸: 이름, 저장소, keepalive, 모습이 달라지는가"""
+        store, k = store_value(), keepalive_value()
+        base = claude_accounts._judge_shape(store, k)
+        cases = (("checkedAt 만 바뀜", store, {**k, "checkedAt": NOW}, False),
+                 ("접근 토큰 만료만 바뀜", store, {**k, "accessExpiresAt": NOW + 9}, False),
+                 ("슬롯이 는다", {**store, "ids": {**store["ids"], "3": "f3"}}, k, True),
+                 ("신원이 바뀐다", {**store, "ids": {"1": "other", "2": "f2"}}, k, True),
+                 ("사용 중 슬롯이 바뀐다", store_value(shown_row(), shown_row("2", active=True)), k, True),
+                 ("인증 실패가 생긴다", store_value(shown_row(active=True, note=RELOGIN), shown_row("2")), k, True),
+                 ("keepalive 등급이 바뀐다", store, {**k, "ok": False, "error": {"type": "refresh_failed"}}, True),
+                 ("로그인 기한이 바뀐다", store, {**k, "loginExpiresAt": NOW + 86400}, True),
+                 ("keepalive 가 사라진다", store, {}, True),
+                 ("저장소가 사라진다", None, k, True))
+        for name, s, keep, differs in cases:
+            with self.subTest(name):
+                self.assertEqual(claude_accounts._judge_shape(s, keep) != base, differs)
+
+
+class JudgeLoginTest(unittest.TestCase):
+    """로그인 판정을 값만으로 본다: 패치도 파일도 없다."""
+
+    ACTIVE = [{"active": True, "slot": "1"}]
+
+    def judge(self, k, rows=(), keychain=False, signed_in=False, fatal=None, first_seen=None):
+        return claude_accounts._judge_login(k, rows, keychain, signed_in, fatal, first_seen, NOW)
+
+    def test_states(self):
+        """covers: USAGE-7. 표의 칸: 이름, keepalive, 나머지 입력, 기대하는 (state, attention, slot, other)"""
+        relogin_row = [{"active": True, "slot": "1", "note": RELOGIN}]
+        failed = lambda kind, **kw: keepalive_value(ok=False, error={"type": kind, "message": "비밀"}, **kw)
+        cases = (("정상", keepalive_value(), {"rows": self.ACTIVE}, ("ok", False, "1", False)),
+                 ("기록 없음: 파일이 없으면 슬롯만 있어도 알릴 것이 없다", {}, {"rows": self.ACTIVE}, None),
+                 ("기록 없어도 사용 중 계정이 재로그인", {}, {"rows": relogin_row}, ("relogin", True, "1", False)),
+                 ("기록 없어도 hswap 의 키체인 답", {}, {"keychain": True}, ("keychain", True, None, False)),
+                 ("기록 없어도 최상위 오류", {}, {"fatal": "config_conflict"}, ("config_conflict", True, None, False)),
+                 ("최상위 재로그인", {}, {"fatal": "relogin_required"}, ("relogin", True, None, False)),
+                 ("설정 충돌이 재로그인보다 먼저", failed("config_conflict"), {"rows": relogin_row}, ("config_conflict", True, "1", False)),
+                 ("키체인 항목이 이전 계정보다 먼저", failed("keychain_item_present", activeSlot=2), {"rows": self.ACTIVE}, ("keychain_item_present", True, None, True)),
+                 ("파일 저장소의 항목 표시", keepalive_value(store="file", keychainItemPresent=True), {}, ("keychain_item_present", True, None, False)),
+                 ("재로그인 기록", failed("relogin_required"), {"rows": self.ACTIVE}, ("relogin", True, "1", False)),
+                 ("이전 계정의 재로그인 기록은 쓰지 않는다", failed("relogin_required", activeSlot=2), {"rows": self.ACTIVE}, ("other_account", True, None, True)),
+                 ("키체인 실패", failed("keychain_unavailable"), {}, ("keychain", True, None, False)),
+                 ("파일 저장소는 키체인 답을 보지 않는다", keepalive_value(store="file"), {"keychain": True}, ("ok", False, None, False)),
+                 ("만료 임박", keepalive_value(loginExpiresAt=NOW + 2 * 86400), {"rows": self.ACTIVE}, ("expiring", True, "1", False)),
+                 ("기한 지남", keepalive_value(loginExpiresAt=NOW - 60), {"rows": self.ACTIVE}, ("expiring", True, "1", False)),
+                 ("이전 계정의 만료는 쓰지 않는다", keepalive_value(activeSlot=2, loginExpiresAt=NOW + 60), {"rows": self.ACTIVE}, ("other_account", True, None, True)),
+                 ("멈춤", keepalive_value(checkedAt=NOW - KEEPALIVE_STALE - 1), {"rows": self.ACTIVE}, ("stalled", True, "1", False)),
+                 ("멈춤은 이전 계정보다 먼저", keepalive_value(activeSlot=2, checkedAt=None), {"rows": self.ACTIVE}, ("stalled", True, None, True)),
+                 ("저장되지 않은 로그인", keepalive_value(), {"signed_in": True}, ("other_account", True, None, True)),
+                 ("사용 중 슬롯을 모르면 경고만", keepalive_value(), {}, ("ok", False, None, False)),
+                 ("activeSlot 없음", keepalive_value(activeSlot=None), {"rows": self.ACTIVE}, ("ok", False, None, False)),
+                 ("activeSlot 이 참거짓", keepalive_value(activeSlot=True), {"rows": self.ACTIVE}, ("ok", False, None, False)),
+                 ("자격 부재는 이전 계정이어도 실패", failed("no_credentials", activeSlot=2), {"rows": self.ACTIVE}, ("failed", True, None, True)),
+                 ("그 밖의 실패", failed("refresh_failed"), {"rows": self.ACTIVE}, ("failed", True, "1", False)),
+                 ("ok 가 참이 아닌 기록", keepalive_value(ok="true"), {"rows": self.ACTIVE}, ("failed", True, "1", False)))
+        for name, k, kw, want in cases:
+            with self.subTest(name):
+                state, _ = self.judge(k, **kw)
+                self.assertEqual(state and (state["state"], state["attention"], state["slot"], state["other"]), want)
+
+    def test_fixed_text_and_note(self):
+        """covers: USAGE-7. 파일의 자유 문구는 나가지 않고, 시각은 받은 now 로 잰다"""
+        cases = ((keepalive_value(), "로그인됨, 자동 갱신 5분 전", "접근 토큰 3시간 뒤 만료(자동 갱신)"),
+                 (keepalive_value(store="file"), "로그인됨 · 파일 저장소, 자동 갱신 5분 전", "접근 토큰 3시간 뒤 만료(자동 갱신)"),
+                 (keepalive_value(accessExpiresAt=NOW - 1), "로그인됨, 자동 갱신 5분 전", "접근 토큰 만료됨(자동 갱신 대기)"),
+                 (keepalive_value(accessExpiresAt=None), "로그인됨, 자동 갱신 5분 전", None),
+                 (keepalive_value(loginExpiresAt=NOW + 2 * 86400), "로그인 만료 임박(2일)", "접근 토큰 3시간 뒤 만료(자동 갱신)"),
+                 (keepalive_value(loginExpiresAt=NOW - 60), "로그인 기한이 지났습니다", "접근 토큰 3시간 뒤 만료(자동 갱신)"),
+                 (keepalive_value(checkedAt=None), "자동 갱신 멈춤", "접근 토큰 3시간 뒤 만료(자동 갱신)"),
+                 (keepalive_value(ok=False, error={"type": "refresh_failed", "message": "비밀"}), "자동 갱신 실패(토큰 갱신 실패)", "접근 토큰 3시간 뒤 만료(자동 갱신)"),
+                 (keepalive_value(ok=False, error={"type": "새 종류", "message": "비밀"}), "자동 갱신 실패(알 수 없는 오류)", "접근 토큰 3시간 뒤 만료(자동 갱신)"),
+                 (keepalive_value(ok=False, error={"type": "config_conflict"}), "hswap 설정 충돌(파일 저장소와 키체인 필수 모드)", None))
+        for k, text, note in cases:
+            with self.subTest(text):
+                state, _ = self.judge(k)
+                self.assertEqual((state["text"], state["note"]), (text, note))
+                self.assertNotIn("비밀", json.dumps(state, ensure_ascii=False))
+
+    def test_first_seen_is_returned_not_kept(self):
+        """covers: USAGE-7. 표의 칸: 이름, keepalive, 받은 first_seen, 기대하는 (state, attention, 새 first_seen)"""
+        failed = keepalive_value(store="file", ok=False, error={"type": "keychain_unavailable"})
+        long_ago = NOW - KEEPALIVE_STALE - 60
+        cases = (("처음 본다", failed, None, ("unconfirmed", False, NOW)),
+                 ("시한 안", failed, NOW - KEEPALIVE_STALE, ("unconfirmed", False, NOW - KEEPALIVE_STALE)),
+                 ("시한을 넘겼다", failed, long_ago, ("unconfirmed", True, long_ago)),
+                 ("성공하면 지운다", keepalive_value(store="file"), long_ago, ("ok", False, None)),
+                 ("다른 실패면 지운다", {**failed, "error": {"type": "refresh_failed"}}, long_ago, ("failed", True, None)),
+                 ("키체인 저장소면 쓰지 않는다", {**failed, "store": "keychain"}, long_ago, ("keychain", True, None)))
+        for name, k, seen, want in cases:
+            with self.subTest(name):
+                state, kept = self.judge(k, first_seen=seen)
+                self.assertEqual((state["state"], state["attention"], kept), want)
+        self.assertEqual(self.judge({}, first_seen=long_ago), (None, None))
+        state, _ = self.judge(failed, first_seen=long_ago)
+        self.assertIsNone(state["note"])  # 확인되지 않았는데 자동 갱신을 말하지 않는다
+        self.assertIn("째)", state["text"])
+        self.assertEqual(state["store"], "file")
+
+
 if __name__ == "__main__":
     unittest.main()
