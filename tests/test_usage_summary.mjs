@@ -207,6 +207,9 @@ assert.doesNotMatch(guide, /\/login/);
 guide = guideOf({ ...fileStore, state: "keychain_item_present" });
 assert.ok(guide.indexOf("hswap claude migrate-store --to file --keep keychain") < guide.indexOf("ssh &lt;그 기기&gt;"));
 assert.match(guide, /<code>security unlock-keychain<\/code> 을 먼저 실행합니다/);
+guide = guideOf({ state: "keychain_item_present", text: "멈춤", store: null }); // store 가 없어도 이 오류는 파일 저장소의 것이다. GUI 안내는 파일을 지울 수 있다
+assert.match(guide, /migrate-store/);
+assert.doesNotMatch(guide, /GUI/);
 // 설정 충돌은 설정만 고친다. 다시 로그인을 권하지 않는다
 guide = guideOf({ state: "config_conflict", text: "hswap 설정 충돌", store: "file" });
 assert.match(guide, /credentials\.store.*credentials\.requireKeychain/);

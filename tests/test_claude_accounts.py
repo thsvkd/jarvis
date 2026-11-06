@@ -491,7 +491,7 @@ class LoginStateTest(StoreCase):
             self.keepalive(store="file", ok=False, error={"type": kind, "message": "x" * 500}, loginExpiresAt=iso(time.time() + 3600))
             for rows in ((), relogin):
                 s = claude_accounts.login(rows, signed_in=True)
-                self.assertEqual((s["state"], s["text"], s["attention"], s["store"]), (kind, want, True, "file"), kind)
+                self.assertEqual((s["state"], s["text"], s["attention"], s["store"], s["note"]), (kind, want, True, "file", None), kind)
             self.assertEqual(claude_accounts.STATUS[kind], (want + ".", True))
             self.keepalive(ok=False, error={"type": kind})  # store 가 없는 기록에서도 같은 오류다
             self.assertEqual((claude_accounts.login()["state"], claude_accounts.login()["store"]), (kind, None))

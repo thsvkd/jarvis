@@ -447,7 +447,7 @@ def login(rows=(), keychain=False, signed_in=False):
         state, text = "failed", f"자동 갱신 실패({KEEPALIVE_ERRORS.get(kind, '알 수 없는 오류')})"
     else:
         state, text = "ok", f"로그인됨{' · 파일 저장소' if file_store else ''}, 자동 갱신 {_span(now - checked)} 전"
-    access = None if other else _sec(k.get("accessExpiresAt"))
+    access = None if other or blocked else _sec(k.get("accessExpiresAt"))  # 갱신이 멈췄는데 "자동 갱신"을 말하지 않는다
     return {"state": state, "text": text, "attention": state != "ok", "slot": current if not k or current == recorded else None, "other": other,
             "store": "file" if file_store else None,
             "note": None if access is None else f"접근 토큰 {_span(access - now)} 뒤 만료(자동 갱신)" if access > now else "접근 토큰 만료됨(자동 갱신 대기)"}
