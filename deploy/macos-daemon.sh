@@ -72,6 +72,8 @@ agent_plist() {  # 렌더 기준: LaunchAgents 의 것이 없으면 옮겨 둔 �
 
 sha() { /usr/bin/shasum -a 256 "$1" | cut -d' ' -f1; }
 field() { "$PLUTIL" -extract "$1" raw -o - "$DAEMON" 2>/dev/null; }
+# plutil 이 정규화한 XML 에서는 최상위 키만 탭 하나로 들여 쓰인다. 사용자가 쓸 수 있는 python 은 검증에 쓰지 않는다
+top_keys() { "$PLUTIL" -convert xml1 -o - "$DAEMON" 2>/dev/null | sed -n 's|^'$'\t''<key>\(.*\)</key>$|\1|p'; }
 # 설치된 root 소유 사본만 믿을 수 있다: $NEW 는 같은 uid 프로세스가 sudo 를 묻는 사이에 바꿀 수 있다. bootstrap 전에 부른다
 verify_installed() {
   local got user
@@ -81,12 +83,24 @@ verify_installed() {
   got=$(field UserName)
   case "$got" in ""|root|0) say "UserName 이 root 입니다: $got"; return 1 ;; esac
   if [ "$got" != "$user" ]; then say "UserName 이 $user 가 아닙니다: $got"; return 1; fi
+  got=$(field GroupName)
+  if [ "$got" != "$(id -gn)" ]; then say "GroupName 이 $(id -gn) 이 아닙니다: $got"; return 1; fi
+  got=$(field InitGroups)
+  if [ "$got" != true ]; then say "InitGroups 가 true 가 아닙니다: $got"; return 1; fi
   for key in StandardOutPath StandardErrorPath; do
     got=$(field "$key")
     if [ "$got" != /dev/null ]; then say "$key 가 /dev/null 이 아닙니다: $got"; return 1; fi
   done
   got=$(field Label)
   if [ "$got" != "$LABEL" ]; then say "Label 이 $LABEL 이 아닙니다: $got"; return 1; fi
+  while IFS= read -r key; do
+    # jarvis/macos_daemon.py 의 KEEP(Program 은 렌더에서 사라진다)과 렌더가 넣는 키. tests/test_macos_daemon.py 가 둘이 같은지 본다
+    case "$key" in
+      Label|ProgramArguments|WorkingDirectory|EnvironmentVariables|RunAtLoad|KeepAlive|ThrottleInterval|ExitTimeOut|ProcessType|SoftResourceLimits|HardResourceLimits|Nice) ;;
+      UserName|GroupName|InitGroups|StandardOutPath|StandardErrorPath) ;;
+      *) say "허용 목록 밖의 키가 있습니다: $key"; return 1 ;;
+    esac
+  done <<< "$(top_keys)"
   if [ "$(sha "$DAEMON")" != "$NEW_SHA" ]; then say "렌더한 내용과 다릅니다(sha256)"; return 1; fi
 }
 
@@ -162,7 +176,7 @@ install_plan() {
   say "  /usr/bin/sudo -n /bin/launchctl bootout system/$LABEL   # 로드돼 있으면"
   say "  # :$PORT 가 풀릴 때까지 대기"
   say "  /usr/bin/sudo -n /usr/bin/install -m 0644 -o root -g wheel <렌더한 plist> $DAEMON"
-  say "  # 설치된 plist 검사: root:wheel 0644, UserName, Standard*Path, Label, sha256 $NEW_SHA"
+  say "  # 설치된 plist 검사: root:wheel 0644, UserName, GroupName, InitGroups, Standard*Path, Label, 최상위 키, sha256 $NEW_SHA"
   say "  /usr/bin/sudo -n /bin/launchctl bootstrap system $DAEMON"
   say "  /bin/launchctl print system/$LABEL   # state = running 확인"
   say "  curl http://127.0.0.1:$PORT/api/health   # 최대 40초"

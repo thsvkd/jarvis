@@ -94,7 +94,10 @@ esac''',
   -extract) exec "$TEST_PY" -c 'import plistlib, sys
 d = plistlib.load(open(sys.argv[2], "rb"))
 if sys.argv[1] not in d: sys.exit(1)
-print(d[sys.argv[1]])' "$2" "$6" ;;
+v = d[sys.argv[1]]
+print(str(v).lower() if isinstance(v, bool) else v)' "$2" "$6" ;;
+  -convert) exec "$TEST_PY" -c 'import plistlib, sys
+sys.stdout.buffer.write(plistlib.dumps(plistlib.load(open(sys.argv[1], "rb"))))' "$5" ;;
   *) exit 2 ;;
 esac''',
     # 가짜 sudo 는 root 가 아니므로 설치된 파일의 소유·권한은 실패를 주입할 때만 다르게 보인다
@@ -530,12 +533,39 @@ exec "$TEST_PY" "$@"
         """covers: DAEMON-13"""
         for over, why in (({"UserName": "root"}, "UserName"), ({"UserName": "0"}, "UserName"), ({"UserName": ""}, "UserName"),
                           ({"UserName": "someone-else"}, "UserName"), ({"StandardOutPath": "/tmp/x"}, "StandardOutPath"),
-                          ({"StandardErrorPath": "/tmp/x"}, "StandardErrorPath"), ({"Label": "dev.other"}, "Label")):
+                          ({"StandardErrorPath": "/tmp/x"}, "StandardErrorPath"), ({"Label": "dev.other"}, "Label"),
+                          ({"GroupName": "wheel"}, "GroupName"), ({"GroupName": ""}, "GroupName"),
+                          ({"InitGroups": False}, "InitGroups"), ({"Sockets": {"a": {"SockServiceName": "22"}}}, "Sockets"),
+                          ({"MachServices": {"x": True}}, "MachServices"), ({"Umask": 0}, "Umask"), ({"Program": "/tmp/evil"}, "Program"),
+                          ({"Label Nice": 1}, "Label Nice"), ({"Weird<Key": 1}, "Weird")):
             with self.subTest(over):
                 self.put("render-override", json.dumps(over))
                 self.assert_never_loaded(self.run_script("install"), why)
                 os.remove(os.path.join(self.state, "render-override"))
                 os.remove(self.log)
+
+    def test_every_allowed_key_passes_the_installed_check(self):
+        """covers: DAEMON-13"""
+        with open(self.agent, "rb") as f:
+            data = plistlib.load(f)
+        data.update(ProcessType="Background", SoftResourceLimits={"NumberOfFiles": 4096}, HardResourceLimits={"NumberOfFiles": 8192}, Nice=5)
+        with open(self.agent, "wb") as f:
+            plistlib.dump(data, f)
+        self.original = self.read(self.agent)
+        r = self.run_script("install")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        d = self.assert_daemon_mode()
+        self.assertEqual(d["Nice"], 5)
+        self.assertEqual(d["SoftResourceLimits"], {"NumberOfFiles": 4096})
+
+    def test_the_script_allows_the_same_keys_as_the_renderer(self):
+        """covers: DAEMON-13"""
+        with open(SCRIPT, encoding="utf-8") as f:
+            source = f.read()
+        allowed = set()
+        for line in re.findall(r"^\s+((?:\w+\|)+\w+)\) ;;$", source, re.M):
+            allowed.update(line.split("|"))
+        self.assertEqual(allowed, macos_daemon.KEEP | {"UserName", "GroupName", "InitGroups", "StandardOutPath", "StandardErrorPath"})
 
     def test_an_agent_that_will_not_stop_stays_as_it_is(self):
         """covers: DAEMON-4"""
