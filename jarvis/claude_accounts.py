@@ -379,7 +379,7 @@ def _store_read():
         cached = cache.get("accounts", {}) if isinstance(cache, dict) and cache.get("schemaVersion") == 2 else {}
         if not isinstance(accounts, dict) or not isinstance(sequence, list) or not isinstance(cached, dict):
             return None
-        result, ids = [], {}
+        result, ids, orgs = [], {}, {}
         for number in sequence:
             if not isinstance(number, int) or isinstance(number, bool) or number <= 0:
                 continue
@@ -406,8 +406,11 @@ def _store_read():
                          "usage": usage, "usageFetchedAt": fetched, "lastGoodUsage": usage, "lastGoodFetchedAt": fetched}, "cswap-cache")
             # 화면은 이메일+조직 이름으로 같은 계정을 묶는다. Orca 경로와 같은 규칙으로 개인 조직("<email>'s Organization")은 None
             result.append({**a, "org": org(a["org"], a["label"])})
+            org_uuid = _identity(None, ident.get("organizationUuid"))[1]
+            if org_uuid:  # hswap 은 조직 이름을 등록할 때만 저장한다: added 가 그 이름의 시점이다
+                orgs[str(number)] = {"org": result[-1]["org"], "org_key": hashlib.sha256(org_uuid.encode("utf-8", "replace")).hexdigest(), "org_at": _sec(ident.get("added"))}
         # signed_in: 로그인을 읽었다. 그런데 active 인 행이 없으면 지금 로그인은 어느 저장 슬롯과도 맞지 않는다
-        return {"accounts": result, "signed_in": identity is not None, "ids": ids} if result else None
+        return {"accounts": result, "signed_in": identity is not None, "ids": ids, "orgs": orgs} if result else None
     except (OSError, ValueError, TypeError, OverflowError, RecursionError):
         return None
 
@@ -528,6 +531,12 @@ def _mark_dead(rows, store, ids):
     return [mark(a) for a in rows]
 
 
+def _org_id(a, ids, store):
+    """core 가 기기 사이에서 같은 조직을 알아볼 값(org_key·org_at)과 그 시각의 이름. 묶어 둔 hswap 답의 이름은 재등록보다 오래됐을 수 있어 이름도 저장소 값을 쓴다.
+    슬롯과 신원이 저장소와 같은 행에만 붙고, core 가 키와 시각을 지운 뒤 화면으로 보낸다(USAGE-1)."""
+    return store.get("orgs", {}).get(a.get("slot"), {}) if store and _same_login(a, ids, store) else {}
+
+
 def _aged(a, why=None):
     """값이 있는 계정에 대체 이유와 신선도를 붙인다. hswap 묶음이 들고 있는 dict 는 고치지 않는다."""
     if not (a.get("windows") or a.get("buckets")):
@@ -603,14 +612,14 @@ def _read(force, install, deadline, give_up=False):
         rows = _mark_dead([{**a, "org": org(a.get("org"), a.get("label"))} for a in _mark_current(rows, store, ids)], store, ids)
         why = None
     elif store:
-        rows = store["accounts"]
+        rows, ids = store["accounts"], store.get("ids", {})
         reason = (out or {}).get("error") or ("hswap 이 없습니다" if not binary() else "hswap 이 계정을 주지 않았습니다")
         why = reason.rstrip(".") + ". 저장된 값을 보입니다."
     else:
         state = login((), _keychain_down(), fatal=_fatal_kind())
         return ({**(out or {}), "accounts": [], "login": state} if state else out), settled
     state = login(rows, _keychain_down(), bool(store and store.get("signed_in")), _fatal_kind())
-    result = {"accounts": [_aged(a, why) for a in rows]}
+    result = {"accounts": [{**_aged(a, why), **_org_id(a, ids, store)} for a in rows]}
     if (out or {}).get("fetched_at"):
         result["fetched_at"] = out["fetched_at"]
     return ({**result, "login": state} if state else result), settled

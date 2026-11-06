@@ -217,6 +217,48 @@ class SameRulesTest(StoreCase):
             self.assertEqual([b["name"] for b in a["buckets"]], ["Opus", "모델별 한도 2"])
         self.assertNotIn("private-name", json.dumps([cached, real]))
 
+    def test_org_key_is_the_same_on_both_adapters_and_hides_the_uuid(self):
+        """covers: USAGE-1, USAGE-6. 조직 계정은 이름이 달라도 같은 키와 등록 시각을 core 에 주고, 개인 계정과 UUID 원문은 내보내지 않는다"""
+        self.write("sequence.json", {"sequence": [1, 2], "accounts": {
+            "1": {"email": "a@example.com", "organizationUuid": " O1 ", "organizationName": "케이골프", "added": "2026-11-05T09:34:05Z"},
+            "2": {"email": "b@example.com", "organizationUuid": "", "organizationName": "b@example.com's Organization", "added": "2026-11-05T09:34:05Z"}}})
+        at = claude_accounts.parse_iso("2026-11-05T09:34:05Z")
+        key = claude_accounts._store_read()["orgs"]["1"]["org_key"]
+        stored = claude_accounts.read()["accounts"]
+        self.assertEqual((stored[0]["org_key"], stored[0]["org_at"]), (key, at))
+        self.assertNotIn("org_key", stored[1])
+        claude_accounts._cache = None
+        self.hswap(hswap_row(organizationUuid="o1", organizationName="K-Golf"))
+        live = claude_accounts.read(force=True)["accounts"][0]
+        self.assertEqual((live["org"], live["org_key"], live["org_at"]), ("케이골프", key, at))  # 이름과 시각은 같은 저장소 읽기의 값이다
+        self.assertNotIn("o1", [v for a in (*stored, live) for v in a.values()])
+
+    def test_re_registered_name_is_not_paired_with_a_held_old_name(self):
+        """covers: USAGE-1. 묶어 둔 hswap 답의 옛 이름이 재등록의 새 시각과 짝지어져 core 에 고정되지 않는다"""
+        seq = lambda name, added: {"sequence": [1], "accounts": {"1": {"email": "a@example.com", "organizationUuid": "o1", "organizationName": name, "added": added}}}
+        self.write("sequence.json", seq("케이골프", "2026-11-02T00:00:00Z"))
+        call = self.hswap(hswap_row(organizationName="케이골프"))
+        self.assertEqual(claude_accounts.read()["accounts"][0]["org"], "케이골프")
+        self.write("sequence.json", seq("K-Golf", "2026-11-05T00:00:00Z"))
+        row = claude_accounts.read()["accounts"][0]
+        self.assertEqual(call.call_count, 1)  # hswap 에 다시 묻지 않고 묶음을 그대로 썼다
+        self.assertEqual((row["org"], row["org_at"]), ("K-Golf", claude_accounts.parse_iso("2026-11-05T00:00:00Z")))
+
+    def test_org_key_only_goes_on_a_row_whose_slot_is_the_same_account(self):
+        """covers: USAGE-1. 슬롯 번호만 같은 다른 계정의 행은 저장소의 조직 키와 이름을 받지 않는다"""
+        self.store(time.time() - 60)
+        self.hswap(hswap_row(organizationUuid="other", organizationName="Other"))
+        row = claude_accounts.read(force=True)["accounts"][0]
+        self.assertEqual(row["org"], "Other")
+        self.assertNotIn("org_key", row)
+
+    def test_default_named_org_still_sends_its_key(self):
+        """covers: USAGE-1. 이름이 기본값이라 화면에 안 보이는 조직도 개명한 기기와 묶이도록 키를 준다"""
+        self.write("sequence.json", {"sequence": [1], "accounts": {"1": {"email": "a@example.com", "organizationUuid": "o1", "organizationName": "a@example.com's Organization"}}})
+        row = claude_accounts.read()["accounts"][0]
+        self.assertIsNone(row["org"])
+        self.assertIn("org_key", row)
+
     def test_active_follows_the_real_login_on_both_adapters(self):
         """covers: USAGE-6. hswap 의 active 가 어긋나도 실제 로그인과 같은 슬롯이 사용 중이다. 로그인을 읽지 못하면 hswap 값"""
         self.store(time.time() - 60)

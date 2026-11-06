@@ -267,6 +267,7 @@ class Core:
         self.devices = {d["id"]: d for d in devices}
         self.state = {i: {"ok_at": None, "error": None, "fails": 0, "summary": None, "snap": None} for i in self.devices}
         self.lock = threading.Lock()
+        self.org_names = {}  # org_key → (등록 시각, 이름). 기기 하나만 새로고침해도 같은 이름을 보이려고 들고 있다
         self.pool = ThreadPoolExecutor(max_workers=max(1, min(16, len(devices))), thread_name_prefix="jarvis-core")
         self._stop = threading.Event()
         self._busy = set()  # 지난 주기의 요청이 아직 끝나지 않은 기기(느린 기기가 다른 기기의 주기를 늦추지 않게)
@@ -487,7 +488,32 @@ class Core:
         return out + [one(i) for i in self.devices if i in mine]
 
     def usage(self, i, force=False, independent=False):
-        """AI 구독 사용량: 그 게이트웨이 GET /api/orca/usage. 모아 두지 않는다(계정 이메일이 들어 있다)."""
+        """AI 구독 사용량 한 기기: 화면으로 보내는 값이다."""
+        code, body = self._usage(i, force, independent)
+        self._same_org_names([body])
+        return code, body
+
+    def _same_org_names(self, bodies):
+        """같은 조직(org_key)의 이름을 가장 늦게 등록된 슬롯의 것으로 맞춘다: hswap 은 이름을 등록할 때만 저장해 개명 뒤 기기마다 다르다.
+        org_key·org_at 은 여기서 지워 화면으로 내보내지 않는다(USAGE-1)."""
+        items = lambda v: v if isinstance(v, list) else []
+        rows = [a for b in bodies if isinstance(b, dict) for p in items(b.get("providers")) if isinstance(p, dict)
+                for a in items(p.get("accounts")) if isinstance(a, dict)]
+        with self.lock:
+            for a in rows:
+                key, at, name = a.get("org_key"), a.get("org_at"), a.get("org")
+                if isinstance(key, str) and isinstance(name, str):
+                    seen = (at if isinstance(at, (int, float)) and not isinstance(at, bool) and 0 <= at < 1e11 else 0, name)
+                    if key not in self.org_names or seen > self.org_names[key]:
+                        self.org_names[key] = seen
+            for a in rows:
+                key = a.pop("org_key", None)
+                a.pop("org_at", None)
+                if isinstance(key, str) and key in self.org_names:
+                    a["org"] = self.org_names[key][1]
+
+    def _usage(self, i, force=False, independent=False):
+        """그 게이트웨이 GET /api/orca/usage. 모아 두지 않는다(계정 이메일이 들어 있다)."""
         path = "/api/usage/independent" if independent else "/api/orca/usage"
         req = urllib.request.Request(self.devices[i]["url"] + path + ("?refresh=1" if force else ""))
         return self._ask(i, req, USAGE_TIMEOUT_S, "사용량 조회를")
@@ -518,11 +544,13 @@ class Core:
                 host = (self.state[i]["summary"] or {}).get("host")
                 err = self.state[i]["fails"] and self.state[i]["error"]
             # 폴링이 실패 중인 기기(꺼진 tailnet 피어)는 묻지 않는다. 물으면 70초를 기다려 섹션 전체가 늦게 뜬다
-            code, body = (502, {"error": f"{i} 에 닿지 못했습니다: {err}"}) if err else self.usage(i, force, independent)
+            code, body = (502, {"error": f"{i} 에 닿지 못했습니다: {err}"}) if err else self._usage(i, force, independent)
             return {**(body if isinstance(body, dict) else {"error": str(body)}), "id": i, "host": host, "status": code}
 
         with ThreadPoolExecutor(max_workers=max(1, min(16, len(ids)))) as pool:
-            return {"generated_at": time.time(), "devices": list(pool.map(one, ids))}
+            devices = list(pool.map(one, ids))
+        self._same_org_names(devices)
+        return {"generated_at": time.time(), "devices": devices}
 
     def orca_update_all(self):
         """기기마다 업데이트를 시작한다. 한 대 실패가 나머지를 멈추지 않는다."""

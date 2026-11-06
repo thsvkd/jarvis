@@ -114,6 +114,27 @@ class CoreTest(unittest.TestCase):
         self.assertEqual(code, 501)
         self.assertIn("갱신 필요", body["error"])
 
+    def test_same_org_shows_the_newest_name_and_hides_the_key(self):
+        """covers: USAGE-1. 기기마다 저장된 이름이 달라도 같은 조직은 가장 늦게 등록된 이름 하나로 보이고, 키는 화면으로 나가지 않는다"""
+        row = lambda org, key, at: {"label": "a@example.com", "org": org, "org_key": key, "org_at": at}
+        body = lambda *accounts: {"providers": [{"id": "claude", "accounts": list(accounts)}]}
+        old, new, other, malformed = row("케이골프", "k1", 100), row("K-Golf", "k1", 200), row("Team", "k2", 50), row("Odd", ["x"], "y")
+        self.core._same_org_names([body(old, other, malformed), body(new), "실패 응답", {"providers": "이상한 값"}])
+        self.assertEqual([old["org"], new["org"], other["org"], malformed["org"]], ["K-Golf", "K-Golf", "Team", "Odd"])
+        self.assertEqual({"org_key", "org_at"} & {k for a in (old, new, other, malformed) for k in a}, set())
+        # 기본 이름이라 org 가 없는 기기도 같은 조직이면 이름을 받고, 범위를 벗어나거나 형식이 틀린 시각은 0 으로 본다
+        unnamed, bad, good = row(None, "k1", 50), row("Bad", "k3", float("nan")), row("Good", "k3", 10)
+        self.core._same_org_names([body(bad, unnamed), body(good, row("Text", "k3", "y"), row("Huge", "k3", 1e308))])
+        self.assertEqual([unnamed["org"], bad["org"], good["org"]], ["K-Golf", "Good", "Good"])
+        # 옛 이름을 가진 기기만 새로고침해도 앞서 본 새 이름을 쓴다
+        Gateway.routes["/api/orca/usage"] = (200, json.dumps(body(row("케이골프", "k1", 100))).encode(), False)
+        self.assertEqual(self.core.usage("gw")[1], body({"label": "a@example.com", "org": "K-Golf"}))
+        rows = {r["id"]: r for r in self.core.usage_all()["devices"]}
+        self.assertEqual(rows["gw"]["providers"][0]["accounts"], [{"label": "a@example.com", "org": "K-Golf"}])
+        # 갱신 전 게이트웨이(키 없음)는 그대로 지나간다
+        self.core._same_org_names([plain := body({"label": "a@example.com", "org": "케이골프"})])
+        self.assertEqual(plain["providers"][0]["accounts"][0]["org"], "케이골프")
+
     def test_independent_usage_uses_only_independent_gateway(self):
         """covers: USAGE-3"""
         Gateway.routes["/api/usage/independent"] = (200, b'{"mode":"independent","providers":[]}', False)
