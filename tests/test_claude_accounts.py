@@ -447,7 +447,67 @@ class LoginStateTest(StoreCase):
     def test_every_allowed_type_has_a_fixed_text(self):
         """covers: USAGE-7"""
         self.assertEqual(set(claude_accounts.KEEPALIVE_ERRORS),
-                         {"keychain_unavailable", "relogin_required", "split_brain", "refresh_failed", "no_credentials", "locked", "unmanaged"})
+                         {"keychain_unavailable", "relogin_required", "split_brain", "refresh_failed", "no_credentials", "locked", "unmanaged",
+                          "keychain_item_present", "config_conflict"})
+
+    def test_ok_shows_the_file_store(self):
+        """covers: USAGE-7"""
+        self.keepalive(store="file", keychainItemPresent=False)
+        s = claude_accounts.login()
+        self.assertEqual((s["state"], s["attention"], s["store"]), ("ok", False, "file"))
+        self.assertTrue(s["text"].startswith("로그인됨 · 파일 저장소, 자동 갱신 "), s["text"])
+
+    def test_old_record_and_other_stores_read_as_before(self):
+        """covers: USAGE-7. store 가 없는 옛 형식과 auto·keychain 은 키체인 경고를 그대로 보이고 저장소를 표시하지 않는다"""
+        for extra in ({}, {"store": "auto"}, {"store": "keychain"}, {"store": ["file"]}):
+            self.keepalive(**extra)
+            s = claude_accounts.login()
+            self.assertEqual((s["state"], s["store"]), ("ok", None), extra)
+            self.assertTrue(s["text"].startswith("로그인됨, 자동 갱신 "), extra)
+            self.assertEqual(claude_accounts.login(keychain=True)["state"], "keychain", extra)
+            self.keepalive(**extra, ok=False, error={"type": "keychain_unavailable"})
+            self.assertEqual(claude_accounts.login()["state"], "keychain", extra)
+
+    def test_file_store_ignores_an_unreachable_keychain(self):
+        """covers: USAGE-7. hswap list 의 keychainUnavailable 과 keepalive 의 같은 오류 모두 파일 저장소에서는 주의가 아니다"""
+        self.keepalive(store="file", keychainItemPresent=False)
+        self.store(time.time() - 60)
+        self.hswap(hswap_row(), keychainUnavailable=True)
+        out = claude_accounts.read(force=True)
+        self.assertEqual((out["login"]["state"], out["login"]["attention"]), ("ok", False))
+        self.assertNotIn("키체인", out["login"]["text"])
+        self.keepalive(store="file", ok=False, error={"type": "keychain_unavailable", "message": "m"})
+        s = claude_accounts.login()
+        self.assertEqual((s["state"], s["attention"], s["store"]), ("ok", False, "file"))
+        # 다른 실패는 파일 저장소에서도 그대로 실패다
+        self.keepalive(store="file", ok=False, error={"type": "refresh_failed"})
+        self.assertEqual(claude_accounts.login()["text"], "자동 갱신 실패(토큰 갱신 실패)")
+
+    def test_file_store_stops_are_reported_with_fixed_text(self):
+        """covers: USAGE-7. 이전 계정의 기록이어도, 만료 임박이어도, 사용 중 계정이 재로그인 필요여도 기기의 사실이 먼저다"""
+        relogin = [{"active": True, "slot": "2", "note": claude_accounts.STATUS["relogin_required"][0]}]
+        for kind, want in (("keychain_item_present", "키체인에 Claude 로그인이 다시 생겨 자동 갱신을 멈췄습니다"),
+                           ("config_conflict", "hswap 설정 충돌(파일 저장소와 키체인 필수 모드)")):
+            self.keepalive(store="file", ok=False, error={"type": kind, "message": "x" * 500}, loginExpiresAt=iso(time.time() + 3600))
+            for rows in ((), relogin):
+                s = claude_accounts.login(rows, signed_in=True)
+                self.assertEqual((s["state"], s["text"], s["attention"], s["store"]), (kind, want, True, "file"), kind)
+            self.assertEqual(claude_accounts.STATUS[kind], (want + ".", True))
+            self.keepalive(ok=False, error={"type": kind})  # store 가 없는 기록에서도 같은 오류다
+            self.assertEqual((claude_accounts.login()["state"], claude_accounts.login()["store"]), (kind, None))
+        # 오류 없이 항목만 보고돼도 파일 저장소면 멈춤으로 보인다. 다른 저장소의 값은 뜻이 없다
+        self.keepalive(store="file", keychainItemPresent=True)
+        self.assertEqual(claude_accounts.login()["state"], "keychain_item_present")
+        self.keepalive(store="auto", keychainItemPresent=True)
+        self.assertEqual(claude_accounts.login()["state"], "ok")
+        self.keepalive(store="file", keychainItemPresent="true")
+        self.assertEqual(claude_accounts.login()["state"], "ok")
+
+    def test_keychain_item_status_on_a_row_needs_a_person(self):
+        """covers: USAGE-7"""
+        for kind in ("keychain_item_present", "config_conflict"):
+            a = claude_accounts.account(hswap_row(usageStatus=kind, usage=None))
+            self.assertEqual((a["status"], a["error"], a["attention"]), ("error", claude_accounts.STATUS[kind][0], True))
 
     def test_unknown_when_the_file_is_missing(self):
         """covers: USAGE-7. keepalive 를 쓰지 않는 기기에는 경고하지 않는다"""
@@ -488,10 +548,10 @@ class LoginStateTest(StoreCase):
         secrets = ("123e4567-e89b-12d3-a456-426614174000", "Authorization: Bearer abc.def", "sk-ant-oat01-SECRET", "/home/alice/.claude", "C:\\Users\\alice\\x", "\ud800")
         leak = " ".join(secrets)
         self.store(time.time() - 60)
-        kinds = ("split_brain", "refresh_failed", "no_credentials", "locked", "unmanaged", "relogin_required", "keychain_unavailable", leak)
+        kinds = ("split_brain", "refresh_failed", "no_credentials", "locked", "unmanaged", "relogin_required", "keychain_unavailable", "keychain_item_present", "config_conflict", leak)
         for kind in kinds:
             for slot in (1, 2):  # 지금 로그인의 기록과 이전 계정의 기록 모두
-                self.write("cache/keepalive.json", json.dumps({"schemaVersion": 1, "checkedAt": time.time(), "ok": False, "action": leak, "note": leak, "activeSlot": slot,
+                self.write("cache/keepalive.json", json.dumps({"schemaVersion": 1, "checkedAt": time.time(), "ok": False, "action": leak, "note": leak, "store": leak, "activeSlot": slot,
                                                                "error": {"type": kind, "message": leak, "detail": leak}, "extra": leak}))
                 self.hswap(hswap_row(usageStatus="unavailable", usage=None, usageError=leak, lastGoodUsage={"sevenDay": {"pct": 1}}, lastGoodFetchedAt=iso(time.time() - 60)))
                 claude_accounts._cache = None

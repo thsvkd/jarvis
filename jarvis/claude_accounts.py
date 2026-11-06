@@ -32,7 +32,8 @@ CONFIG_MAX = 32 << 20  # Claude Code 전역 설정은 프로젝트 기록이 쌓
 KNOWN_BUCKETS = {"opus", "sonnet", "haiku"}  # 첫 단어가 이것인 이름만 그대로 내보낸다. 나머지는 번호로 적는다
 # keepalive error.type → 화면 문구. 파일의 자유 문구(error.message)는 토큰·조직 UUID 가 들어 있어도 새지 않게 내보내지 않는다
 KEEPALIVE_ERRORS = {"keychain_unavailable": "키체인 접근 불가", "relogin_required": "재로그인 필요", "split_brain": "키체인과 파일의 로그인이 갈라짐",
-                    "refresh_failed": "토큰 갱신 실패", "no_credentials": "자격 증명 없음", "locked": "다른 프로세스가 잠금을 쥐고 있음", "unmanaged": "저장 슬롯에 없는 로그인"}
+                    "refresh_failed": "토큰 갱신 실패", "no_credentials": "자격 증명 없음", "locked": "다른 프로세스가 잠금을 쥐고 있음", "unmanaged": "저장 슬롯에 없는 로그인",
+                    "keychain_item_present": "키체인에 Claude 로그인이 다시 생겨 자동 갱신을 멈췄습니다", "config_conflict": "hswap 설정 충돌(파일 저장소와 키체인 필수 모드)"}
 LOGIN_WARN_S = 3 * 86400  # 로그인(갱신 토큰) 만료 3일 전부터 '주의 필요'. 새 /login 만이 기한을 늘린다
 CACHE_S = 30  # hswap 자체가 캐시하므로 짧게만 묶는다(요청마다 프로세스를 띄우지 않게)
 READ_BUDGET_S = 40  # 읽기 한 번의 전체 시한. 재시도의 잠금 대기와 hswap 호출이 함께 쓴다. 수집기의 대기(독립 55초, 호환 60초)보다 짧아야 한다
@@ -44,6 +45,8 @@ STATUS = {
     # hswap 은 죽은 갱신 토큰을 슬롯 백업 기준으로 격리한다. Claude Code 에서 다시 로그인만 하면 격리가 남는다
     "relogin_required": ("다시 로그인해야 합니다: 그 계정으로 Claude Code 에서 /login 한 뒤 hswap claude add 를 실행하세요.", True),
     "keychain_unavailable": ("Keychain 을 읽지 못했습니다.", True),
+    "keychain_item_present": ("키체인에 Claude 로그인이 다시 생겨 자동 갱신을 멈췄습니다.", True),
+    "config_conflict": ("hswap 설정 충돌(파일 저장소와 키체인 필수 모드).", True),
     "foreign_credential": ("지금 로그인이 다른 계정입니다. hswap claude switch 로 맞추세요.", True),
     "no_credentials": ("자격 증명이 없습니다.", True),
     "no_saved_usage": ("저장된 사용량이 없습니다.", False),  # 저장소 캐시 어댑터만 쓴다
@@ -407,8 +410,9 @@ def _is_relogin(a):
 
 
 def login(rows=(), keychain=False, signed_in=False):
-    """기기 단위 로그인 상태 {state, text, note, attention, slot, other}. 알릴 것이 없으면 None(keepalive.json 이 없으면 이 기능을 쓰지 않는 기기다).
-    순서: 사람이 다시 로그인해야 하는 것 > 키체인 > 만료 임박 > 멈춤 > 이전 계정의 기록 > 그 밖의 실패 > 정상.
+    """기기 단위 로그인 상태 {state, text, note, attention, slot, other, store}. 알릴 것이 없으면 None(keepalive.json 이 없으면 이 기능을 쓰지 않는 기기다).
+    순서: 설정 충돌·키체인 항목 재생성 > 사람이 다시 로그인해야 하는 것 > 키체인 > 만료 임박 > 멈춤 > 이전 계정의 기록 > 그 밖의 실패 > 정상.
+    store: 파일 저장소 기기면 "file", 아니면 None(옛 형식 포함). 파일의 다른 값은 내보내지 않는다. 키체인을 쓰지 않는 기기라 키체인에 닿지 못하는 것은 문제가 아니다.
     rows: 사용 중 계정의 재로그인 판정(저장소의 authDeadStrikes 와 hswap 의 relogin_required 가 같은 문구가 된다)과 사용 중 슬롯.
     keychain: hswap 의 keychainUnavailable. signed_in: 로그인을 읽었다(rows 에 active 가 없으면 저장되지 않은 로그인이다).
     other: keepalive 기록의 activeSlot 이 지금 로그인의 슬롯과 다르다고 확인됐다. 만료·오류·접근 토큰은 그 계정의 사실이라 쓰지 않고, 키체인·멈춤·자격 부재는 기기의 사실이라 그대로 쓴다.
@@ -423,9 +427,13 @@ def login(rows=(), keychain=False, signed_in=False):
     recorded = str(recorded) if isinstance(recorded, int) and not isinstance(recorded, bool) and recorded > 0 else None
     # 사용 중 슬롯을 모르고 저장되지 않은 로그인도 아니면 맞는지 알 수 없다: 경고는 남기고 슬롯만 권하지 않는다
     other = recorded is not None and bool(current or signed_in) and current != recorded
-    if (kind == "relogin_required" and not other) or any(a.get("active") and _is_relogin(a) for a in rows):
+    file_store = k.get("store") == "file"
+    blocked = kind if kind in ("config_conflict", "keychain_item_present") else "keychain_item_present" if file_store and k.get("keychainItemPresent") is True else None
+    if blocked:  # 기기의 사실이다. 항목이 남아 있으면 SSH 의 /login 이 저장되지 않을 수 있어 재로그인보다 먼저 보인다
+        state, text = blocked, KEEPALIVE_ERRORS[blocked]
+    elif (kind == "relogin_required" and not other) or any(a.get("active") and _is_relogin(a) for a in rows):
         state, text = "relogin", "재로그인 필요"
-    elif kind == "keychain_unavailable" or keychain:
+    elif not file_store and (kind == "keychain_unavailable" or keychain):
         state, text = "keychain", "키체인 접근 불가: 키체인에 접근할 수 없는 곳에서 실행됨"
     elif not k:
         return None
@@ -435,12 +443,13 @@ def login(rows=(), keychain=False, signed_in=False):
         state, text = "stalled", "자동 갱신 멈춤" + (f"(마지막 {_span(now - checked)} 전)" if checked else "")
     elif other and kind != "no_credentials":  # 자격 부재는 add 로 고칠 수 없어 /login 안내로 이어지는 실패로 둔다
         state, text = "other_account", "자동 갱신 기록이 이전 계정의 것입니다"
-    elif k.get("ok") is not True:
+    elif k.get("ok") is not True and not (file_store and kind == "keychain_unavailable"):
         state, text = "failed", f"자동 갱신 실패({KEEPALIVE_ERRORS.get(kind, '알 수 없는 오류')})"
     else:
-        state, text = "ok", f"로그인됨, 자동 갱신 {_span(now - checked)} 전"
+        state, text = "ok", f"로그인됨{' · 파일 저장소' if file_store else ''}, 자동 갱신 {_span(now - checked)} 전"
     access = None if other else _sec(k.get("accessExpiresAt"))
     return {"state": state, "text": text, "attention": state != "ok", "slot": current if not k or current == recorded else None, "other": other,
+            "store": "file" if file_store else None,
             "note": None if access is None else f"접근 토큰 {_span(access - now)} 뒤 만료(자동 갱신)" if access > now else "접근 토큰 만료됨(자동 갱신 대기)"}
 
 
