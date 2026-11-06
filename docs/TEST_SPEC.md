@@ -1,6 +1,6 @@
 # TEST_SPEC
 
-> 상태: 확정(2026-10-30 사용자 확인 K1, ORCA-8 은 사용자 결정으로 고침, Windows 갱신 방식 K4·K10 은 5라운드). 셋업·하네스 갱신·AGENTS.md 절과 BOOT-2·3 은 2026-11-01 사용자가 확정했다. 실행본 이전 절(RELOC)과 CORE-8 의 `relocate` 는 2026-11-05 손팡님 A안으로 더했다. 목록의 추가·수정·삭제는 사용자만 닫는다.
+> 상태: 확정(2026-10-30 사용자 확인 K1, ORCA-8 은 사용자 결정으로 고침, Windows 갱신 방식 K4·K10 은 5라운드). 셋업·하네스 갱신·AGENTS.md 절과 BOOT-2·3 은 2026-11-01 사용자가 확정했다. 실행본 이전 절(RELOC)과 CORE-8 의 `relocate` 는 2026-11-05 손팡님 A안으로 더했다. macOS LaunchDaemon 절(DAEMON)은 2026-11-06 작업 승인으로 더했다. 목록의 추가·수정·삭제는 사용자만 닫는다.
 > 모든 케이스는 격리된 임시 HOME 과 대체한 명령으로 검증한다. 실제 사용자 홈, 실제 Orca 서비스, 실제 설치기, 실제 페어링은 쓰지 않는다.
 > 테스트는 docstring·주석에 `covers: ORCA-n` 을 적는다. ai-setup 에서 옮긴 테스트는 괄호 안에 원래 ID(AI-n)를 남긴다.
 
@@ -68,6 +68,22 @@
 | RELOC-10 | WHEN 옛 배치(.git 없는 실행본)로 등록된 기기에서 설치기를 다시 실행하면 THE SYSTEM SHALL 새 릴리스를 app 에 풀지 않고 임시 폴더에 받은 새 코드로 relocate 를 불러 옛 base 를 app 으로 옮기며(app 의 판은 옛 base 와 같다), 자동 이전 뒤(app = relocate 없는 옛 base) 다시 실행해도 ModuleNotFoundError 없이 이어서 정리한다. macOS 에서 `pending_reload` 이면 LaunchAgent 를 bootout·bootstrap(실패하면 다시 시도) 한 뒤 다시 불러 옛 폴더를 옮긴다. Linux 는 이번 실행이 유닛을 바꿨고 `registered` 일 때만 `systemctl --user try-restart jarvis` 와 health 대기 뒤 relocate 를 다시 부르고, 이전이 없는 재실행은 다시 띄우지 않는다. 새 설치는 받은 릴리스의 템플릿이 옛 작업 폴더를 적어도(1.8.0 릴리스 전) plist·유닛의 작업 폴더를 app 으로 쓴다 | `tests/test_install_sh.py` | 부분 (macOS 단위 GREEN; Linux 이전 케이스는 Linux 에서만 돈다. install.ps1 은 pwsh 가 없어 미검증) |
 | RELOC-11 | WHEN 다른 프로세스가 `ROOT/.relocate.lock` 을 쥐고 있으면 THE SYSTEM SHALL 기다리지 않고 `busy` 로 끝나며 파일·등록을 바꾸지 않고 외부 명령도 부르지 않는다 | `tests/test_relocate.py` | GREEN (단위; Windows `msvcrt.locking` 미검증) |
 | RELOC-12 | WHEN Windows 에서 관리자 토큰이 아닌 프로세스(RunLevel Limited 게이트웨이)가 relocate 를 부르면 THE SYSTEM SHALL PowerShell·잠금·복사·파일 쓰기 없이 `noop` 과 관리자 셸에서 install.ps1 재실행 또는 `python -m jarvis relocate` 를 하라는 안내를 내고, dry-run 도 같다 | `tests/test_relocate.py` | GREEN (단위; 실제 Windows 에서 Limited 권한의 Set-ScheduledTask 거부 0x80070005 를 확인했다) |
+
+## macOS LaunchDaemon
+
+| ID | 케이스 | 테스트 | 상태 |
+| --- | --- | --- | --- |
+| DAEMON-1 | WHEN `python -m jarvis.macos_daemon render` 가 LaunchAgent plist 를 받으면 THE SYSTEM SHALL ProgramArguments·WorkingDirectory·EnvironmentVariables 등 사용자가 고친 값을 보존하면서 UserName·GroupName·InitGroups·HOME·USER·LOGNAME(LANG 이 없으면 `en_US.UTF-8`)을 더하고 `JARVIS_TRAY` 를 빼며 StandardOut/Err 를 `/dev/null`, RunAtLoad·KeepAlive 를 true 로 두고, 명령을 사용자 권한에서 `~/Library/Logs/jarvis.log` 에 덧붙이는 셸 래퍼로 감싼다. 래퍼는 exec 이라 최종 명령줄은 `<python> -m jarvis` 로 끝난다. 비밀로 보이는 환경 변수 이름이 있으면 렌더를 거절한다 | `tests/test_macos_daemon.py` | GREEN (단위) |
+| DAEMON-2 | WHEN 에이전트 plist 가 LaunchAgents 에도 옮겨 둔 자리에도 없으면 THE SYSTEM SHALL `deploy/jarvis.plist` 를 install.sh 와 같은 치환으로 쓴 것을 렌더 기준으로 삼는다. 포트는 plist 의 `JARVIS_PORT`, 설정 파일, 기본값 순으로 읽는다 | `tests/test_macos_daemon.py` | GREEN (단위) |
+| DAEMON-3 | WHEN 사용자가 `deploy/macos-daemon.sh install` 을 실행하면 THE SYSTEM SHALL sudo 를 `sudo -v` 로 한 번만 묻고 LaunchAgent bootout, 포트가 풀릴 때까지 대기, `/Library/LaunchDaemons/dev.jarvis.plist` 를 root:wheel 0644 로 설치, `launchctl bootstrap system`(재시도), `state = running` 확인, health 최대 40초, 에이전트 plist 를 LaunchAgents 밖으로 옮기기 순으로 진행한다. GUI 세션 없이도 돈다 | `tests/test_macos_daemon.py` | GREEN (단위; 가짜 launchctl·sudo. 실기기 전환 미검증) |
+| DAEMON-4 | WHEN install 이 sudo 를 얻은 뒤 어느 단계에서든 실패하거나 SIGINT·SIGTERM 을 받으면 THE SYSTEM SHALL daemon bootout·plist 제거, 에이전트 plist 복원, `launchctl bootstrap gui/<uid>` 재시도, health 확인을 하고 결과를 출력한 뒤 0 이 아닌 코드로 끝난다. sudo 가 끊겨 daemon 을 내리지 못하면 에이전트를 띄우지 않고 LaunchAgents 밖에 둔다. SIGHUP 은 무시하고 전환을 끝까지 진행한다. 사전 점검(python·코드·에이전트 plist·`plutil -lint`, 내릴 것이 없는데 포트가 잡혀 있음) 또는 sudo 실패는 아무것도 바꾸지 않고 끝난다 | `tests/test_macos_daemon.py` | GREEN (단위) |
+| DAEMON-5 | WHEN install·uninstall 에 `--dry-run` 을 주면 THE SYSTEM SHALL sudo 를 묻지 않고 파일·서비스를 바꾸지 않으며, 렌더한 plist 와 실행할 명령 목록을 출력한다 | `tests/test_macos_daemon.py` | GREEN (단위) |
+| DAEMON-6 | WHEN 이미 daemon 으로 돌고 렌더 결과가 설치된 plist 와 같으며 에이전트 plist 가 LaunchAgents 에 없으면 THE SYSTEM SHALL install 을 다시 실행해도 아무것도 바꾸지 않는다. 렌더 결과가 다르거나 에이전트 plist 가 남아 있으면 같은 절차로 바꾼다 | `tests/test_macos_daemon.py` | GREEN (단위) |
+| DAEMON-7 | WHEN root 로 실행하거나 macOS 가 아니거나 모르는 인자를 주면 THE SYSTEM SHALL `deploy/macos-daemon.sh` 를 launchctl·sudo 호출 없이 거절한다 | `tests/test_macos_daemon.py` | GREEN (단위) |
+| DAEMON-8 | WHEN `deploy/macos-daemon.sh uninstall` 을 실행하면 THE SYSTEM SHALL 롤백과 같은 절차로 LaunchAgent 로 되돌리고(에이전트 plist 바이트 보존, 되돌릴 plist 가 없으면 아무것도 바꾸지 않는다, GUI 세션이 없어 띄우지 못하면 plist 를 복원하고 0 이 아닌 코드로 알린다), `status` 는 어느 쪽이 로드됐는지와 health 를 보인다 | `tests/test_macos_daemon.py` | GREEN (단위) |
+| DAEMON-9 | WHEN `install.sh --daemon` 을 실행하면 THE SYSTEM SHALL macOS 에서만 받아(Linux 는 아무것도 쓰기 전에 거절) LaunchAgent plist 를 만들되 띄우지 않고 모듈 단계 전에 `deploy/macos-daemon.sh install` 로 넘기며(app 에 스크립트가 없으면 `~/.local/share/jarvis/daemon-src` 에 받은 릴리스의 것), 실패하면 0 이 아닌 코드로 끝난다. 플래그가 없으면 launchctl 호출이 전과 같다. daemon plist 가 있는 기기에서는 플래그가 없어도 에이전트를 만들지 않고 안내하며, 옛 폴더에 코드가 있으면 app 에 릴리스를 풀지 않고, 이전 단계에서도 에이전트를 다시 읽지 않는다 | `tests/test_install_sh.py`, `tests/test_macos_daemon.py` | GREEN (단위) |
+| DAEMON-10 | WHEN 게이트웨이가 시스템 도메인에서 돌면(`launchctl managername` = System) THE SYSTEM SHALL 사용자 작업을 `launchctl print gui/<USER_UID>` 의 services 블록으로 읽고, 그 조회가 실패하면 사용자 작업 없음으로 본다. Aqua 와 managername 실패에서는 `launchctl list` 를 지금처럼 읽는다. 답을 받은 managername 은 다시 묻지 않는다 | `tests/test_parsers.py` | GREEN (단위. 출력 형식은 Mac mini 에서 2026-11-06 실측) |
+| DAEMON-11 | WHEN LaunchAgents 에 plist 가 없고 daemon plist 가 있는 기기에 옛 배치가 있으면 THE SYSTEM SHALL relocate 에서 launchctl 호출·잠금·복사·쓰기 없이 `noop` 과 관리자 권한으로 등록을 고치라는 안내를 낸다(dry-run 도 같다). 에이전트 plist 가 있으면 지금처럼 이전한다 | `tests/test_relocate.py` | GREEN (단위) |
 
 ## core 전환
 

@@ -87,7 +87,7 @@ tests/           파서·플랫폼 층·스냅샷 조립 단위 테스트, tests
 tools/shot.mjs   헤드리스 chromium 스크린샷·콘솔 오류·가로 넘침 검사 (CDP 직접, 의존성 없음)
 tools/check-lab.mjs  디자인 랩 갤러리·3개 시안의 모바일·데스크톱 탐색과 동일 스냅샷 비교 검증
 tools/snapcheck.py  시험 포트로 기동해 /api/snapshot 스키마를 기준선과 비교
-deploy/          systemd 사용자 유닛(Linux)·pm2 ecosystem, launchd plist(macOS), 기기별 설정(s2.toml·pit5.toml·gateway.toml·macstudio.toml)
+deploy/          systemd 사용자 유닛(Linux)·pm2 ecosystem, launchd plist·LaunchDaemon 전환 스크립트(macOS), 기기별 설정(s2.toml·pit5.toml·gateway.toml·macstudio.toml)
 ```
 
 의존성: Python 3.11+(설정 파일을 읽는 tomllib), psutil. 선택: pystray·Pillow(Windows 알림 영역·macOS 메뉴 막대 아이콘, `JARVIS_TRAY=1` 일 때). Linux 에서 쓰면 좋은 것: iproute2(`ip`·`ss`), docker, tailscale, pm2.
@@ -240,7 +240,7 @@ ssh = "kgolf-macmini-m1"   # core 사용자 ~/.ssh/config 의 Host 별칭
   - 별칭과 ProxyJump 를 core 서비스 사용자의 `~/.ssh/config` 에 둔다. macOS 는 `/usr/bin/ssh` 를 쓴다(Homebrew openssh 는 `UseKeychain` 을 거절한다).
   - **점프 호스트 Host 블록에도** `BatchMode yes`·`ConnectTimeout 5`·`ServerAliveInterval 5` 를 둔다. 명령줄 `-o` 는 목적지 홉에만 걸린다.
   - known_hosts 에 점프 호스트와 대상의 호스트 키를 미리 등록한다(대화형 `ssh <별칭> true` 한 번).
-  - core 서비스(LaunchAgent·systemd) 세션에서 passphrase 입력 없이 쓸 수 있는 키(에이전트·키체인)가 있어야 한다. 대화형 셸에서 되더라도 서비스에서는 `Permission denied` 일 수 있다.
+  - core 서비스(LaunchAgent·systemd) 세션에서 passphrase 입력 없이 쓸 수 있는 키(에이전트·키체인)가 있어야 한다. 대화형 셸에서 되더라도 서비스에서는 `Permission denied` 일 수 있다. [LaunchDaemon 모드](#launchdaemon-모드-gui-로그인-없는-mac)에는 에이전트·키체인이 없어 passphrase 없는 키 파일만 쓸 수 있다.
 - 대상 기기
   - sshd 가 명령 실행과 TCP 포워딩을 허용한다. 키를 `permitopen` 전용으로 좁히면 조작이 안 된다.
   - install.sh 배치다: 저장소 `~/.local/share/jarvis/app`(없으면 옛 배치·개발 체크아웃 `~/Workspace/jarvis`), python `~/.local/share/jarvis/venv/bin/python`. 손으로 설치한 기기는 조작이 502(배치 아님)로 끝난다. 대상은 macOS·Linux 이고 jarvis 1.7.8 이상이다(낮으면 501, 그 기기에서 직접 갱신).
@@ -248,6 +248,7 @@ ssh = "kgolf-macmini-m1"   # core 사용자 ~/.ssh/config 의 Host 별칭
 
         plutil -extract KeepAlive raw -o - ~/Library/LaunchAgents/dev.jarvis.plist     # true
         launchctl print gui/$(id -u)/dev.jarvis | grep -m1 'pid ='                      # 스냅샷 monitor.pid 와 같은지
+        # LaunchDaemon 모드는 /Library/LaunchDaemons/dev.jarvis.plist 와 system/dev.jarvis 로 확인한다
 
 절차:
 
@@ -341,6 +342,35 @@ launchctl kickstart -k gui/$(id -u)/dev.jarvis            # 코드를 고친 뒤
 launchctl bootout gui/$(id -u)/dev.jarvis                 # 잠시 끄기(다음 로그인 또는 bootstrap 까지). 아이콘 메뉴에는 종료가 없다
 # 또는 pm2: ecosystem.config.cjs 의 script 를 /opt/homebrew/bin/python3 로 바꿔 pm2 start, pm2 startup launchd
 ```
+
+### LaunchDaemon 모드 (GUI 로그인 없는 Mac)
+
+기본 LaunchAgent(`gui/<uid>/dev.jarvis`)는 GUI 로그인 세션이 있어야 뜬다. CLI·SSH 로만 쓰고 자동 로그인을 끈 Mac 은 시스템 도메인의 LaunchDaemon(`system/dev.jarvis`, 사용자 권한)으로 돌린다. 선택 사항이고, 플래그를 주지 않으면 지금까지와 같다.
+
+```sh
+# 새 기기는 --core 도 준다. 이미 설치한 기기도 같은 한 줄이다(app 에 스크립트가 없으면 ~/.local/share/jarvis/daemon-src 에 받는다)
+curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh -s -- --daemon
+
+# 스크립트 위치: ~/.local/share/jarvis/app/deploy, 없으면 ~/.local/share/jarvis/daemon-src/deploy(설치가 끝날 때 경로를 출력한다)
+# 사용자로 실행한다. sudo 는 처음에 한 번만 묻는다
+bash deploy/macos-daemon.sh install --dry-run   # 렌더한 plist 와 실행할 명령만 본다(sudo 도 묻지 않는다)
+bash deploy/macos-daemon.sh install             # LaunchAgent → LaunchDaemon
+bash deploy/macos-daemon.sh status              # 어느 쪽이 로드됐는지, health
+bash deploy/macos-daemon.sh uninstall           # LaunchDaemon → LaunchAgent
+```
+
+- `/Library/LaunchDaemons/dev.jarvis.plist` 는 에이전트 plist 를 기준으로 렌더한다(`python -m jarvis.macos_daemon render`). 고친 ProgramArguments·WorkingDirectory·환경 변수는 남고, `UserName`·`GroupName`·`InitGroups`·`HOME`·`USER`·`LOGNAME` 이 더해지며 `KeepAlive`·`RunAtLoad` 는 true 가 된다. 이 파일은 누구나 읽을 수 있으므로 비밀로 보이는 환경 변수 이름이나 인자(TOKEN·SECRET·PASSWORD·`_KEY` 등)가 있으면 렌더를 거절한다. 이름으로만 판별하므로 그 밖의 비밀은 직접 뺀다.
+- 에이전트 plist 는 `~/.local/share/jarvis/dev.jarvis.plist.agent` 로 옮긴다(남겨 두면 다음 GUI 로그인 때 두 번째 jarvis 가 같은 포트를 잡으려 한다). `uninstall` 이 되돌린다.
+- `install` 은 어느 단계에서든 실패하거나 Ctrl-C 로 중단하면 daemon 을 내리고 LaunchAgent 로 되돌린 뒤 0 이 아닌 코드로 끝난다. GUI 세션이 없으면 에이전트는 다음 GUI 로그인 때까지 뜨지 않고, 스크립트가 그렇게 알린다(`uninstall` 도 같다). 렌더 결과가 같으면 다시 실행해도 아무것도 하지 않는다.
+- SSH 연결이 끊겨도 전환은 멈추지 않고 끝까지 돈다(끊긴 뒤에는 sudo 권한이 사라질 수 있어서다). 뒤 단계가 실패했는데 sudo 가 없어 daemon 을 내리지 못하면 에이전트를 띄우지 않고 daemon 을 그대로 둔다. 다시 접속해 `status` 로 확인하고 필요하면 `uninstall` 한다.
+- daemon 으로 등록된 기기에서 `install.sh` 를 플래그 없이 다시 실행해도 LaunchAgent 를 만들지 않는다. [실행본 이전](#실행본-이전-180)은 root 소유 등록을 고칠 수 없어 `noop` 과 안내로 끝난다.
+- **메뉴 막대 아이콘이 없다.** GUI 세션이 없으면 AppKit 이 프로세스를 죽일 수 있어 `JARVIS_TRAY` 를 뺀다.
+- **로그:** `~/Library/Logs/jarvis.log`(LaunchAgent 와 같은 파일). launchd 는 `StandardOutPath` 를 root 로 열 수 있어 둘 다 `/dev/null` 로 두고, 사용자 권한으로 바뀐 뒤 셸이 이 파일에 덧붙인 다음 `<python> -m jarvis` 로 exec 한다.
+- **SSH(core 로 쓸 때):** ssh-agent·키체인이 없다. passphrase 없는 키 파일만 쓸 수 있다.
+- **키체인에 의존하는 도구는 안 될 수 있다.** 파일 저장소를 쓰는 도구는 그대로 돈다.
+- **Orca 서버 모듈은 LaunchAgent(`gui/<uid>`)를 쓴다.** GUI 세션이 없으면 모듈 적용이 실패할 수 있다.
+- **사용자 작업 목록:** 시스템 도메인에서는 `launchctl list` 대신 `launchctl print gui/<uid>` 로 읽고, GUI 세션이 없으면 사용자 작업이 없는 것으로 보인다.
+- **업데이트 버튼:** `KeepAlive=true` 와 사용자 권한이면 그대로 돈다(서비스 정의 조건은 위 SSH 기기 절의 확인 명령을 daemon 경로로 본다). 게이트웨이 코드 경로는 `~/.local/share/jarvis` 의 런처·`versions` 그대로다.
 
 ## 운영 — Windows (게이트웨이)
 
