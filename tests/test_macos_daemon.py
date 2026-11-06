@@ -782,6 +782,23 @@ exec "$TEST_PY" "$@"
         self.assertTrue(os.path.exists(self.daemon))
         self.assertFalse([c for c in self.calls() if c.startswith("sudo")])
 
+    def test_another_users_daemon_is_refused_and_left_alone(self):
+        """covers: DAEMON-14"""
+        for body in (plistlib.dumps({"Label": "dev.jarvis", "UserName": "someone-else"}), plistlib.dumps({"Label": "dev.jarvis"}), b"not a plist"):
+            with open(self.daemon, "wb") as f:
+                f.write(body)
+            self.set("daemon")  # 다른 사용자의 작업이 돌고 있다
+            for args in (("install",), ("install", "--dry-run"), ("uninstall",), ("uninstall", "--dry-run")):
+                with self.subTest(args=args, body=body[:20]):
+                    r = self.run_script(*args)
+                    self.assertEqual(r.returncode, 1, r.stdout)
+                    self.assertIn("다른 사용자", r.stderr)
+                    self.assertIn("아무것도 바꾸지 않았습니다", r.stderr)
+                    self.assertEqual(self.read(self.daemon), body)
+                    self.assertEqual(self.read(self.agent), self.original)
+                    self.assertTrue(self.has("daemon") and self.has("agent"))
+                    self.assertEqual(self.calls(), [])
+
     def test_status_names_what_is_loaded_and_the_health(self):
         """covers: DAEMON-8"""
         r = self.run_script("status")

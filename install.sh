@@ -57,12 +57,24 @@ fi
 if [ "$OS" = Darwin ]; then uv pip install --quiet --python "$PY" psutil pystray pillow
 else uv pip install --quiet --python "$PY" psutil; fi
 
+# 시스템 도메인의 dev.jarvis 는 기기에 하나다. plist 의 UserName 이 이 사용자일 때만 이 사용자의 daemon 으로 본다
+MY_DAEMON=""
+if [ "$OS" = Darwin ] && [ -f "$DAEMON_PLIST" ]; then
+  owner=$("$PY" -c 'import plistlib, sys; print(plistlib.load(open(sys.argv[1], "rb"))["UserName"])' "$DAEMON_PLIST" 2>/dev/null) || owner=""
+  if [ "$owner" = "$(id -un)" ]; then
+    MY_DAEMON=1
+  else
+    echo "이 기기의 LaunchDaemon 은 다른 사용자(${owner:-알 수 없음})의 것이라 손대지 않습니다. 이 사용자는 LaunchAgent 로 설치합니다" >&2
+    DAEMON=""
+  fi
+fi
+
 # 2. 코드: 최신 릴리스 묶음. 이후 갱신은 core 의 jarvis 업데이트 버튼이 한다(versions/).
 if [ "$OS" = Darwin ]; then REG="$AGENT"; else REG="$UNIT"; fi
 # 개발 체크아웃(~/Workspace/jarvis/.git)으로 이미 등록된 기기는 그대로 둔다(받지도 옮기지도 않는다)
 if [ ! -d "$APP" ] && [ -e "$OLD/.git" ] && [ -f "$REG" ]; then APP="$OLD"; fi
 # LaunchDaemon 이 옛 폴더를 가리키는 기기도 같다: root 소유 등록은 고칠 수 없다
-if [ ! -d "$APP" ] && [ -f "$OLD/jarvis/__init__.py" ] && [ -f "$DAEMON_PLIST" ]; then APP="$OLD"; fi
+if [ ! -d "$APP" ] && [ -f "$OLD/jarvis/__init__.py" ] && [ -n "$MY_DAEMON" ]; then APP="$OLD"; fi
 # 1.8.0 이전 배치(~/Workspace/jarvis 에 푼 실행본, .git 없음)로 등록된 기기: 옛 base 를 그대로 app 으로 옮긴다(relocate).
 # 새 릴리스를 app 에 풀지 않는다(base 가 바뀌면 런처의 롤백 기준 previous=None → base 가 바뀐다)
 RELOC=""
@@ -110,7 +122,7 @@ EOF
 fi
 
 # 4. 서비스: macOS 는 LaunchAgent(로그인한 사용자 세션), Linux 는 systemd 사용자 유닛
-if [ "$OS" = Darwin ] && [ -f "$DAEMON_PLIST" ]; then
+if [ -n "$MY_DAEMON" ]; then
   # 에이전트를 새로 만들면 다음 GUI 로그인 때 두 번째 jarvis 가 같은 포트를 잡으려 한다
   [ -n "$DAEMON" ] || echo "LaunchDaemon 으로 등록된 기기라 LaunchAgent 를 만들지 않습니다(되돌리기: README 의 LaunchDaemon 모드 절)"
 elif [ "$OS" = Darwin ]; then
@@ -145,7 +157,7 @@ if [ -n "$RELOC" ]; then
   state=$(relocate --json | "$PY" -c 'import json, sys; r = json.load(sys.stdin); print("이전:", r["state"], r["detail"], file=sys.stderr); print(r["state"])') || state=failed
   # macOS 는 launchd 가 plist 를 다시 읽어야 app 에서 뜬다. 사용자가 실행한 설치기라 여기서 다시 읽힌 뒤 옛 폴더를 옮긴다
   # LaunchDaemon 등록이 남아 있으면 에이전트를 띄우지 않는다(두 벌이 같은 포트를 잡으려 한다)
-  if [ "$OS" = Darwin ] && [ "$state" = pending_reload ] && [ -f "$DAEMON_PLIST" ]; then
+  if [ "$OS" = Darwin ] && [ "$state" = pending_reload ] && [ -n "$MY_DAEMON" ]; then
     echo "LaunchDaemon 등록이 남아 있어 LaunchAgent 를 다시 읽지 않습니다" >&2
   elif [ "$OS" = Darwin ] && [ "$state" = pending_reload ]; then
     launchctl bootout "gui/$(id -u)/dev.jarvis" 2>/dev/null || true

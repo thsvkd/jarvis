@@ -90,6 +90,14 @@ verify_installed() {
   if [ "$(sha "$DAEMON")" != "$NEW_SHA" ]; then say "렌더한 내용과 다릅니다(sha256)"; return 1; fi
 }
 
+# 시스템 도메인의 dev.jarvis 는 기기에 하나다. 다른 사용자의 등록은 채택·교체·삭제하지 않는다
+refuse_foreign() {
+  [ -f "$DAEMON" ] || return 0
+  local owner
+  owner=$(field UserName)
+  [ "$owner" = "$(id -un)" ] || die "$DAEMON 은 다른 사용자(${owner:-알 수 없음})의 LaunchDaemon 입니다. 아무것도 바꾸지 않았습니다"
+}
+
 sudo_begin() {  # 이후의 sudo 는 모두 -n 이다: 다시 묻지 않고, 시간이 지나 끊기면 실패로 다룬다
   "$SUDO" -v || die "sudo 권한을 얻지 못했습니다. 아무것도 바꾸지 않았습니다"
   ( exec >/dev/null 2>&1 </dev/null; while kill -0 $$ && "$SUDO" -n -v; do sleep 30; done ) &
@@ -156,6 +164,7 @@ install_plan() {
 
 cmd_install() {
   local base why
+  refuse_foreign
   base=$(agent_plist) || die "에이전트 plist 가 없습니다: $AGENT (install.sh 로 먼저 설치합니다)"
   [ -x "$PY" ] || die "venv python 이 없습니다: $PY (install.sh 로 먼저 설치합니다)"
   py check --agent "$base" || die "사전 점검에 실패했습니다. 아무것도 바꾸지 않았습니다"
@@ -210,6 +219,7 @@ cmd_install() {
 
 cmd_uninstall() {
   local base
+  refuse_foreign
   base=$(agent_plist) || die "되돌릴 에이전트 plist 가 없습니다: $KEPT"
   PORT=$(py port --agent "$base" 2>/dev/null) || PORT=9300
   if [ ! -f "$DAEMON" ] && ! loaded system && [ -f "$AGENT" ]; then

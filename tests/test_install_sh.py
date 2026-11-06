@@ -379,11 +379,11 @@ class InstallTest(unittest.TestCase):
         with open(self.log) as f:
             return f.read().splitlines()
 
-    def daemon_plist(self):
+    def daemon_plist(self, user=None):
         path = self.env["JARVIS_DAEMON_PLIST"]
         os.makedirs(os.path.dirname(path))
-        with open(path, "w") as f:
-            f.write("daemon")
+        with open(path, "wb") as f:
+            plistlib.dump({"Label": "dev.jarvis", "UserName": user or subprocess.check_output(["id", "-un"], text=True).strip()}, f)
         return path
 
     def test_the_daemon_path_override_needs_the_test_flag(self):
@@ -449,6 +449,36 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertFalse(os.path.exists(agent))
         self.assertIn(f"macos-daemon cwd={self.home} install", self.lines())
+
+    def test_another_users_daemon_does_not_stop_the_agent_flow(self):
+        """covers: DAEMON-14"""
+        path = self.daemon_plist("someone-else")
+        with open(path, "rb") as f:
+            before = f.read()
+        uid = os.getuid()
+        agent = f"{self.home}/Library/LaunchAgents/dev.jarvis.plist"
+        for args in (("--core", "100.64.0.1"), ("--daemon",)):  # --daemon 도 그 등록을 바꾸지 않는다
+            with self.subTest(args):
+                r = self.run_install(*args)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn("다른 사용자(someone-else)", r.stderr)
+                self.assertTrue(os.path.exists(agent))
+                log = self.lines()
+                self.assertIn(f"launchctl print gui/{uid}/dev.jarvis", log)
+                self.assertFalse([line for line in log if line.startswith("macos-daemon")])
+                self.assertIn("jarvis module orca plan --json", log)
+                with open(path, "rb") as f:
+                    self.assertEqual(f.read(), before)
+                os.remove(self.log)
+
+    def test_an_unreadable_daemon_plist_is_not_taken_as_this_users(self):
+        """covers: DAEMON-14"""
+        with open(self.daemon_plist(), "w") as f:
+            f.write("not a plist")
+        r = self.run_install("--core", "100.64.0.1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("알 수 없음", r.stderr)
+        self.assertTrue(os.path.exists(os.path.join(self.home, "Library", "LaunchAgents", "dev.jarvis.plist")))
 
     def test_a_dev_checkout_registered_as_a_daemon_downloads_nothing(self):
         """covers: DAEMON-9, BOOT-1"""
