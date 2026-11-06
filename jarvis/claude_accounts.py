@@ -486,67 +486,91 @@ def login(rows=(), keychain=False, signed_in=False, fatal=None):
             "note": None if access is None else f"접근 토큰 {_span(access - now)} 뒤 만료(자동 갱신)" if access > now else "접근 토큰 만료됨(자동 갱신 대기)"}
 
 
-def _old(a):
-    """값이 있는데 신선도 기준보다 오래됐는가."""
+def _old(a, now):
+    """값이 있는데 신선도 기준보다 오래됐는가. 물을지 판정과 행 판정이 같은 규칙을 쓴다."""
     at = a.get("updated_at")
-    return bool(a.get("windows") or a.get("buckets")) and (not at or time.time() - at > config.CLAUDE_STALE_S)
+    return bool(a.get("windows") or a.get("buckets")) and (not at or now - at > config.CLAUDE_STALE_S)
 
 
-def _same_login(a, ids, store):
-    """CLI 행과 저장소의 같은 슬롯이 같은 계정인가. 슬롯 번호만 같으면 다른 계정의 상태를 옮기게 된다."""
-    fingerprint = ids.get(a.get("slot"))
-    return fingerprint is not None and fingerprint == store.get("ids", {}).get(a.get("slot"))
+def _recent(fact, mono):
+    """hswap 이 답한 기기 사실 (monotonic, 값) 의 값. 신선도 기준 안에 다시 확인하지 못한 옛 답은 쓰지 않는다."""
+    return fact[1] if fact and mono - fact[0] < config.CLAUDE_STALE_S else None
 
 
-def _store_shape(store):
+def _judge_shape(store, k):
     """묶음이 믿을 수 있는지 가르는 값: 슬롯→신원 지문 전체, 사용 중 슬롯, 인증 실패인 슬롯, keepalive 등급(ok·실패 종류)과 loginExpiresAt.
     /login 뒤의 새 기록이 묶어 둔 CLI 의 재로그인·만료 경고를 무효로 한다. checkedAt 같은 시각만 바뀌면 달라지지 않는다. 묶음 안에만 두고 내보내지 않는다."""
     rows = (store or {}).get("accounts", [])
-    k = _keepalive() or {}
     err = k.get("error") if isinstance(k.get("error"), dict) else {}
     grade = None if not k else "ok" if k.get("ok") is True else err.get("type") if isinstance(err.get("type"), str) else "failed"
     return ((store or {}).get("ids", {}), {a.get("slot") for a in rows if a.get("active")}, {a.get("slot") for a in rows if _is_relogin(a)},
             grade, k.get("loginExpiresAt"))
 
 
-def _mark_current(rows, store, ids):
-    """사용 중 판정: 실제 로그인과 같은 저장 슬롯이고 신원도 같은 행(엔진과 같은 규칙. 맞는 슬롯이 없으면 사용 중도 없다). 로그인이나 저장소를 읽지 못하면 hswap 의 값."""
-    if not (store and store.get("signed_in")):
-        return rows
-    current = {a.get("slot") for a in store["accounts"] if a.get("active")}
-    return [{**a, "active": a.get("slot") in current and _same_login(a, ids, store)} for a in rows]
+def _store_shape(store):
+    return _judge_shape(store, _keepalive() or {})
 
 
-def _mark_dead(rows, store, ids):
-    """저장소의 인증 실패(authDeadStrikes)를 슬롯과 신원이 같은 CLI 행에 붙인다. 묶어 둔 행이 그 뒤에 적힌 실패를 가리지 않게 읽을 때마다 본다.
-    사용량 값은 건드리지 않고, 묶음의 dict 도 고치지 않는다."""
-    dead = {a.get("slot") for a in (store or {}).get("accounts", []) if _is_relogin(a)}
+def _judge_ask(force, install, store, shape, held, discovered, fatal, device, mono, now):
+    """묶음을 다시 쓸지 hswap 에 물을지 정한다. (물을까, 묻지 않을 때 보일 묶음의 답). 값만 받는다.
+    held: (monotonic, 답, 물을 때의 모습). discovered·fatal·device: 지난 답의 기억. mono·now: time.monotonic()·time.time().
+    계정을 찾은 적도 저장소도 없는 기기는 묻지 않는다. CLI 로 계정을 찾았거나 경고가 있던 기기는 기준이 지나면 다시 묻는다.
+    묶음의 모습은 hswap 답이 아니라 물을 때의 저장소다: 답이 저장소와 계속 어긋나도 변경 한 번에 한 번만 다시 부른다."""
+    recent = held[1] if held and mono - held[0] < config.CLAUDE_STALE_S else None
+    recent = recent if recent and recent.get("accounts") else None
+    recheck = discovered or bool(fatal) or (bool(device and device[1]) and not _recent(device, mono))
+    if store is None and recent is None and not force and not install and not recheck:
+        return False, None
+    changed = recent is not None and shape != held[2]
+    return force or changed or recent is None or any(_old(a, now) for a in recent["accounts"]), recent
+
+
+def _judge_rows(out, store, hswap, now):
+    """행 판정: 저장값이 지금 로그인에 아직 맞는지 정해 화면 행을 만든다. 값만 받고, 묶음이 들고 있는 dict 는 고치지 않는다.
+    out: live() 의 답이나 묶음. store: _store_read() 의 값. hswap: 실행 파일이 있는가. now: time.time().
+    (login 판정에 넘길 행, 응답 행). 보일 행이 없으면 ([], None).
+    CLI 행과 저장소의 같은 슬롯은 신원 지문까지 같아야 같은 계정이다: 슬롯 번호만 같으면 다른 계정의 상태를 옮기게 된다.
+    사용 중: 실제 로그인과 같은 저장 슬롯이고 신원도 같은 행(엔진과 같은 규칙. 맞는 슬롯이 없으면 사용 중도 없다). 로그인이나 저장소를 읽지 못하면 hswap 의 값.
+    인증 실패(authDeadStrikes): 슬롯과 신원이 같은 CLI 행에 붙인다. 묶어 둔 행이 그 뒤에 적힌 실패를 가리지 않게 읽을 때마다 보고, 사용량 값은 건드리지 않는다.
+    조직: core 가 기기 사이에서 같은 조직을 알아볼 값(org_key·org_at)과 그 시각의 이름. 묶어 둔 hswap 답의 이름은 재등록보다 오래됐을 수 있어 이름도 저장소 값을 쓴다.
+    슬롯과 신원이 저장소와 같은 행에만 붙고, core 가 키와 시각을 지운 뒤 화면으로 보낸다(USAGE-1).
+    신선도: 값이 있는 행에 대체 이유와 "N 전 값"을 붙인다. login 판정은 이 문구가 붙기 전의 행을 본다."""
+    stored = store or {}
+    cli = (out or {}).get("accounts")
+    ids = out.get("ids", {}) if cli else stored.get("ids", {})
+    current = {a.get("slot") for a in stored.get("accounts", []) if a.get("active")}
+    dead = {a.get("slot") for a in stored.get("accounts", []) if _is_relogin(a)}
     relogin = STATUS["relogin_required"][0]
 
-    def mark(a):
-        if a.get("slot") not in dead or _is_relogin(a) or not _same_login(a, ids, store):
+    def same(a):
+        fingerprint = ids.get(a.get("slot"))
+        return fingerprint is not None and fingerprint == stored.get("ids", {}).get(a.get("slot"))
+
+    def marked(a):
+        if stored.get("signed_in"):
+            a = {**a, "active": a.get("slot") in current and same(a)}
+        a = {**a, "org": org(a.get("org"), a.get("label"))}
+        if a.get("slot") not in dead or _is_relogin(a) or not same(a):
             return a
         has = a.get("windows") or a.get("buckets")
         return {**a, "attention": True, **({"note": relogin, "error": None} if has else {"status": "error", "note": None, "error": relogin})}
-    return [mark(a) for a in rows]
 
+    def shown(a, why):
+        org_id = stored.get("orgs", {}).get(a.get("slot"), {}) if same(a) else {}
+        old, at = _old(a, now), a.get("updated_at")
+        if not ((a.get("windows") or a.get("buckets")) and (old or why)):
+            return {**a, **org_id}
+        age = (f"{_span(now - at)} 전 값입니다." if at else "저장 시각을 모르는 값입니다.") if old else None
+        return {**a, "note": " ".join(x for x in (a.get("note"), why, age) if x), "attention": a.get("attention") or old, **org_id}
 
-def _org_id(a, ids, store):
-    """core 가 기기 사이에서 같은 조직을 알아볼 값(org_key·org_at)과 그 시각의 이름. 묶어 둔 hswap 답의 이름은 재등록보다 오래됐을 수 있어 이름도 저장소 값을 쓴다.
-    슬롯과 신원이 저장소와 같은 행에만 붙고, core 가 키와 시각을 지운 뒤 화면으로 보낸다(USAGE-1)."""
-    return store.get("orgs", {}).get(a.get("slot"), {}) if store and _same_login(a, ids, store) else {}
-
-
-def _aged(a, why=None):
-    """값이 있는 계정에 대체 이유와 신선도를 붙인다. hswap 묶음이 들고 있는 dict 는 고치지 않는다."""
-    if not (a.get("windows") or a.get("buckets")):
-        return a
-    old = _old(a)
-    at = a.get("updated_at")
-    if not (old or why):
-        return a
-    age = (f"{_span(time.time() - at)} 전 값입니다." if at else "저장 시각을 모르는 값입니다.") if old else None
-    return {**a, "note": " ".join(x for x in (a.get("note"), why, age) if x), "attention": a.get("attention") or old}
+    if cli:
+        rows, why = [marked(a) for a in cli], None
+    elif store:
+        reason = (out or {}).get("error") or ("hswap 이 없습니다" if not hswap else "hswap 이 계정을 주지 않았습니다")
+        rows, why = store["accounts"], reason.rstrip(".") + ". 저장된 값을 보입니다."
+    else:
+        return [], None
+    return rows, [shown(a, why) for a in rows]
 
 
 def read(force=False, install=False):
@@ -571,55 +595,35 @@ def read(force=False, install=False):
 
 
 def _keychain_down():
-    """hswap 이 신선도 기준 안에 키체인에 닿지 못한다고 답했는가. 다시 확인하지 못한 옛 답은 쓰지 않는다."""
-    d = _device
-    return bool(d and d[1] and time.monotonic() - d[0] < config.CLAUDE_STALE_S)
+    """hswap 이 신선도 기준 안에 키체인에 닿지 못한다고 답했는가."""
+    return bool(_recent(_device, time.monotonic()))
 
 
 def _fatal_kind():
-    """hswap 이 신선도 기준 안에 답한 치명적 오류 type. 다시 확인하지 못한 옛 답은 쓰지 않는다."""
-    f = _fatal
-    return f[1] if f and time.monotonic() - f[0] < config.CLAUDE_STALE_S else None
+    """hswap 이 신선도 기준 안에 답한 치명적 오류 type."""
+    return _recent(_fatal, time.monotonic())
 
 
 def _read(force, install, deadline, give_up=False):
     """(결과, 답을 받는 동안 저장소 모습이 그대로였는가). give_up: hswap 을 부르지 않고 지금 저장소로 답한다."""
     settled = True
     store = _store_read()
-    held = _cache  # switch() 가 도중에 비워도 같은 값을 본다
-    recent = held[1] if held and time.monotonic() - held[0] < config.CLAUDE_STALE_S else None
-    recent = recent if recent and recent.get("accounts") else None
-    device = _device
-    # 계정을 찾은 적도 저장소도 없는 기기는 묻지 않는다. CLI 로 계정을 찾았거나 경고가 있던 기기는 기준이 지나면 다시 묻는다
-    recheck = _discovered or bool(_fatal) or (bool(device and device[1]) and not _keychain_down())
     if give_up:
         out = {"error": "저장소가 계속 바뀌어 hswap 값을 확정하지 못했습니다"}
-    elif store is None and recent is None and not force and not install and not recheck:
-        out = None
     else:
+        memory = (_cache, _discovered, _fatal, _device)  # switch() 가 도중에 비워도 같은 값을 본다
+        mono = time.monotonic()
         shape = _store_shape(store)
-        # 묶음의 모습은 hswap 답이 아니라 물을 때의 저장소다: 답이 저장소와 계속 어긋나도 변경 한 번에 한 번만 다시 부른다
-        changed = recent is not None and shape != held[2]
-        asked = force or changed or recent is None or any(_old(a) for a in recent["accounts"])
-        out = recent
+        asked, out = _judge_ask(force, install, store, shape, *memory, mono, time.time())
         if asked:
             out = live(force, install=install, shape=shape, deadline=deadline)
             store = _store_read()  # 사용 중 판정은 hswap 이 답한 뒤의 로그인으로 한다(잠금을 기다리는 사이 로그인이 바뀌었을 수 있다)
             settled = _store_shape(store) == shape
-    rows = (out or {}).get("accounts")
-    if rows:
-        ids = out.get("ids", {})
-        rows = _mark_dead([{**a, "org": org(a.get("org"), a.get("label"))} for a in _mark_current(rows, store, ids)], store, ids)
-        why = None
-    elif store:
-        rows, ids = store["accounts"], store.get("ids", {})
-        reason = (out or {}).get("error") or ("hswap 이 없습니다" if not binary() else "hswap 이 계정을 주지 않았습니다")
-        why = reason.rstrip(".") + ". 저장된 값을 보입니다."
-    else:
-        state = login((), _keychain_down(), fatal=_fatal_kind())
-        return ({**(out or {}), "accounts": [], "login": state} if state else out), settled
+    rows, accounts = _judge_rows(out, store, bool(binary()), time.time())
     state = login(rows, _keychain_down(), bool(store and store.get("signed_in")), _fatal_kind())
-    result = {"accounts": [{**_aged(a, why), **_org_id(a, ids, store)} for a in rows]}
+    if accounts is None:
+        return ({**(out or {}), "accounts": [], "login": state} if state else out), settled
+    result = {"accounts": accounts}
     if (out or {}).get("fetched_at"):
         result["fetched_at"] = out["fetched_at"]
     return ({**result, "login": state} if state else result), settled
