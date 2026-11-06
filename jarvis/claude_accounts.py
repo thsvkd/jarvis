@@ -415,7 +415,7 @@ def _store_read():
             result.append({**a, "org": org(a["org"], a["label"])})
             org_uuid = _identity(None, ident.get("organizationUuid"))[1]
             if org_uuid:  # hswap 은 조직 이름을 등록할 때만 저장한다: added 가 그 이름의 시점이다
-                orgs[str(number)] = {"org": result[-1]["org"], "org_key": hashlib.sha256(org_uuid.encode("utf-8", "replace")).hexdigest(), "org_at": _sec(ident.get("added"))}
+                orgs[str(number)] = {**({"org": result[-1]["org"]} if isinstance(name, str) and name else {}), "org_key": hashlib.sha256(org_uuid.encode("utf-8", "replace")).hexdigest(), "org_at": _sec(ident.get("added"))}
         # signed_in: 로그인을 읽었다. 그런데 active 인 행이 없으면 지금 로그인은 어느 저장 슬롯과도 맞지 않는다
         return {"accounts": result, "signed_in": identity is not None, "ids": ids, "orgs": orgs} if result else None
     except (OSError, ValueError, TypeError, OverflowError, RecursionError):

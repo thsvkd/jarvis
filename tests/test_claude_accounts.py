@@ -259,6 +259,17 @@ class SameRulesTest(StoreCase):
         self.assertIsNone(row["org"])
         self.assertIn("org_key", row)
 
+    def test_a_store_without_an_org_name_keeps_the_cli_name(self):
+        """covers: USAGE-1. 저장소에 조직 이름이 없으면 hswap 이 준 이름을 지우지 않고, 키는 그대로 준다"""
+        for empty in ({"organizationName": ""}, {"organizationName": None}, {}):
+            with self.subTest(empty):
+                self.write("sequence.json", {"sequence": [1], "accounts": {"1": {"email": "a@example.com", "organizationUuid": "o1", **empty}}})
+                claude_accounts._state.cache = None
+                self.hswap(hswap_row(organizationName="Team"))
+                row = claude_accounts.read(force=True)["accounts"][0]
+                self.assertEqual(row["org"], "Team")
+                self.assertIn("org_key", row)
+
     def test_active_follows_the_real_login_on_both_adapters(self):
         """covers: USAGE-6. hswap 의 active 가 어긋나도 실제 로그인과 같은 슬롯이 사용 중이다. 로그인을 읽지 못하면 hswap 값"""
         self.store(time.time() - 60)
