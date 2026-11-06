@@ -388,7 +388,7 @@ class InstallTest(unittest.TestCase):
 
     def test_without_the_flag_the_launchctl_calls_are_the_same_as_before(self):
         """covers: DAEMON-9"""
-        self.assertEqual(self.run_install("--core", "100.115.245.91").returncode, 0)
+        self.assertEqual(self.run_install("--core", "100.64.0.1").returncode, 0)
         uid = os.getuid()
         self.assertEqual([line for line in self.lines() if line.startswith("launchctl ")],
                          [f"launchctl print gui/{uid}/dev.jarvis",
@@ -397,7 +397,7 @@ class InstallTest(unittest.TestCase):
 
     def test_daemon_flag_makes_the_agent_without_loading_it_and_hands_off_before_the_modules(self):
         """covers: DAEMON-9"""
-        r = self.run_install("--core", "100.115.245.91", "--daemon")
+        r = self.run_install("--core", "100.64.0.1", "--daemon")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn(f"<key>WorkingDirectory</key><string>{self.app}</string>", self.read("Library", "LaunchAgents", "dev.jarvis.plist"))
         log = self.lines()
@@ -408,14 +408,14 @@ class InstallTest(unittest.TestCase):
     def test_a_failed_hand_off_stops_with_an_error(self):
         """covers: DAEMON-9"""
         self.env["FAKE_DAEMON_RC"] = "1"
-        r = self.run_install("--core", "100.115.245.91", "--daemon")
+        r = self.run_install("--core", "100.64.0.1", "--daemon")
         self.assertEqual(r.returncode, 1)
         self.assertIn("LaunchDaemon 으로 옮기지 못했습니다", r.stderr)
         self.assertFalse([line for line in self.lines() if line.startswith("jarvis ")])
 
     def test_an_app_older_than_the_installer_hands_off_to_the_downloaded_script(self):
         """covers: DAEMON-9"""
-        self.assertEqual(self.run_install("--core", "100.115.245.91").returncode, 0)
+        self.assertEqual(self.run_install("--core", "100.64.0.1").returncode, 0)
         os.remove(os.path.join(self.app, "deploy", "macos-daemon.sh"))
         os.remove(self.log)
         r = self.run_install("--daemon")
@@ -428,7 +428,7 @@ class InstallTest(unittest.TestCase):
         """covers: DAEMON-9"""
         self.daemon_plist()
         agent = os.path.join(self.home, "Library", "LaunchAgents", "dev.jarvis.plist")
-        r = self.run_install("--core", "100.115.245.91")
+        r = self.run_install("--core", "100.64.0.1")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertFalse(os.path.exists(agent))
         self.assertIn("LaunchAgent 를 만들지 않습니다", r.stdout)
@@ -481,7 +481,7 @@ class InstallTest(unittest.TestCase):
     def test_linux_refuses_the_daemon_flag_before_writing(self):
         """covers: DAEMON-9, BOOT-2"""
         self.linux()
-        r = self.run_install("--core", "100.115.245.91", "--daemon")
+        r = self.run_install("--core", "100.64.0.1", "--daemon")
         self.assertEqual(r.returncode, 1)
         self.assertIn("macOS 전용", r.stderr)
         self.assertEqual(os.listdir(self.home), [])
