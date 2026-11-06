@@ -457,8 +457,14 @@ def _same_login(a, ids, store):
 
 
 def _store_shape(store):
-    """슬롯→신원 지문 전체와 사용 중 슬롯. 슬롯이 늘거나 줄거나 신원·사용 중 슬롯이 바뀌면 달라진다."""
-    return store and (store.get("ids", {}), {a.get("slot") for a in store["accounts"] if a.get("active")})
+    """묶음이 믿을 수 있는지 가르는 값: 슬롯→신원 지문 전체, 사용 중 슬롯, 인증 실패인 슬롯, keepalive 등급(ok·실패 종류)과 loginExpiresAt.
+    /login 뒤의 새 기록이 묶어 둔 CLI 의 재로그인·만료 경고를 무효로 한다. checkedAt 같은 시각만 바뀌면 달라지지 않는다. 묶음 안에만 두고 내보내지 않는다."""
+    rows = (store or {}).get("accounts", [])
+    k = _keepalive() or {}
+    err = k.get("error") if isinstance(k.get("error"), dict) else {}
+    grade = None if not k else "ok" if k.get("ok") is True else err.get("type") if isinstance(err.get("type"), str) else "failed"
+    return ((store or {}).get("ids", {}), {a.get("slot") for a in rows if a.get("active")}, {a.get("slot") for a in rows if _is_relogin(a)},
+            grade, k.get("loginExpiresAt"))
 
 
 def _mark_current(rows, store, ids):

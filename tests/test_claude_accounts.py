@@ -1008,7 +1008,7 @@ class StoreAuthFailureTest(StoreCase):
         self.assertFalse(before["accounts"][0]["attention"])
         self.two_slots((1, 0))
         out = claude_accounts.read()
-        run.assert_called_once()  # 묶어 둔 값을 쓰는 그 읽기에서 보인다
+        self.assertEqual(run.call_count, 2)  # 인증 실패가 바뀌면 다시 묻는다. hswap 이 아직 정상으로 답해도 저장소의 실패를 붙인다
         a = out["accounts"][0]
         self.assertEqual((a["status"], a["note"], a["error"], a["attention"]), ("ok", self.RELOGIN, None, True))
         self.assertEqual((a["windows"], a["updated_at"], a["source"]), (before["accounts"][0]["windows"], before["accounts"][0]["updated_at"], "cswap"))  # 저장소의 99% 로 바꾸지 않는다
@@ -1396,13 +1396,13 @@ class StoreShapeTest(StoreCase):
             claude_accounts.read()
         self.assertEqual(run.call_count, 2)
 
-    def test_auth_failure_and_new_usage_do_not_rerun(self):
-        """covers: USAGE-6. 슬롯 구성·사용 중 슬롯 말고는 묶음을 무효로 하지 않는다"""
+    def test_new_usage_does_not_rerun(self):
+        """covers: USAGE-6. 저장소의 사용량 값과 시각이 새로워진 것만으로는 묶음을 무효로 하지 않는다"""
         self.slots((1, self.A, 0))
         run = self.hswap(self.row(1, self.A, active=True))
         claude_accounts.read()
-        self.slots((1, self.A, 1))
-        self.assertEqual(claude_accounts.read()["login"]["state"], "relogin")
+        self.slots((1, self.A, 0))
+        self.assertEqual(claude_accounts.read()["accounts"][0]["source"], "cswap")
         run.assert_called_once()
 
     def test_unreadable_store_keeps_using_held_values(self):
@@ -1775,6 +1775,121 @@ class IdentityNormalizationTest(StoreCase):
         mine = [{"label": "a@example.com", "org": "Team", "active": True}]
         orca = [{"label": " A@EXAMPLE.com ", "org": "Team"}, {"label": "A@example.com ", "org": None}, {"label": "a@example.COM", "org": "Other"}]
         self.assertEqual([a["org"] for a in claude_accounts.merge_orca(mine, orca)], ["Team", "Other"])
+
+
+class AuthRecordChangeTest(StoreCase):
+    """/login 뒤 같은 계정을 다시 저장하면, 더 새로운 keepalive·저장소 기록이 묶어 둔 CLI 의 인증 값을 무효로 한다."""
+
+    FAR = "2099-01-01T00:00:00Z"
+
+    def healed(self, run):
+        run.return_value = {"accounts": [hswap_row()]}
+
+    def assert_healthy(self, out):
+        a = out["accounts"][0]
+        self.assertEqual((a["note"], a["error"], a["attention"], a["status"]), (None, None, False, "ok"))
+
+    def relogin_row(self):
+        return hswap_row(usageStatus="relogin_required", usage=None, lastGoodUsage={"sevenDay": {"pct": 1}}, lastGoodFetchedAt=iso(time.time() - 60))
+
+    def test_relogin_clears_when_keepalive_and_store_recover(self):
+        """covers: USAGE-6, USAGE-7. 재현 1: keepalive 가 정상이 되고 인증 실패가 지워지면 다음 보통 읽기에 relogin 이 남지 않는다"""
+        self.store(time.time() - 60, authDeadStrikes=1)
+        self.keepalive(activeSlot=1, ok=False, error={"type": "relogin_required"}, loginExpiresAt=self.FAR)
+        run = self.hswap(self.relogin_row())
+        self.assertEqual(claude_accounts.read()["login"]["state"], "relogin")
+        self.store(time.time() - 60, authDeadStrikes=0)
+        self.keepalive(activeSlot=1, loginExpiresAt=self.FAR)
+        self.healed(run)
+        out = claude_accounts.read()
+        self.assertEqual(run.call_count, 2)
+        self.assert_healthy(out)
+        self.assertEqual(out["login"]["state"], "ok")
+
+    def test_each_record_alone_invalidates(self):
+        """covers: USAGE-6, USAGE-7. 저장소 쪽만, keepalive 쪽만 바뀌어도 다시 묻는다"""
+        self.store(time.time() - 60, authDeadStrikes=1)
+        run = self.hswap(self.relogin_row())
+        claude_accounts.read()
+        self.store(time.time() - 60, authDeadStrikes=0)  # keepalive 없는 기기: 저장소의 인증 실패만 지워진다
+        self.healed(run)
+        out = claude_accounts.read()
+        self.assertEqual(run.call_count, 2)
+        self.assert_healthy(out)
+        self.assertNotIn("login", out)
+        claude_accounts._cache = None
+        self.keepalive(activeSlot=1, ok=False, error={"type": "refresh_failed"}, loginExpiresAt=self.FAR)
+        run.return_value = {"accounts": [self.relogin_row()]}
+        claude_accounts.read()
+        self.assertEqual(run.call_count, 3)
+        self.keepalive(activeSlot=1, loginExpiresAt=self.FAR)  # 실패 종류가 정상으로
+        self.healed(run)
+        self.assert_healthy(claude_accounts.read())
+        self.assertEqual(run.call_count, 4)
+        self.keepalive(activeSlot=1, ok=False, error={"type": "locked"}, loginExpiresAt=self.FAR)  # 정상이 실패로
+        claude_accounts.read()
+        self.keepalive(activeSlot=1, ok=False, error={"type": "refresh_failed"}, loginExpiresAt=self.FAR)  # 실패 종류끼리도 다르다
+        claude_accounts.read()
+        self.assertEqual(run.call_count, 6)
+
+    def test_expiry_warning_clears_when_keepalive_has_a_new_deadline(self):
+        """covers: USAGE-6, USAGE-7. 재현 2: login 은 ok 인데 '로그인 만료 2일 남음' 이 남지 않는다"""
+        soon = iso(time.time() + 2 * 86400)
+        self.store(time.time() - 60)
+        self.keepalive(activeSlot=1, loginExpiresAt=soon)
+        run = self.hswap(hswap_row(loginExpiresAt=soon))
+        before = claude_accounts.read()
+        self.assertIn("로그인 만료", before["accounts"][0]["note"])
+        self.assertEqual(before["login"]["state"], "expiring")
+        self.keepalive(activeSlot=1, loginExpiresAt=self.FAR)
+        self.healed(run)
+        out = claude_accounts.read()
+        self.assertEqual(run.call_count, 2)
+        self.assert_healthy(out)
+        self.assertEqual(out["login"]["state"], "ok")
+
+    def test_only_timestamps_changing_does_not_rerun(self):
+        """covers: USAGE-6. checkedAt 같은 시각과 그 밖의 필드만 바뀐 keepalive 기록으로는 CLI 호출이 늘지 않는다"""
+        self.store(time.time() - 60)
+        self.keepalive(activeSlot=1, loginExpiresAt=self.FAR, checkedAt=time.time() - 300)
+        run = self.hswap(hswap_row())
+        self.assertEqual(claude_accounts.read()["login"]["text"], "로그인됨, 자동 갱신 5분 전")
+        self.keepalive(activeSlot=1, loginExpiresAt=self.FAR, checkedAt=time.time() - 120, action="refreshed", note="split_brain",
+                       accessExpiresAt=iso(time.time() + 7 * 3600))
+        for _ in range(3):
+            out = claude_accounts.read()
+        self.assertEqual(out["login"]["text"], "로그인됨, 자동 갱신 2분 전")  # 문구는 읽을 때마다 새로 만든다
+        run.assert_called_once()
+
+    def test_repeated_strikes_do_not_rerun(self):
+        """covers: USAGE-6. 이미 실패인 계정의 횟수만 늘면 보이는 값이 같아 다시 묻지 않는다"""
+        self.store(time.time() - 60, authDeadStrikes=1)
+        run = self.hswap(hswap_row())
+        claude_accounts.read()
+        self.store(time.time() - 60, authDeadStrikes=2)
+        self.assertEqual(claude_accounts.read()["login"]["state"], "relogin")
+        run.assert_called_once()
+
+    def test_record_changes_without_a_readable_store(self):
+        """covers: USAGE-6. 저장소를 못 읽어도 keepalive 변경은 다시 묻는다"""
+        self.store(time.time() - 60)
+        os.chmod(os.path.join(self.root, "sequence.json"), 0o644)
+        self.keepalive(ok=False, activeSlot=None, error={"type": "relogin_required"}, loginExpiresAt=self.FAR)
+        run = self.hswap(self.relogin_row())
+        claude_accounts.read(force=True)
+        self.keepalive(activeSlot=None, loginExpiresAt=self.FAR)
+        self.healed(run)
+        self.assert_healthy(claude_accounts.read())
+        self.assertEqual(run.call_count, 2)
+
+    def test_record_values_stay_internal(self):
+        """covers: USAGE-7. 비교에 쓰는 실패 종류는 묶음 안에만 있고 응답에는 고정 문구만 나간다"""
+        self.store(time.time() - 60)
+        self.keepalive(activeSlot=1, ok=False, error={"type": "secret-kind", "message": "m"}, loginExpiresAt=self.FAR)
+        self.hswap(hswap_row())
+        text = json.dumps(claude_accounts.read(force=True), ensure_ascii=False)
+        self.assertNotIn("secret-kind", text)
+        self.assertIn("알 수 없는 오류", text)
 
 
 class AliasTest(unittest.TestCase):
