@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -119,6 +120,57 @@ class DarwinParsers(unittest.TestCase):
         self.assertEqual(units["homebrew.mxcl.broken"]["active"], "failed")
         self.assertEqual(units["pm2.me"]["active"], "active")
         self.assertGreater(units["pm2.me"]["mem_bytes"], 0)
+
+    def launchd_jobs(self, manager):
+        """가짜 launchctl 로 _jobs 를 두 번 돌려 부른 명령과 행을 돌려준다."""
+        system = "services = {\n\t 10 0 com.example.sys\n}\n"
+        gui = "services = {\n\t 20 0 com.example.agent\n\t - 3 com.example.broken\n}\n"
+        listed = "PID\tStatus\tLabel\n30\t0\tcom.example.listed\n"
+        calls = []
+
+        def fake(args, timeout=6):
+            calls.append(args[1:])
+            if args[1] == "managername":
+                return manager if isinstance(manager, tuple) else (0, manager + "\n", "")
+            if args[1:] == ["print", "system"]:
+                return 0, system, ""
+            if args[1:] == ["list"]:
+                return 0, listed, ""
+            return (113, "", "no domain") if self.no_gui else (0, gui, "")
+
+        c = launchd.UnitCollector()
+        with mock.patch.object(launchd, "run", fake), mock.patch.object(launchd.config, "USER_UID", 1234):
+            rows = list(c._jobs())
+            rows2 = list(c._jobs())
+        self.assertEqual(rows, rows2)
+        return calls, rows
+
+    no_gui = False
+
+    def test_launchd_system_domain_reads_user_jobs_from_the_gui_domain(self):
+        """covers: DAEMON-10"""
+        calls, rows = self.launchd_jobs("System")
+        self.assertEqual(calls, [["print", "system"], ["managername"], ["print", "gui/1234"], ["print", "system"], ["print", "gui/1234"]])
+        self.assertEqual(rows, [("system", "com.example.sys", 10, 0), ("user", "com.example.agent", 20, 0),
+                                ("user", "com.example.broken", None, 3)])
+
+    def test_launchd_system_domain_without_a_gui_session_has_no_user_jobs(self):
+        """covers: DAEMON-10"""
+        self.no_gui = True
+        _, rows = self.launchd_jobs("System")
+        self.assertEqual(rows, [("system", "com.example.sys", 10, 0)])
+
+    def test_launchd_aqua_session_reads_launchctl_list_as_before(self):
+        """covers: DAEMON-10"""
+        calls, rows = self.launchd_jobs("Aqua")
+        self.assertEqual(calls, [["print", "system"], ["managername"], ["list"], ["print", "system"], ["list"]])
+        self.assertEqual(rows, [("system", "com.example.sys", 10, 0), ("user", "com.example.listed", 30, 0)])
+
+    def test_launchd_failed_managername_is_asked_again_and_reads_as_before(self):
+        """covers: DAEMON-10"""
+        calls, rows = self.launchd_jobs((-1, "", "timeout"))
+        self.assertEqual(calls, [["print", "system"], ["managername"], ["list"], ["print", "system"], ["managername"], ["list"]])
+        self.assertEqual(rows[1], ("user", "com.example.listed", 30, 0))
 
     def test_macmon(self):
         m = macmon.parse(data("darwin", "macmon_pipe.json"))

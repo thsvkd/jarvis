@@ -48,12 +48,27 @@ def parse_list(out):
 class UnitCollector:
     def __init__(self):
         self.rate = Rate()
+        self._system_domain = None
+
+    def _in_system_domain(self):
+        """LaunchDaemon 으로 도는가(managername = System). 한 번 답을 받으면 다시 묻지 않는다."""
+        if self._system_domain is None:
+            rc, out, _ = run(["launchctl", "managername"], timeout=8)
+            if rc != 0:  # 일시적 실패를 굳히지 않는다. 그동안은 지금까지처럼 읽는다
+                return False
+            self._system_domain = out.strip() == "System"
+        return self._system_domain
 
     def _jobs(self):
         rc, out, _ = run(["launchctl", "print", "system"], timeout=8)
         yield from (("system", *r) for r in parse_print(out))
-        rc, out, _ = run(["launchctl", "list"], timeout=8)
-        yield from (("user", *r) for r in parse_list(out))
+        if self._in_system_domain():
+            # 시스템 도메인의 `launchctl list` 는 시스템 작업 목록을 준다. GUI 세션이 없으면 사용자 작업도 없다
+            rc, out, _ = run(["launchctl", "print", f"gui/{config.USER_UID}"], timeout=8)
+            yield from (("user", *r) for r in (parse_print(out) if rc == 0 else []))
+        else:
+            rc, out, _ = run(["launchctl", "list"], timeout=8)
+            yield from (("user", *r) for r in parse_list(out))
 
     def collect(self, rss_by_pid):
         now = time.time()
