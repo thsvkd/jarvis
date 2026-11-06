@@ -75,7 +75,8 @@ class InstallTest(unittest.TestCase):
         self.release()
         self.log = os.path.join(self.tmp, "log")
         self.env = {"HOME": self.home, "LOG": self.log, "PATH": bin_dir + ":/usr/bin:/bin",
-                    "JARVIS_MANIFEST": "file://" + self.manifest, "TEST_PY": sys.executable}
+                    "JARVIS_MANIFEST": "file://" + self.manifest, "TEST_PY": sys.executable,
+                    "JARVIS_DAEMON_PLIST": os.path.join(self.tmp, "LaunchDaemons", "dev.jarvis.plist")}
         self.share = os.path.join(self.home, ".local", "share", "jarvis")
         self.app = os.path.join(self.share, "app")
         self.old = os.path.join(self.home, "Workspace", "jarvis")
@@ -96,6 +97,8 @@ class InstallTest(unittest.TestCase):
             f.write('__version__ = "9.9.9"\n')
         with open(os.path.join(src, "jarvis", "__main__.py"), "w") as f:
             f.write(FAKE_MAIN)
+        with open(os.path.join(src, "deploy", "macos-daemon.sh"), "w") as f:  # 실제 전환은 tests/test_macos_daemon.py 가 본다
+            f.write('echo "macos-daemon cwd=$PWD $*" >> "$LOG"\nexit "${FAKE_DAEMON_RC:-0}"\n')
         for name in ("launch.py", "relocate.py"):  # 설치기가 부르는 실제 이전 코드
             shutil.copy(os.path.join(ROOT, "jarvis", name), os.path.join(src, "jarvis"))
         if fake_relocate:
@@ -371,6 +374,118 @@ class InstallTest(unittest.TestCase):
             log = f.read()
         self.assertIn("systemctl --user daemon-reload", log)
         self.assertIn("systemctl --user try-restart jarvis", log)  # 이번에 유닛을 바꿨으므로 옛 폴더에서 도는 게이트웨이를 다시 띄운다
+
+    def lines(self):
+        with open(self.log) as f:
+            return f.read().splitlines()
+
+    def daemon_plist(self):
+        path = self.env["JARVIS_DAEMON_PLIST"]
+        os.makedirs(os.path.dirname(path))
+        with open(path, "w") as f:
+            f.write("daemon")
+        return path
+
+    def test_without_the_flag_the_launchctl_calls_are_the_same_as_before(self):
+        """covers: DAEMON-9"""
+        self.assertEqual(self.run_install("--core", "100.115.245.91").returncode, 0)
+        uid = os.getuid()
+        self.assertEqual([line for line in self.lines() if line.startswith("launchctl ")],
+                         [f"launchctl print gui/{uid}/dev.jarvis",
+                          f"launchctl bootstrap gui/{uid} {self.home}/Library/LaunchAgents/dev.jarvis.plist"])
+        self.assertFalse([line for line in self.lines() if line.startswith("macos-daemon")])
+
+    def test_daemon_flag_makes_the_agent_without_loading_it_and_hands_off_before_the_modules(self):
+        """covers: DAEMON-9"""
+        r = self.run_install("--core", "100.115.245.91", "--daemon")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(f"<key>WorkingDirectory</key><string>{self.app}</string>", self.read("Library", "LaunchAgents", "dev.jarvis.plist"))
+        log = self.lines()
+        self.assertFalse([line for line in log if line.startswith("launchctl ")])
+        i = log.index(f"macos-daemon cwd={self.home} install")
+        self.assertLess(i, log.index("jarvis module orca plan --json"))
+
+    def test_a_failed_hand_off_stops_with_an_error(self):
+        """covers: DAEMON-9"""
+        self.env["FAKE_DAEMON_RC"] = "1"
+        r = self.run_install("--core", "100.115.245.91", "--daemon")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("LaunchDaemon 으로 옮기지 못했습니다", r.stderr)
+        self.assertFalse([line for line in self.lines() if line.startswith("jarvis ")])
+
+    def test_an_app_older_than_the_installer_hands_off_to_the_downloaded_script(self):
+        """covers: DAEMON-9"""
+        self.assertEqual(self.run_install("--core", "100.115.245.91").returncode, 0)
+        os.remove(os.path.join(self.app, "deploy", "macos-daemon.sh"))
+        os.remove(self.log)
+        r = self.run_install("--daemon")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(f"macos-daemon cwd={self.home} install", self.lines())
+        self.assertFalse(os.path.exists(os.path.join(self.app, "deploy", "macos-daemon.sh")))  # app 은 그대로 둔다
+        self.assertTrue(os.path.isfile(os.path.join(self.share, "daemon-src", "deploy", "macos-daemon.sh")))  # 나중의 uninstall 을 위해 남는다
+
+    def test_a_device_registered_as_a_daemon_gets_no_agent(self):
+        """covers: DAEMON-9"""
+        self.daemon_plist()
+        agent = os.path.join(self.home, "Library", "LaunchAgents", "dev.jarvis.plist")
+        r = self.run_install("--core", "100.115.245.91")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(os.path.exists(agent))
+        self.assertIn("LaunchAgent 를 만들지 않습니다", r.stdout)
+        log = self.lines()
+        self.assertFalse([line for line in log if line.startswith(("launchctl ", "macos-daemon"))])
+        self.assertIn("jarvis module orca plan --json", log)
+        os.remove(self.log)
+        r = self.run_install("--daemon")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(os.path.exists(agent))
+        self.assertIn(f"macos-daemon cwd={self.home} install", self.lines())
+
+    def test_a_dev_checkout_registered_as_a_daemon_downloads_nothing(self):
+        """covers: DAEMON-9, BOOT-1"""
+        os.remove(self.old_layout(git=True))
+        self.daemon_plist()
+        os.remove(self.manifest)
+        r = self.run_install()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(os.path.exists(self.app))
+        self.assertIn("jarvis module orca plan --json", self.lines())
+
+    def test_an_old_layout_registered_as_a_daemon_gets_no_release_in_app(self):
+        """covers: DAEMON-9"""
+        os.remove(self.old_layout())
+        self.daemon_plist()
+        os.remove(self.manifest)
+        r = self.run_install()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(os.path.exists(self.app))
+        self.assertIn("jarvis module orca plan --json", self.lines())
+
+    @unittest.skipUnless(sys.platform == "darwin", "relocate 는 실제 플랫폼으로 돈다: macOS 흐름")
+    def test_a_pending_reload_does_not_load_the_agent_next_to_a_daemon(self):
+        """covers: DAEMON-9"""
+        agent = self.old_layout()
+        shutil.copytree(self.old, self.app)  # 자동 이전 뒤: plist 는 app, launchd 는 아직 옛 plist
+        with open(agent, "rb") as f:
+            data = plistlib.load(f)
+        data["WorkingDirectory"] = self.app
+        with open(agent, "wb") as f:
+            plistlib.dump(data, f)
+        self.daemon_plist()
+        r = self.run_install()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("pending_reload", r.stderr)
+        self.assertFalse([line for line in self.lines() if "bootout" in line or "bootstrap" in line])
+        self.assertTrue(os.path.isdir(self.old))
+
+    def test_linux_refuses_the_daemon_flag_before_writing(self):
+        """covers: DAEMON-9, BOOT-2"""
+        self.linux()
+        r = self.run_install("--core", "100.115.245.91", "--daemon")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("macOS 전용", r.stderr)
+        self.assertEqual(os.listdir(self.home), [])
+        self.assertFalse(os.path.exists(self.log))
 
     def test_other_systems_are_refused_before_writing(self):
         """covers: BOOT-2"""

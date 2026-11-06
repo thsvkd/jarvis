@@ -1,12 +1,15 @@
 """macOS LaunchDaemon 모드: 렌더(jarvis/macos_daemon.py)와 전환 스크립트(deploy/macos-daemon.sh).
 임시 HOME 과 가짜 launchctl·sudo·plutil·curl·lsof 로 돌린다. 실제 launchd·sudo·/Library 는 건드리지 않는다."""
+import hashlib
 import os
 import plistlib
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 import unittest
@@ -609,6 +612,77 @@ class Script(Harness):
         self.assertIn(self.kept, r.stdout)
         self.set("daemon-unhealthy")
         self.assertIn("health: 응답 없음", self.run_script("status").stdout)
+
+
+FAKE_MAIN = '''import json, os, sys
+with open(os.environ["LOG"], "a") as f:
+    f.write("jarvis " + " ".join(sys.argv[1:]) + "\\n")
+print(json.dumps({"plan_id": "abc", "steps": [], "blocked": []} if sys.argv[3] == "plan" else {"status": "done"}))
+'''
+
+
+class InstallShEndToEnd(Harness):
+    """install.sh --daemon 이 받은 릴리스의 실제 스크립트로 넘어가는 전체 흐름."""
+
+    def setUp(self):
+        super().setUp()
+        src = os.path.join(self.tmp, "src", "jarvis-9.9.9")
+        os.makedirs(os.path.join(src, "jarvis"))
+        os.makedirs(os.path.join(src, "deploy"))
+        for rel in ("deploy/jarvis.plist", "deploy/macos-daemon.sh", "jarvis/macos_daemon.py"):
+            shutil.copy(os.path.join(ROOT, rel), os.path.join(src, rel))
+        with open(os.path.join(src, "jarvis", "__init__.py"), "w") as f:
+            f.write('__version__ = "9.9.9"\n')
+        with open(os.path.join(src, "jarvis", "__main__.py"), "w") as f:
+            f.write(FAKE_MAIN)
+        tgz = os.path.join(self.tmp, "jarvis.tar.gz")
+        with tarfile.open(tgz, "w:gz") as t:
+            t.add(src, arcname="jarvis-9.9.9")
+        with open(tgz, "rb") as f:
+            digest = hashlib.sha256(f.read()).hexdigest()
+        manifest = os.path.join(self.tmp, "manifest.json")
+        with open(manifest, "w") as f:
+            f.write('{"version": "9.9.9", "url": "file://%s", "sha256": "%s"}' % (tgz, digest))
+        self.env["JARVIS_MANIFEST"] = "file://" + manifest
+        uv = os.path.join(self.bin, "uv")
+        with open(uv, "w") as f:
+            f.write('''#!/bin/sh
+if [ "$1" = venv ]; then mkdir -p "$4/bin" && printf '#!/bin/sh\\nexec "%s" "$@"\\n' "$TEST_PY" > "$4/bin/python" && chmod +x "$4/bin/python"; fi
+''')
+        os.chmod(uv, stat.S_IRWXU)
+
+    def install(self, *args):
+        return subprocess.run(["sh", os.path.join(ROOT, "install.sh"), *args], env=self.env, capture_output=True, text=True, timeout=120)
+
+    def test_a_fresh_ssh_install_ends_as_a_daemon_and_a_rerun_changes_nothing(self):
+        """covers: DAEMON-9"""
+        self.set("no-gui")  # SSH 세션: gui 도메인에 bootstrap 할 수 없다
+        r = self.install("--core", "100.64.0.1", "--daemon")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(self.has("daemon"))
+        self.assertFalse(os.path.exists(self.agent))
+        with open(self.kept, "rb") as f:
+            self.assertEqual(plistlib.load(f)["EnvironmentVariables"]["JARVIS_TRAY"], "1")
+        with open(self.daemon, "rb") as f:
+            d = plistlib.load(f)
+        self.assertEqual(d["WorkingDirectory"], os.path.join(self.share, "app"))
+        self.assertNotIn("/Users/USER", plistlib.dumps(d).decode())
+        calls = self.calls()
+        self.assertFalse([c for c in calls if "bootstrap gui" in c])
+        self.assertLess(calls.index(f"sudo -n launchctl bootstrap system {self.daemon}"), calls.index("jarvis module orca plan --json"))
+
+        installed = self.read(self.daemon)
+        os.remove(self.log)
+        r = self.install()  # 플래그 없이 다시 실행: 에이전트를 만들지 않는다
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("LaunchAgent 를 만들지 않습니다", r.stdout)
+        self.assertFalse(os.path.exists(self.agent))
+        r = self.install("--daemon")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("바꿀 것이 없습니다", r.stdout)
+        self.assertFalse(os.path.exists(self.agent))
+        self.assertEqual(self.read(self.daemon), installed)
+        self.assertFalse([c for c in self.calls() if c.startswith("sudo") or "bootout" in c or "bootstrap" in c])
 
 
 if __name__ == "__main__":

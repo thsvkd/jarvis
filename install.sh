@@ -2,7 +2,7 @@
 # jarvis 설치기(macOS·Linux): 게이트웨이를 설치해 띄우고 모듈(Orca·훅·셋업)을 적용한다. 다시 실행해도 된다.
 # Windows 는 install.ps1 을 쓴다(README 의 운영 절).
 #
-#   curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh -s -- --core <core 의 tailnet IP>
+#   curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh -s -- --core <core 의 tailnet IP> [--daemon]
 #
 # git·Homebrew 가 없는 새 Mac 에서도 돈다: Python 은 uv 로 받은 venv(~/.local/share/jarvis/venv), 코드는 최신 릴리스 묶음.
 # Linux 는 LaunchAgent 대신 systemd 사용자 유닛(deploy/jarvis.service, python 만 venv 로)을 쓴다.
@@ -11,9 +11,11 @@
 set -eu
 
 CORE=""
+DAEMON=""  # --daemon: macOS 에서 LaunchAgent 대신 LaunchDaemon 으로 돈다(GUI 로그인이 없는 기기. README 의 macOS 절)
 while [ $# -gt 0 ]; do
   case "$1" in
     --core) CORE="${2:?--core 에 tailnet IP 를 주세요}"; shift 2 ;;
+    --daemon) DAEMON=1; shift ;;
     *) echo "모르는 인자: $1" >&2; exit 1 ;;
   esac
 done
@@ -23,12 +25,17 @@ case "$OS" in
   Darwin|Linux) ;;
   *) echo "macOS·Linux 만 지원합니다. Windows 는 install.ps1 을 쓰세요(README 의 운영 절)" >&2; exit 1 ;;
 esac
+if [ -n "$DAEMON" ] && [ "$OS" != Darwin ]; then
+  echo "--daemon 은 macOS 전용입니다" >&2
+  exit 1
+fi
 
 SHARE="$HOME/.local/share/jarvis"
 APP="$SHARE/app"
 OLD="$HOME/Workspace/jarvis"  # 1.8.0 이전 배치
 CONFIG="$HOME/.config/jarvis/config.toml"
 AGENT="$HOME/Library/LaunchAgents/dev.jarvis.plist"
+DAEMON_PLIST="${JARVIS_DAEMON_PLIST:-/Library/LaunchDaemons/dev.jarvis.plist}"  # 재정의는 테스트용이다
 UNIT="$HOME/.config/systemd/user/jarvis.service"
 PY="$SHARE/venv/bin/python"
 MANIFEST="${JARVIS_MANIFEST:-https://github.com/thsvkd/jarvis/releases/latest/download/manifest.json}"
@@ -53,6 +60,8 @@ else uv pip install --quiet --python "$PY" psutil; fi
 if [ "$OS" = Darwin ]; then REG="$AGENT"; else REG="$UNIT"; fi
 # 개발 체크아웃(~/Workspace/jarvis/.git)으로 이미 등록된 기기는 그대로 둔다(받지도 옮기지도 않는다)
 if [ ! -d "$APP" ] && [ -e "$OLD/.git" ] && [ -f "$REG" ]; then APP="$OLD"; fi
+# LaunchDaemon 이 옛 폴더를 가리키는 기기도 같다: root 소유 등록은 고칠 수 없다
+if [ ! -d "$APP" ] && [ -f "$OLD/jarvis/__init__.py" ] && [ -f "$DAEMON_PLIST" ]; then APP="$OLD"; fi
 # 1.8.0 이전 배치(~/Workspace/jarvis 에 푼 실행본, .git 없음)로 등록된 기기: 옛 base 를 그대로 app 으로 옮긴다(relocate).
 # 새 릴리스를 app 에 풀지 않는다(base 가 바뀌면 런처의 롤백 기준 previous=None → base 가 바뀐다)
 RELOC=""
@@ -100,14 +109,18 @@ EOF
 fi
 
 # 4. 서비스: macOS 는 LaunchAgent(로그인한 사용자 세션), Linux 는 systemd 사용자 유닛
-if [ "$OS" = Darwin ]; then
+if [ "$OS" = Darwin ] && [ -f "$DAEMON_PLIST" ]; then
+  # 에이전트를 새로 만들면 다음 GUI 로그인 때 두 번째 jarvis 가 같은 포트를 잡으려 한다
+  [ -n "$DAEMON" ] || echo "LaunchDaemon 으로 등록된 기기라 LaunchAgent 를 만들지 않습니다(되돌리기: README 의 LaunchDaemon 모드 절)"
+elif [ "$OS" = Darwin ]; then
   if [ ! -f "$AGENT" ]; then
     mkdir -p "$(dirname "$AGENT")"
     # 작업 폴더는 템플릿과 상관없이 app 이다(1.8.0 이전 릴리스의 템플릿은 ~/Workspace/jarvis 를 적는다)
     sed -e "s#/opt/homebrew/bin/python3#$PY#" -e "s#/Users/USER/Workspace/jarvis#$APP#" \
       -e "s#/Users/USER/.local/share/jarvis/app#$APP#" -e "s#/Users/USER#$HOME#g" "$APP/deploy/jarvis.plist" > "$AGENT"
   fi
-  launchctl print "gui/$(id -u)/dev.jarvis" >/dev/null 2>&1 || launchctl bootstrap "gui/$(id -u)" "$AGENT"
+  # --daemon 은 GUI 세션 없이(SSH) 실행할 수 있어 에이전트를 띄우지 않는다. 전환은 5단계 뒤에 한다
+  [ -n "$DAEMON" ] || launchctl print "gui/$(id -u)/dev.jarvis" >/dev/null 2>&1 || launchctl bootstrap "gui/$(id -u)" "$AGENT"
 else
   if [ ! -f "$UNIT" ]; then
     mkdir -p "$(dirname "$UNIT")"
@@ -130,7 +143,10 @@ if [ -n "$RELOC" ]; then
   before=$(cksum < "$REG")
   state=$(relocate --json | "$PY" -c 'import json, sys; r = json.load(sys.stdin); print("이전:", r["state"], r["detail"], file=sys.stderr); print(r["state"])') || state=failed
   # macOS 는 launchd 가 plist 를 다시 읽어야 app 에서 뜬다. 사용자가 실행한 설치기라 여기서 다시 읽힌 뒤 옛 폴더를 옮긴다
-  if [ "$OS" = Darwin ] && [ "$state" = pending_reload ]; then
+  # LaunchDaemon 등록이 남아 있으면 에이전트를 띄우지 않는다(두 벌이 같은 포트를 잡으려 한다)
+  if [ "$OS" = Darwin ] && [ "$state" = pending_reload ] && [ -f "$DAEMON_PLIST" ]; then
+    echo "LaunchDaemon 등록이 남아 있어 LaunchAgent 를 다시 읽지 않습니다" >&2
+  elif [ "$OS" = Darwin ] && [ "$state" = pending_reload ]; then
     launchctl bootout "gui/$(id -u)/dev.jarvis" 2>/dev/null || true
     # bootout 직후의 bootstrap 은 작업이 아직 내려가는 중이면 실패할 수 있다(5: Input/output error). 몇 번 다시 한다
     for i in 1 2 3 4 5; do launchctl bootstrap "gui/$(id -u)" "$AGENT" 2>/dev/null && break; sleep 1; done
@@ -149,8 +165,21 @@ if [ -n "$RELOC" ]; then
   fi
 fi
 
-# 6. 모듈: 계획을 보이고 그 plan_id 로 적용한다. app 의 런처가 받아 둔 릴리스(versions/)로 넘긴다
 [ -d "$APP" ] || APP="$OLD"  # 이전이 실패했으면 아직 옛 배치가 실행본이다
+
+# --daemon: 이전(5단계)이 에이전트 plist 를 고친 뒤에 넘긴다. 전환하면 그 plist 가 LaunchAgents 밖으로 옮겨진다
+if [ -n "$DAEMON" ]; then
+  DSRC="$APP"
+  # 이 설치기보다 오래된 app 에는 스크립트가 없다. 나중에 uninstall 을 부를 수 있게 지워지지 않는 곳에 받는다
+  if [ ! -f "$DSRC/deploy/macos-daemon.sh" ]; then DSRC="$SHARE/daemon-src"; fetch "$DSRC"; fi
+  # 이 셸이 파이프(curl | sh)로 읽는 스크립트를 자식이 먹지 않게 한다. sudo 는 /dev/tty 로 묻는다
+  bash "$DSRC/deploy/macos-daemon.sh" install </dev/null || {
+    echo "LaunchDaemon 으로 옮기지 못했습니다. 위 결과를 확인한 뒤 다시 실행하세요" >&2
+    exit 1
+  }
+fi
+
+# 6. 모듈: 계획을 보이고 그 plan_id 로 적용한다. app 의 런처가 받아 둔 릴리스(versions/)로 넘긴다
 cd "$APP"
 for m in orca hooks setup; do
   plan=$("$PY" -m jarvis module "$m" plan --json) || { echo "$m: 계획을 세우지 못했습니다" >&2; continue; }
