@@ -165,11 +165,19 @@
     :html`<div class="ul-login"><p>아래 주소를 열어 로그인하고 일회용 코드를 넣으세요. 코드는 ${new Date(L.expires_at*1000).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",hour12:false})}까지 유효합니다.</p><p><a href="${L.url}" target="_blank" rel="noopener noreferrer">${L.url}</a></p><p class="ul-code">${L.code}</p><p class="ul-muted">로그인을 마치면 이 창이 저절로 닫히고 사용량을 다시 읽습니다.</p></div>`);
    return;
   }
-  if(S.guide){ // 안내만 한다: 로그인은 그 기기의 화면 세션에서 사람이 한다. 문구에 기기 이름·경로를 넣지 않는다
+  if(S.guide){ // 안내만 한다: 로그인은 그 기기에서 사람이 한다(파일 저장소는 SSH, 그 밖에는 화면 세션). 문구에 기기 이름·경로를 넣지 않는다
    const d=S.devs.find(x=>x.id===S.guide),L=d&&(d.providers||[]).find(x=>x.id==="claude")?.login;
    $("#ulDlgT").textContent=(d?d.host||d.id:S.guide)+" · Claude 다시 로그인";
    const add=L&&L.slot?"hswap claude add --slot "+L.slot:"hswap claude add",other=!!(L&&L.other),onlyAdd=!!(L&&L.state==="other_account");
-   P.render($("#ulDlgB"),html`<div class="ul-login">${L&&L.state==="keychain"?html`<p class="ul-err">SSH·서비스가 아니라 로그인 세션에서 실행해야 합니다.</p>`:""}${onlyAdd?"":html`<p>1. 그 기기의 로그인된 화면(GUI) 터미널에서 <code>claude</code> 를 실행해 <code>/login</code> 합니다. SSH 나 원격 실행 맥락은 피합니다.</p>`}<p>${onlyAdd?"":"2. "}<code>${add}</code> 로 ${other?"지금 로그인을 새 슬롯에 저장합니다. 이미 저장한 계정이면 다음 자동 갱신 뒤 이 표시가 사라집니다.":html`그 계정을 다시 저장합니다.${L&&L.slot?"":" 슬롯 번호를 알면 --slot N 을 덧붙입니다."}`}</p><p class="ul-muted">Claude 는 device-code 로그인이 없어 jarvis 가 대신 로그인하지 않습니다.</p></div>`);
+   const save=html`<code>${add}</code> 로 ${other?"지금 로그인을 새 슬롯에 저장합니다. 이미 저장한 계정이면 다음 자동 갱신 뒤 이 표시가 사라집니다.":html`그 계정을 다시 저장합니다.${L&&L.slot?"":" 슬롯 번호를 알면 --slot N 을 덧붙입니다."}`}`;
+   const gui=html`${L&&L.state==="keychain"?html`<p class="ul-err">SSH·서비스가 아니라 로그인 세션에서 실행해야 합니다.</p>`:""}${onlyAdd?"":html`<p>1. 그 기기의 로그인된 화면(GUI) 터미널에서 <code>claude</code> 를 실행해 <code>/login</code> 합니다. SSH 나 원격 실행 맥락은 피합니다.</p>`}<p>${onlyAdd?"":"2. "}${save}</p>`;
+   // 파일 저장소: 키체인이 열린 곳에서 claude 를 실행하면 키체인에 쓰고 파일을 지운다. 그래서 키체인이 잠긴 SSH 로 안내한다
+   const ssh=html`<p>1. <code>ssh &lt;그 기기&gt;</code> 로 접속합니다. 화면 터미널은 피합니다: 키체인이 열린 곳에서 <code>claude</code> 를 실행하면 로그인이 키체인으로 옮겨집니다.</p>${onlyAdd?"":html`<p>2. <code>claude</code> 를 실행해 <code>/login</code> 합니다.</p>`}<p>${onlyAdd?"2":"3"}. ${save}</p>`;
+   // 복구가 먼저다: 항목이 남아 있으면 SSH 의 /login 이 저장되지 않을 수 있다
+   const repair=html`<p class="ul-err">키체인에 생긴 로그인을 파일로 되돌립니다: <code>hswap claude migrate-store --to file --keep keychain</code></p><p>이 명령은 키체인이 열린 맥락에서만 동작합니다. 그 기기의 화면 세션에서 실행하거나, 같은 셸에서 <code>security unlock-keychain</code> 을 먼저 실행합니다. 그 셸에서는 <code>claude</code> 를 실행하지 않습니다.</p><p class="ul-muted">복구한 뒤에도 로그인이 풀려 있으면 아래 순서로 다시 로그인합니다.</p>`;
+   const conflict=html`<p class="ul-err">hswap 설정에서 파일 저장소(<code>credentials.store</code>)와 키체인 필수 모드(<code>credentials.requireKeychain</code>) 중 하나만 켭니다. 다시 로그인하지 않아도 됩니다.</p>`;
+   const steps=L&&L.state==="config_conflict"?conflict:L&&L.store==="file"?html`${L.state==="keychain_item_present"?repair:""}${ssh}`:gui;
+   P.render($("#ulDlgB"),html`<div class="ul-login">${steps}<p class="ul-muted">Claude 는 device-code 로그인이 없어 jarvis 가 대신 로그인하지 않습니다.</p></div>`);
    return;
   }
   if(!S.dlg)return;

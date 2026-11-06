@@ -185,6 +185,38 @@ click({ guide: "first" });
 guide = element("ulDlgB").innerHTML;
 assert.ok(guide.indexOf("로그인 세션에서 실행해야") < guide.indexOf("/login"));
 assert.match(guide, /<code>hswap claude add<\/code> 로 그 계정을 다시 저장합니다\. 슬롯 번호를 알면 --slot N/);
+// 파일 저장소: SSH → /login → add 순서이고 화면 터미널은 피한다. 기기 이름은 일반 표기다. 슬롯을 알면 넣는다
+const guideOf = login => {
+  guideDialog.close();
+  claudeOf(devices[0]).login = { note: null, attention: true, slot: null, ...login };
+  click({ guide: "first" });
+  return element("ulDlgB").innerHTML;
+};
+const fileStore = { state: "failed", text: "자동 갱신 실패", store: "file", slot: "2" };
+guide = guideOf(fileStore);
+assert.ok(guide.indexOf("<code>ssh &lt;그 기기&gt;</code>") < guide.indexOf("/login"));
+assert.ok(guide.indexOf("/login") < guide.indexOf("hswap claude add --slot 2"));
+assert.match(guide, /화면 터미널은 피합니다: 키체인이 열린 곳에서 <code>claude<\/code> 를 실행하면 로그인이 키체인으로 옮겨집니다/);
+assert.doesNotMatch(guide, /GUI|migrate-store|unlock-keychain|first/);
+// 이전 계정의 기록이면 파일 저장소에서도 add 만 안내한다
+guide = guideOf({ ...fileStore, state: "other_account", slot: null, other: true });
+assert.match(guide, /<code>ssh &lt;그 기기&gt;<\/code>/);
+assert.match(guide, /<p>2\. <code>hswap claude add<\/code> 로 지금 로그인을 새 슬롯에 저장합니다/);
+assert.doesNotMatch(guide, /\/login/);
+// 키체인 항목이 다시 생겼으면 복구 명령과 그 조건이 재로그인보다 먼저 온다
+guide = guideOf({ ...fileStore, state: "keychain_item_present" });
+assert.ok(guide.indexOf("hswap claude migrate-store --to file --keep keychain") < guide.indexOf("ssh &lt;그 기기&gt;"));
+assert.match(guide, /<code>security unlock-keychain<\/code> 을 먼저 실행합니다/);
+// 설정 충돌은 설정만 고친다. 다시 로그인을 권하지 않는다
+guide = guideOf({ state: "config_conflict", text: "hswap 설정 충돌", store: "file" });
+assert.match(guide, /credentials\.store.*credentials\.requireKeychain/);
+assert.doesNotMatch(guide, /\/login|ssh &lt;|hswap claude add/);
+// store 가 없는 옛 형식과 auto·keychain 은 기존 GUI 안내 그대로다
+for (const store of [undefined, "auto", "keychain"]) {
+  guide = guideOf({ state: "failed", text: "자동 갱신 실패", store, slot: "2" });
+  assert.match(guide, /로그인된 화면\(GUI\) 터미널에서 <code>claude<\/code> 를 실행해 <code>\/login<\/code> 합니다/, String(store));
+  assert.doesNotMatch(guide, /ssh &lt;|migrate-store/, String(store));
+}
 // 자동 갱신 기록이 이전 계정의 것이면 옛 슬롯을 권하지 않고 새 슬롯으로 add 만 안내한다
 guideDialog.close();
 claudeOf(devices[0]).login = { state: "other_account", text: "자동 갱신 기록이 이전 계정의 것입니다", note: null, attention: true, slot: null, other: true };
