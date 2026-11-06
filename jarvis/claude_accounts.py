@@ -433,8 +433,9 @@ def _is_relogin(a):
     return STATUS["relogin_required"][0] in (a.get("note"), a.get("error"))
 
 
-def login(rows=(), keychain=False, signed_in=False, fatal=None):
-    """기기 단위 로그인 상태 {state, text, note, attention, slot, other, store}. 알릴 것이 없으면 None(keepalive.json 이 없으면 이 기능을 쓰지 않는 기기다).
+def _judge_login(k, rows, keychain, signed_in, fatal, first_seen, now):
+    """로그인 판정: 값만 받아 (기기 단위 로그인 상태 {state, text, note, attention, slot, other, store} 또는 None, 새 first_seen). 알릴 것이 없으면 None(keepalive.json 이 없으면 이 기능을 쓰지 않는 기기다).
+    k: keepalive 기록(없으면 {}). first_seen: 파일 저장소에서 갱신을 확인하지 못한 기록을 처음 본 시각. now: time.time().
     순서: 설정 충돌·키체인 항목(있거나 확인 실패) > 사람이 다시 로그인해야 하는 것 > 키체인 > 만료 임박 > 멈춤 > 이전 계정의 기록 > 그 밖의 실패 > 정상.
     store: 파일 저장소 기기면 "file", 아니면 None(옛 형식 포함). 파일의 다른 값은 내보내지 않는다. 키체인을 쓰지 않는 기기라 키체인에 닿지 못하는 것은 문제가 아니다.
     rows: 사용 중 계정의 재로그인 판정(저장소의 authDeadStrikes 와 hswap 의 relogin_required 가 같은 문구가 된다)과 사용 중 슬롯.
@@ -444,11 +445,9 @@ def login(rows=(), keychain=False, signed_in=False, fatal=None):
     other: keepalive 기록의 activeSlot 이 지금 로그인의 슬롯과 다르다고 확인됐다. 만료·오류·접근 토큰은 그 계정의 사실이라 쓰지 않고, 키체인·멈춤·자격 부재는 기기의 사실이라 그대로 쓴다.
     activeSlot 이 없으면 슬롯을 모르는 것이지 다른 계정이라는 증거가 아니다: 판정은 그대로 두고 slot 만 뺀다.
     슬롯은 맞다고 확인될 때만 준다(다른 계정의 슬롯에 add 하면 저장 로그인을 덮을 수 있다). 파일이 없으면 기록과 비교할 것이 없어 사용 중 슬롯을 준다."""
-    global _unconfirmed
-    k = _keepalive() or {}
     err = k.get("error") if isinstance(k.get("error"), dict) else {}
     kind = err.get("type") if isinstance(err.get("type"), str) else None
-    now, checked, expires = time.time(), _sec(k.get("checkedAt")), _sec(k.get("loginExpiresAt"))
+    checked, expires = _sec(k.get("checkedAt")), _sec(k.get("loginExpiresAt"))
     current = next((a.get("slot") for a in rows if a.get("active") and a.get("slot")), None)
     recorded = k.get("activeSlot")
     recorded = str(recorded) if isinstance(recorded, int) and not isinstance(recorded, bool) and recorded > 0 else None
@@ -457,7 +456,7 @@ def login(rows=(), keychain=False, signed_in=False, fatal=None):
     file_store = k.get("store") == "file"
     blocked = next((x for x in (fatal, kind) if x in ("config_conflict", "keychain_item_present")), "keychain_item_present" if file_store and k.get("keychainItemPresent") is True else None)
     # shortcut: 처음 본 시각은 메모리에만 있어 게이트웨이를 재시작하면 처음부터 센다. hswap 이 마지막 성공 시각을 적으면 그것으로 바꾼다
-    _unconfirmed = (_unconfirmed or now) if file_store and kind == "keychain_unavailable" and k.get("ok") is not True else None
+    first_seen = (first_seen or now) if file_store and kind == "keychain_unavailable" and k.get("ok") is not True else None
     quiet = False
     if blocked:  # 기기의 사실이다. 항목이 남아 있으면 SSH 의 /login 이 저장되지 않을 수 있어 재로그인보다 먼저 보인다
         state, text = blocked, KEEPALIVE_ERRORS[blocked]
@@ -466,16 +465,16 @@ def login(rows=(), keychain=False, signed_in=False, fatal=None):
     elif not file_store and (kind == "keychain_unavailable" or keychain):
         state, text = "keychain", "키체인 접근 불가: 키체인에 접근할 수 없는 곳에서 실행됨"
     elif not k:
-        return None
+        return None, first_seen
     elif not other and expires is not None and expires - now <= LOGIN_WARN_S:
         state, text = "expiring", f"로그인 만료 임박({_span(expires - now)})" if expires > now else "로그인 기한이 지났습니다"
     elif checked is None or now - checked > config.CLAUDE_KEEPALIVE_STALE_S:
         state, text = "stalled", "자동 갱신 멈춤" + (f"(마지막 {_span(now - checked)} 전)" if checked else "")
     elif other and kind != "no_credentials":  # 자격 부재는 add 로 고칠 수 없어 /login 안내로 이어지는 실패로 둔다
         state, text = "other_account", "자동 갱신 기록이 이전 계정의 것입니다"
-    elif _unconfirmed:
-        quiet = now - _unconfirmed <= config.CLAUDE_KEEPALIVE_STALE_S
-        state, text = "unconfirmed", "자동 갱신 확인되지 않음" + ("" if quiet else f"({_span(now - _unconfirmed)}째)")
+    elif first_seen:
+        quiet = now - first_seen <= config.CLAUDE_KEEPALIVE_STALE_S
+        state, text = "unconfirmed", "자동 갱신 확인되지 않음" + ("" if quiet else f"({_span(now - first_seen)}째)")
     elif k.get("ok") is not True:
         state, text = "failed", f"자동 갱신 실패({KEEPALIVE_ERRORS.get(kind, '알 수 없는 오류')})"
     else:
@@ -483,7 +482,14 @@ def login(rows=(), keychain=False, signed_in=False, fatal=None):
     access = None if other or blocked or state == "unconfirmed" else _sec(k.get("accessExpiresAt"))  # 갱신이 멈췄거나 확인되지 않았는데 "자동 갱신"을 말하지 않는다
     return {"state": state, "text": text, "attention": state != "ok" and not quiet, "slot": current if not k or current == recorded else None, "other": other,
             "store": "file" if file_store else None,
-            "note": None if access is None else f"접근 토큰 {_span(access - now)} 뒤 만료(자동 갱신)" if access > now else "접근 토큰 만료됨(자동 갱신 대기)"}
+            "note": None if access is None else f"접근 토큰 {_span(access - now)} 뒤 만료(자동 갱신)" if access > now else "접근 토큰 만료됨(자동 갱신 대기)"}, first_seen
+
+
+def login(rows=(), keychain=False, signed_in=False, fatal=None):
+    """지금 keepalive 기록으로 로그인을 판정한다(_judge_login). 파일 읽기와 처음 본 시각의 기억은 판정 밖인 여기서 한다."""
+    global _unconfirmed
+    state, _unconfirmed = _judge_login(_keepalive() or {}, rows, keychain, signed_in, fatal, _unconfirmed, time.time())
+    return state
 
 
 def _old(a, now):
