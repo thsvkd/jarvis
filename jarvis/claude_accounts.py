@@ -230,8 +230,10 @@ class _HswapError(RuntimeError):
     """hswap 이 최상위 오류로 답했다. 문구는 고정 문구이고 kind 는 응답의 값 그대로라 비교에만 쓴다."""
 
     def __init__(self, kind):
-        safe = kind if isinstance(kind, str) and re.fullmatch(r"[a-z_]{1,40}", kind) else "알 수 없음"
-        super().__init__((HSWAP_ERRORS.get(kind) if isinstance(kind, str) else None) or f"hswap 오류(종류: {safe})")
+        known = HSWAP_ERRORS.get(kind) if isinstance(kind, str) else None
+        if not known:  # 종류 원문은 화면에 내지 않는다. 진단용으로 거른 값만 게이트웨이 로그에 남긴다
+            print(f"[jarvis] hswap 의 모르는 오류 종류: {re.sub(r'[^a-z_]', '', kind if isinstance(kind, str) else '')[:40]}", flush=True)
+        super().__init__(known or "hswap 오류(알 수 없는 종류)")
         self.kind = kind
 
 

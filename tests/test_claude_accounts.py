@@ -522,10 +522,10 @@ class LoginStateTest(StoreCase):
         secrets = ("sk-ant-oat01-SECRET", "Bearer abc.def", "/Users/alice/.claude", "C:\\Users\\alice\\x", "/opt/private/token.json")
         leak = " ".join(secrets)
         for error, want in (({"type": "config_conflict", "message": leak}, "hswap 설정 충돌"), ({"type": "LockError", "message": leak}, "잠금을 쥐고 있음"),
-                            ({"type": "brand_new_error", "message": leak}, "hswap 오류(종류: brand_new_error)"),
-                            ({"type": leak, "message": leak}, "hswap 오류(종류: 알 수 없음)"), ({"type": "A" * 10, "message": leak}, "hswap 오류(종류: 알 수 없음)"),
-                            ({"type": "a" * 41, "message": leak}, "hswap 오류(종류: 알 수 없음)"), ({"type": ["list"], "message": leak}, "hswap 오류(종류: 알 수 없음)"),
-                            ({"message": leak}, "hswap 오류(종류: 알 수 없음)"), (leak, "hswap 오류(종류: 알 수 없음)")):
+                            ({"type": "brand_new_error", "message": leak}, "hswap 오류(알 수 없는 종류)"),
+                            ({"type": leak, "message": leak}, "hswap 오류(알 수 없는 종류)"), ({"type": "A" * 10, "message": leak}, "hswap 오류(알 수 없는 종류)"),
+                            ({"type": "a" * 41, "message": leak}, "hswap 오류(알 수 없는 종류)"), ({"type": ["list"], "message": leak}, "hswap 오류(알 수 없는 종류)"),
+                            ({"message": leak}, "hswap 오류(알 수 없는 종류)"), (leak, "hswap 오류(알 수 없는 종류)")):
             self.reply(error=error)
             for stored in (False, True):
                 if stored:
@@ -535,13 +535,23 @@ class LoginStateTest(StoreCase):
                 claude_accounts._cache = None
                 text = json.dumps([body, self.compat_body()], ensure_ascii=False)
                 self.assertIn(want, text, error)
-                for s in (*secrets, "alice", "SECRET"):
+                for s in (*secrets, "alice", "SECRET", "brand_new_error", "aaaaa"):
                     self.assertNotIn(s, text, error)
             code, answer = claude_accounts.switch("1")
             self.assertEqual(code, 409)
             self.assertIn(want, answer["error"])
             self.assertNotIn("SECRET", answer["error"])
             os.remove(os.path.join(self.root, "sequence.json"))
+
+    def test_unknown_hswap_type_goes_only_to_the_log_filtered_and_cut(self):
+        """covers: USAGE-6. 표에 있는 type 은 로그에 남기지 않는다"""
+        for kind, want in (("brand_new_error", "brand_new_error"), ("Sk-1/ab_c", "kab_c"), ("a" * 41, "a" * 40), (["list"], ""), (None, "")):
+            with mock.patch.object(claude_accounts, "print", create=True) as log:
+                self.assertEqual(str(claude_accounts._HswapError(kind)), "hswap 오류(알 수 없는 종류)")
+            self.assertEqual(log.call_args[0][0], f"[jarvis] hswap 의 모르는 오류 종류: {want}", kind)
+        with mock.patch.object(claude_accounts, "print", create=True) as log:
+            claude_accounts._HswapError("config_conflict")
+        log.assert_not_called()
 
     def test_fatal_hswap_errors_reach_the_login_state_over_an_old_record(self):
         """covers: USAGE-7. keepalive 기록이 정상이어도 치명적 type 은 바로 attention 이다. hswap 이 다시 답하면 사라진다"""
