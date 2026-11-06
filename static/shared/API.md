@@ -20,7 +20,7 @@
 | `GET /api/devices/<id>/orca/update` | core 전용. 업데이트 확인: 그 게이트웨이 `GET /api/orca/update` 로 전달. 옛 게이트웨이(404)는 501 `{error}`(갱신 필요) | `viewers`. 캐시 없음 |
 | `POST /api/devices/<id>/orca/update` | core 전용. 그 기기 Orca 업데이트. 게이트웨이 `POST /api/orca/update` 로 전달 | `viewers`. 헤더 `X-Jarvis-Action: orca-update` 필수 |
 | `POST /api/devices/orca/update` | core 전용. 목록의 기기마다 업데이트를 시작한다. `{devices:[{id, status, ...}]}`. 한 대 실패가 나머지를 멈추지 않는다 | `viewers`. 헤더 `X-Jarvis-Action: orca-update` 필수 |
-| `GET /api/usage/independent` | 이 기기 AI 구독 사용량 `{mode: "independent", providers: [{id, name, accounts, login}], unavailable, fetched_at}`. `login` 은 Claude 프로바이더에만 붙는다(아래 "사용량의 login"). 호환 경로 `GET /api/orca/usage` 도 같은 값을 붙인다 | 설정 `core`. core 는 `GET /api/devices/usage?independent=1` 로 모은다 |
+| `GET /api/usage/independent` | 이 기기 AI 구독 사용량 `{mode: "independent", providers: [{id, name, accounts, login}], unavailable, fetched_at}`. `login` 은 Claude 프로바이더에만 붙는다(아래 "사용량의 login"). 호환 경로 `GET /api/orca/usage` 도 같은 값을 붙인다. 조직 UUID 가 있는 Claude 행에는 `org_key`(조직 UUID 해시)와 `org_at`(hswap 슬롯 등록 시각)이 붙고, core 가 같은 조직의 이름을 가장 늦은 것으로 맞춘 뒤 지운다 | 설정 `core`. core 는 `GET /api/devices/usage?independent=1` 로 모은다 |
 | `GET /api/changes` | 최근 구성 변경 최대 200건 `{changes:[...]}` | 10초. 30초마다 저장 및 종료 시 저장 |
 
 SSH 기기(`url` 이 `ssh://…`, `docs/SPEC.md` 의 "SSH 기기"): 모듈(`/api/devices/modules`·`plan`·`apply`)과 jarvis 업데이트는 HTTP 기기와 같은 응답 모양이다. 그 밖의 기기 조작(페어링·`orca/issue`·Orca 업데이트 확인·실행·사용량·로그인·계정 전환)은 ssh 를 실행하지 않고 501 `{error}`(페어링은 `{supported:false, error}`)다. 스냅샷 판이 1.7.8 미만이면 조작이 501, 스냅샷이 없거나 ssh·원격 실행이 실패하면 502, 그 기기에서 core 가 시작한 apply·갱신이 진행 중이면 409 다. history·changes 는 기기마다 동시에 4개까지이고 넘치면 502 다.
