@@ -61,6 +61,7 @@ _cache = None  # (monotonic, 결과, 물을 때의 저장소 모습 _store_shape
 _discovered = False  # hswap 이 마지막으로 답한 때 계정을 주었다. 저장소를 읽지 못해도 기준이 지나면 다시 묻는 근거다
 _device = None  # (monotonic, 키체인에 닿지 못함). hswap 이 답한 기기 상태. 계정 행과 따로 두어 계정이 없거나 다음 조회가 실패해도 남는다
 _fatal = None  # (monotonic, type). hswap 이 최상위 오류로 답한 FATAL_ERRORS. hswap 이 다시 답하면 지운다
+_unconfirmed = None  # 파일 저장소에서 갱신을 확인하지 못한 기록을 처음 본 시각. 기록의 checkedAt 은 실패해도 새로워져 기간을 알 수 없다
 _switched = 0  # switch() 가 끝난 횟수. 이것이 바뀌면 그 전에 시작한 읽기의 값은 전환 전 값일 수 있다
 # 자동 설치·올리기: 검증한 버전으로 고정한다(서비스가 최신판을 저절로 받아 실행하지 않게). PyPI 배포본이 그 태그의 소스와 같은지
 # 대조한 뒤 여기 버전을 올려 릴리스하면, 게이트웨이(maintain)가 이보다 낮은 hswap 을 이 버전으로 올린다
@@ -434,9 +435,11 @@ def login(rows=(), keychain=False, signed_in=False, fatal=None):
     rows: 사용 중 계정의 재로그인 판정(저장소의 authDeadStrikes 와 hswap 의 relogin_required 가 같은 문구가 된다)과 사용 중 슬롯.
     keychain: hswap 의 keychainUnavailable. signed_in: 로그인을 읽었다(rows 에 active 가 없으면 저장되지 않은 로그인이다).
     fatal: hswap 이 최상위 오류로 답한 FATAL_ERRORS. keepalive 기록보다 새로운 사실이라 기록과 상관없이 쓴다.
+    unconfirmed: 파일 저장소인데 keychain_unavailable 로 실패한 기록. 키체인 경고는 아니지만 갱신이 확인되지 않았으므로 성공 문구를 쓰지 않고, CLAUDE_KEEPALIVE_STALE_S 동안 계속되면 attention 으로 올린다.
     other: keepalive 기록의 activeSlot 이 지금 로그인의 슬롯과 다르다고 확인됐다. 만료·오류·접근 토큰은 그 계정의 사실이라 쓰지 않고, 키체인·멈춤·자격 부재는 기기의 사실이라 그대로 쓴다.
     activeSlot 이 없으면 슬롯을 모르는 것이지 다른 계정이라는 증거가 아니다: 판정은 그대로 두고 slot 만 뺀다.
     슬롯은 맞다고 확인될 때만 준다(다른 계정의 슬롯에 add 하면 저장 로그인을 덮을 수 있다). 파일이 없으면 기록과 비교할 것이 없어 사용 중 슬롯을 준다."""
+    global _unconfirmed
     k = _keepalive() or {}
     err = k.get("error") if isinstance(k.get("error"), dict) else {}
     kind = err.get("type") if isinstance(err.get("type"), str) else None
@@ -448,6 +451,9 @@ def login(rows=(), keychain=False, signed_in=False, fatal=None):
     other = recorded is not None and bool(current or signed_in) and current != recorded
     file_store = k.get("store") == "file"
     blocked = next((x for x in (fatal, kind) if x in ("config_conflict", "keychain_item_present")), "keychain_item_present" if file_store and k.get("keychainItemPresent") is True else None)
+    # shortcut: 처음 본 시각은 메모리에만 있어 게이트웨이를 재시작하면 처음부터 센다. hswap 이 마지막 성공 시각을 적으면 그것으로 바꾼다
+    _unconfirmed = (_unconfirmed or now) if file_store and kind == "keychain_unavailable" and k.get("ok") is not True else None
+    quiet = False
     if blocked:  # 기기의 사실이다. 항목이 남아 있으면 SSH 의 /login 이 저장되지 않을 수 있어 재로그인보다 먼저 보인다
         state, text = blocked, KEEPALIVE_ERRORS[blocked]
     elif fatal == "relogin_required" or (kind == "relogin_required" and not other) or any(a.get("active") and _is_relogin(a) for a in rows):
@@ -462,12 +468,15 @@ def login(rows=(), keychain=False, signed_in=False, fatal=None):
         state, text = "stalled", "자동 갱신 멈춤" + (f"(마지막 {_span(now - checked)} 전)" if checked else "")
     elif other and kind != "no_credentials":  # 자격 부재는 add 로 고칠 수 없어 /login 안내로 이어지는 실패로 둔다
         state, text = "other_account", "자동 갱신 기록이 이전 계정의 것입니다"
-    elif k.get("ok") is not True and not (file_store and kind == "keychain_unavailable"):
+    elif _unconfirmed:
+        quiet = now - _unconfirmed <= config.CLAUDE_KEEPALIVE_STALE_S
+        state, text = "unconfirmed", "자동 갱신 확인되지 않음" + ("" if quiet else f"({_span(now - _unconfirmed)}째)")
+    elif k.get("ok") is not True:
         state, text = "failed", f"자동 갱신 실패({KEEPALIVE_ERRORS.get(kind, '알 수 없는 오류')})"
     else:
         state, text = "ok", f"로그인됨{' · 파일 저장소' if file_store else ''}, 자동 갱신 {_span(now - checked)} 전"
-    access = None if other or blocked else _sec(k.get("accessExpiresAt"))  # 갱신이 멈췄는데 "자동 갱신"을 말하지 않는다
-    return {"state": state, "text": text, "attention": state != "ok", "slot": current if not k or current == recorded else None, "other": other,
+    access = None if other or blocked or state == "unconfirmed" else _sec(k.get("accessExpiresAt"))  # 갱신이 멈췄거나 확인되지 않았는데 "자동 갱신"을 말하지 않는다
+    return {"state": state, "text": text, "attention": state != "ok" and not quiet, "slot": current if not k or current == recorded else None, "other": other,
             "store": "file" if file_store else None,
             "note": None if access is None else f"접근 토큰 {_span(access - now)} 뒤 만료(자동 갱신)" if access > now else "접근 토큰 만료됨(자동 갱신 대기)"}
 

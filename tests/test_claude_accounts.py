@@ -49,7 +49,7 @@ class StoreCase(unittest.TestCase):
         self.root = tmp.name
         os.mkdir(os.path.join(self.root, "cache"), 0o700)
         for name, kw in (("_root", {"return_value": self.root}), ("_live_identity", {"return_value": ("a@example.com", "o1")}),
-                         ("binary", {"return_value": None}), ("_cache", {"new": None}), ("_device", {"new": None}), ("_discovered", {"new": False}), ("_fatal", {"new": None}),
+                         ("binary", {"return_value": None}), ("_cache", {"new": None}), ("_device", {"new": None}), ("_discovered", {"new": False}), ("_fatal", {"new": None}), ("_unconfirmed", {"new": None}),
                          ("ensure", {"side_effect": AssertionError("독립 경로는 설치하지 않는다")})):
             p = mock.patch.object(claude_accounts, name, **kw)
             setattr(self, name.strip("_"), p.start())
@@ -477,12 +477,37 @@ class LoginStateTest(StoreCase):
         out = claude_accounts.read(force=True)
         self.assertEqual((out["login"]["state"], out["login"]["attention"]), ("ok", False))
         self.assertNotIn("키체인", out["login"]["text"])
-        self.keepalive(store="file", ok=False, error={"type": "keychain_unavailable", "message": "m"})
-        s = claude_accounts.login()
-        self.assertEqual((s["state"], s["attention"], s["store"]), ("ok", False, "file"))
         # 다른 실패는 파일 저장소에서도 그대로 실패다
         self.keepalive(store="file", ok=False, error={"type": "refresh_failed"})
         self.assertEqual(claude_accounts.login()["text"], "자동 갱신 실패(토큰 갱신 실패)")
+
+    def test_file_store_failure_never_reads_as_success(self):
+        """covers: USAGE-7. 파일 저장소의 keychain_unavailable 실패는 경고가 아니지만 성공도 아니다. 기록이 새로워도 계속되면 attention 으로 올린다"""
+        self.keepalive(store="file", ok=False, error={"type": "keychain_unavailable", "message": "m"})
+        s = claude_accounts.login()
+        self.assertEqual((s["state"], s["text"], s["attention"], s["note"], s["store"]), ("unconfirmed", "자동 갱신 확인되지 않음", False, None, "file"))
+        self.assertEqual(claude_accounts.login(keychain=True)["state"], "unconfirmed")
+        # checkedAt 이 새로워도 시한은 처음 본 때부터 잰다
+        claude_accounts._unconfirmed = time.time() - claude_accounts.config.CLAUDE_KEEPALIVE_STALE_S - 60
+        self.keepalive(store="file", ok=False, error={"type": "keychain_unavailable"}, checkedAt=time.time())
+        s = claude_accounts.login()
+        self.assertEqual((s["state"], s["attention"]), ("unconfirmed", True))
+        self.assertNotIn("로그인됨", s["text"])
+        self.assertIn("자동 갱신 확인되지 않음", s["text"])
+        # ok:true 가 오면 끝나고, 다시 실패하면 처음부터 잰다
+        self.keepalive(store="file")
+        s = claude_accounts.login()
+        self.assertEqual((s["state"], s["attention"]), ("ok", False))
+        self.assertIn("로그인됨 · 파일 저장소", s["text"])
+        self.assertIsNone(claude_accounts._unconfirmed)
+        self.keepalive(store="file", ok=False, error={"type": "keychain_unavailable"})
+        self.assertFalse(claude_accounts.login()["attention"])
+        # 그 밖의 ok:false 와 ok 값이 없는 기록은 어떤 경우에도 성공 문구가 아니다
+        for extra in ({"ok": False, "error": {"type": "refresh_failed"}}, {"ok": False, "error": {"type": "new_kind"}}, {"ok": False, "error": None}, {"ok": "true"}):
+            self.keepalive(store="file", **extra)
+            s = claude_accounts.login()
+            self.assertEqual((s["state"], s["attention"]), ("failed", True), extra)
+            self.assertNotIn("로그인됨", s["text"], extra)
 
     def reply(self, *rows, error=None):
         """가짜 hswap 프로세스: 실제 _json 을 거친다."""
