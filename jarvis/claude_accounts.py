@@ -1,6 +1,8 @@
 """Claude 계정의 모든 규칙을 한 곳에 둔다: 신선도, 만료 경고, 상태 문구, 사용 중 판정, 창·Fable·버킷 이름, 기기 로그인 상태.
 
 바깥 인터페이스는 read(force)와 switch(slot)이다. 독립 경로와 호환 경로(orca_usage.read)가 같은 read 를 거치고, 그 뒤에 같은 merge_orca 로 Orca 계정을 보탠다.
+저장값이 지금 로그인에 아직 맞는지는 판정 함수(_judge_shape, _judge_ask, _judge_rows, _judge_login)가 값만 받아 정한다. 새 신선도·유효성 규칙은 그 함수와 표 테스트만 고친다.
+파일과 프로세스를 읽는 순서는 _read 가, 기억(_state)을 고치는 것은 live·switch·login 이 맡는다.
 안에 어댑터가 둘 있다.
 - hswap CLI(live, _json): `hswap claude list --json`(cswap 과 같은 schemaVersion 1)의 실값. 토큰 갱신·사용량 조회 간격은 hswap 이 맡는다.
   쓰기는 core 의 '이 계정 사용' 버튼이 부르는 `hswap claude switch <슬롯> --json` 하나다(자격 교체는 hswap 이 한다).
@@ -57,12 +59,19 @@ STATUS = {
     "no_saved_usage": ("저장된 사용량이 없습니다.", False),  # 저장소 캐시 어댑터만 쓴다
 }
 _lock = threading.Lock()
-_cache = None  # (monotonic, 결과, 물을 때의 저장소 모습 _store_shape). 잠금 안에서 한 값으로 바꾼다. 모습이 지금 저장소와 같을 때만 다시 쓴다
-_discovered = False  # hswap 이 마지막으로 답한 때 계정을 주었다. 저장소를 읽지 못해도 기준이 지나면 다시 묻는 근거다
-_device = None  # (monotonic, 키체인에 닿지 못함). hswap 이 답한 기기 상태. 계정 행과 따로 두어 계정이 없거나 다음 조회가 실패해도 남는다
-_fatal = None  # (monotonic, type). hswap 이 최상위 오류로 답한 FATAL_ERRORS. hswap 이 다시 답하면 지운다
-_unconfirmed = None  # 파일 저장소에서 갱신을 확인하지 못한 기록을 처음 본 시각. 기록의 checkedAt 은 실패해도 새로워져 기간을 알 수 없다
-_switched = 0  # switch() 가 끝난 횟수. 이것이 바뀌면 그 전에 시작한 읽기의 값은 전환 전 값일 수 있다
+
+
+class _State:
+    """읽기 경로의 기억. 고치는 곳은 live·switch·login 뿐이고 판정 함수는 값으로 받는다."""
+    cache = None  # (monotonic, 결과, 물을 때의 저장소 모습 _store_shape). 잠금 안에서 한 값으로 바꾼다. 모습이 지금 저장소와 같을 때만 다시 쓴다
+    discovered = False  # hswap 이 마지막으로 답한 때 계정을 주었다. 저장소를 읽지 못해도 기준이 지나면 다시 묻는 근거다
+    device = None  # (monotonic, 키체인에 닿지 못함). hswap 이 답한 기기 상태. 계정 행과 따로 두어 계정이 없거나 다음 조회가 실패해도 남는다
+    fatal = None  # (monotonic, type). hswap 이 최상위 오류로 답한 FATAL_ERRORS. hswap 이 다시 답하면 지운다
+    unconfirmed = None  # 파일 저장소에서 갱신을 확인하지 못한 기록을 처음 본 시각. 기록의 checkedAt 은 실패해도 새로워져 기간을 알 수 없다
+    switched = 0  # switch() 가 끝난 횟수. 이것이 바뀌면 그 전에 시작한 읽기의 값은 전환 전 값일 수 있다
+
+
+_state = _State()
 # 자동 설치·올리기: 검증한 버전으로 고정한다(서비스가 최신판을 저절로 받아 실행하지 않게). PyPI 배포본이 그 태그의 소스와 같은지
 # 대조한 뒤 여기 버전을 올려 릴리스하면, 게이트웨이(maintain)가 이보다 낮은 hswap 을 이 버전으로 올린다
 # ponytail: 버전만 고정한다. 같은 버전에 나중에 더해진 배포 파일은 대조 없이 받을 수 있다. 막으려면 파일 해시로 고정한다
@@ -267,7 +276,6 @@ def _fingerprint(email, org_uuid):
 
 def switch(slot):
     """'이 계정 사용' 버튼: Claude Code 가 쓰는 계정을 hswap 슬롯 slot 으로 바꾼다. (http 상태, 응답)."""
-    global _cache, _switched
     if not (isinstance(slot, str) and slot.isdigit() and len(slot) <= 4):
         return 400, {"error": "slot 은 hswap 슬롯 번호여야 합니다"}
     exe = binary()
@@ -281,19 +289,18 @@ def switch(slot):
     except Exception as e:
         return 409, {"error": scrub_home(str(e))[:200] or type(e).__name__}
     finally:
-        _cache = None  # 실패해도 다음 읽기는 hswap 에 다시 묻는다
-        _switched += 1  # 묶음을 비운 뒤에 는다: 새 번호를 본 읽기는 옛 묶음을 볼 수 없다
+        _state.cache = None  # 실패해도 다음 읽기는 hswap 에 다시 묻는다
+        _state.switched += 1  # 묶음을 비운 뒤에 는다: 새 번호를 본 읽기는 옛 묶음을 볼 수 없다
         _lock.release()
 
 
 def live(force=False, install=True, shape=None, deadline=None):
     """hswap CLI 어댑터. None(hswap 없음·계정 없음) 또는 {"accounts": [...], "fetched_at": 초, "ids": {슬롯: 신원 지문}} 또는 {"error": "..."}. ids 는 read() 안에서만 쓴다.
     install 이면 hswap 이 없을 때 ensure() 가 설치를 시작하고 그 진행·실패를 error 로 준다(호환 경로만. 독립 경로는 설치하지 않는다).
-    hswap 이 답하면 최상위 keychainUnavailable(0.2.2 의 추가 필드. 없으면 아니라고 본다)을 _device 에 적는다. 실패한 조회는 건드리지 않는다.
+    hswap 이 답하면 최상위 keychainUnavailable(0.2.2 의 추가 필드. 없으면 아니라고 본다)을 _state.device 에 적는다. 실패한 조회는 건드리지 않는다.
     force 는 jarvis 의 30초 묶음만 건너뛴다(프로바이더 조회 간격은 hswap 이 정한다).
     shape: 이 호출을 정한 저장소 모습. 잠금을 기다린 뒤든 포기한 뒤든 모습이 같은 결과만 다시 쓴다(hswap 은 한 번에 하나만 도니 옛 답은 새 답보다 먼저 온다).
     deadline: 잠금 대기와 hswap 호출이 함께 쓰는 시한(monotonic). 넘기면 hswap 을 부르지 않고 오류를 준다."""
-    global _cache, _device, _discovered, _fatal
     exe = binary()
     if not exe:
         msg = ensure() if install else None
@@ -302,10 +309,10 @@ def live(force=False, install=True, shape=None, deadline=None):
     # 동시에 여러 hswap 을 띄우지 않는다. 앞 요청이 끝나지 않으면(멈춘 hswap) 기다리지 않고 마지막 값을 준다
     left = lambda: float("inf") if deadline is None else deadline - time.monotonic()
     if not _lock.acquire(timeout=max(0, min(TIMEOUT_S + 5, left()))):
-        held = _cache
+        held = _state.cache
         return held[1] if held and held[2] == shape else {"error": "hswap 이 응답하지 않습니다"}
     try:
-        held = _cache
+        held = _state.cache
         # 기다리는 동안 앞 요청이 같은 저장소를 보고 새로 읽었으면 강제라도 그 값을 쓴다
         if held and held[2] == shape and (held[0] >= asked or (not force and asked - held[0] < CACHE_S)):
             return held[1]
@@ -315,16 +322,16 @@ def live(force=False, install=True, shape=None, deadline=None):
             body = _json(exe, "list", timeout=min(TIMEOUT_S, left()))
             raw = [r for r in body.get("accounts") or [] if isinstance(r, dict)]
             accounts = [account(r) for r in raw]
-            _device = (time.monotonic(), body.get("keychainUnavailable") is True)
-            _discovered = bool(accounts)  # 실패한 조회는 건드리지 않는다: 일시 실패로 계정을 잊지 않게
-            _fatal = None
+            _state.device = (time.monotonic(), body.get("keychainUnavailable") is True)
+            _state.discovered = bool(accounts)  # 실패한 조회는 건드리지 않는다: 일시 실패로 계정을 잊지 않게
+            _state.fatal = None
             out = {"accounts": accounts, "fetched_at": time.time(),
                    "ids": {str(r.get("number")): _fingerprint(r.get("email"), r.get("organizationUuid")) for r in raw}} if accounts else None
         except Exception as e:
             if isinstance(e, _HswapError):  # 시간 초과처럼 답이 없는 실패는 이전 판정을 지우지 않는다
-                _fatal = (time.monotonic(), e.kind) if e.kind in FATAL_ERRORS else None
+                _state.fatal = (time.monotonic(), e.kind) if e.kind in FATAL_ERRORS else None
             out = {"error": scrub_home(str(e))[:200] or type(e).__name__}
-        _cache = (time.monotonic(), out, shape)
+        _state.cache = (time.monotonic(), out, shape)
         return out
     finally:
         _lock.release()
@@ -487,8 +494,7 @@ def _judge_login(k, rows, keychain, signed_in, fatal, first_seen, now):
 
 def login(rows=(), keychain=False, signed_in=False, fatal=None):
     """지금 keepalive 기록으로 로그인을 판정한다(_judge_login). 파일 읽기와 처음 본 시각의 기억은 판정 밖인 여기서 한다."""
-    global _unconfirmed
-    state, _unconfirmed = _judge_login(_keepalive() or {}, rows, keychain, signed_in, fatal, _unconfirmed, time.time())
+    state, _state.unconfirmed = _judge_login(_keepalive() or {}, rows, keychain, signed_in, fatal, _state.unconfirmed, time.time())
     return state
 
 
@@ -590,24 +596,14 @@ def read(force=False, install=False):
     재시도는 2번까지이고 전체 시한은 READ_BUDGET_S 다. 그 안에 확정하지 못하면 CLI 값 대신 지금 저장소 값과 로그인 상태를 준다."""
     deadline = time.monotonic() + READ_BUDGET_S
     for _ in range(3):
-        seen = _switched
+        seen = _state.switched
         out, settled = _read(force, install, deadline)
-        if settled and seen == _switched:
+        if settled and seen == _state.switched:
             return out
         if time.monotonic() >= deadline:
             break
         force = False  # 강제는 첫 시도로 지켰다. 다시 읽을 때는 같은 모습의 새 결과를 쓴다
     return _read(False, False, deadline, give_up=True)[0]
-
-
-def _keychain_down():
-    """hswap 이 신선도 기준 안에 키체인에 닿지 못한다고 답했는가."""
-    return bool(_recent(_device, time.monotonic()))
-
-
-def _fatal_kind():
-    """hswap 이 신선도 기준 안에 답한 치명적 오류 type."""
-    return _recent(_fatal, time.monotonic())
 
 
 def _read(force, install, deadline, give_up=False):
@@ -617,7 +613,7 @@ def _read(force, install, deadline, give_up=False):
     if give_up:
         out = {"error": "저장소가 계속 바뀌어 hswap 값을 확정하지 못했습니다"}
     else:
-        memory = (_cache, _discovered, _fatal, _device)  # switch() 가 도중에 비워도 같은 값을 본다
+        memory = (_state.cache, _state.discovered, _state.fatal, _state.device)  # switch() 가 도중에 비워도 같은 값을 본다
         mono = time.monotonic()
         shape = _store_shape(store)
         asked, out = _judge_ask(force, install, store, shape, *memory, mono, time.time())
@@ -626,7 +622,8 @@ def _read(force, install, deadline, give_up=False):
             store = _store_read()  # 사용 중 판정은 hswap 이 답한 뒤의 로그인으로 한다(잠금을 기다리는 사이 로그인이 바뀌었을 수 있다)
             settled = _store_shape(store) == shape
     rows, accounts = _judge_rows(out, store, bool(binary()), time.time())
-    state = login(rows, _keychain_down(), bool(store and store.get("signed_in")), _fatal_kind())
+    mono = time.monotonic()  # hswap 이 방금 답했으면 그 기억으로 판정한다
+    state = login(rows, _recent(_state.device, mono), bool(store and store.get("signed_in")), _recent(_state.fatal, mono))
     if accounts is None:
         return ({**(out or {}), "accounts": [], "login": state} if state else out), settled
     result = {"accounts": accounts}

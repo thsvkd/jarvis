@@ -69,7 +69,7 @@ class AccountTest(unittest.TestCase):
         self.assertEqual((a["windows"], a["status"]), ([], "ok"))
 
 
-@mock.patch.object(cswap_usage, "_cache", None)
+@mock.patch.dict(vars(cswap_usage._state), clear=True)
 @mock.patch.object(cswap_usage, "binary", return_value="/home/alice/.local/bin/cswap")
 class RunTest(unittest.TestCase):
     def test_missing(self, _):
@@ -108,10 +108,10 @@ class RunTest(unittest.TestCase):
                 self.assertEqual(cswap_usage.switch(bad)[0], 400)
             run.assert_not_called()
         with mock.patch.object(cswap_usage.subprocess, "run", return_value=proc({"schemaVersion": 1, "switched": True})) as run:
-            cswap_usage._cache = (1e18, {"accounts": []})
+            cswap_usage._state.cache = (1e18, {"accounts": []})
             self.assertEqual(cswap_usage.switch("2"), (200, {"switched": True}))
         self.assertEqual(run.call_args[0][0][1:], ["claude", "switch", "2", "--json"])
-        self.assertIsNone(cswap_usage._cache)  # 다음 읽기는 바뀐 사용 중 계정을 cswap 에 다시 묻는다
+        self.assertIsNone(cswap_usage._state.cache)  # 다음 읽기는 바뀐 사용 중 계정을 cswap 에 다시 묻는다
         err = {"schemaVersion": 1, "error": {"type": "AccountNotFoundError", "message": "No account /home/alice/x"}}
         with mock.patch.object(cswap_usage.subprocess, "run", return_value=proc(err, 1)):
             code, body = cswap_usage.switch("9")
@@ -167,7 +167,7 @@ class MergeTest(unittest.TestCase):
         self.assertNotIn("cswap_error", self.merged({"installed": True, "providers": []}, None))
 
 
-@mock.patch.object(cswap_usage, "_cache", None)
+@mock.patch.dict(vars(cswap_usage._state), clear=True)
 class InstallTest(unittest.TestCase):
     def setUp(self):
         cswap_usage.installer.state, cswap_usage.installer.error, cswap_usage.installer.at = None, None, 0.0
