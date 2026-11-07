@@ -1,4 +1,4 @@
-"""Orca 모듈의 계약 층(docs/SPEC.md): 설치·서버·스킬은 modules/orca(ai-setup 에서 옮긴 코드), 갱신은 orca_update 가 한다.
+"""Orca 모듈의 계약 층(docs/SPEC.md): 설치·서버·스킬은 이 폴더의 코드(ai-setup 에서 옮긴 것), 갱신은 orca_update 가 한다.
 
 status·plan 은 읽기만 한다(파일·설정·패키지를 바꾸지 않는다). 영수증은 이 모듈(modules/orca 와 이 계약 층)만 쓰고,
 jarvis 본체는 읽기만 한다. 페어링 링크·코드가 든 경로나 값은 내보내지 않는다.
@@ -12,9 +12,9 @@ import subprocess
 import sys
 import time
 
-from . import module, orca_install, orca_pairing, orca_rpc, orca_serve, orca_update
-from .orca_install import TOOLS, tools
-from .util import run
+from ... import module, orca_install, orca_pairing, orca_rpc, orca_serve, orca_update
+from ...orca_install import TOOLS, tools
+from ...util import run
 
 # 영수증의 서버 기록 가운데 내보내도 되는 것(페어링 파일 경로·환경 ID 는 뺀다)
 SERVER_KEYS = ("state", "service_manager", "service_task")

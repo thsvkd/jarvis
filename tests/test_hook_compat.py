@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pytest_compat import collect, pytest  # noqa: E402
 
 HOOKS_DIR = Path(__file__).resolve().parent.parent / "jarvis" / "modules" / "hooks"
-HOOKS = sorted(HOOKS_DIR.glob("*.py"))
+HOOKS = sorted(p for p in HOOKS_DIR.glob("*.py") if p.name != "contract.py")  # contract.py 는 설치하지 않는 jarvis 계약 층이다
 
 # 훅이 지원해야 하는 최저 인터프리터. macOS Sonoma~Sequoia 의 /usr/bin/python3 가 3.9.x 다.
 MIN_SUPPORTED = (3, 9)

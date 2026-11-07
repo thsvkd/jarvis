@@ -12,13 +12,14 @@ from unittest import mock
 
 import psutil
 
-from jarvis import doctor_module, orca_rpc
+from jarvis import orca_rpc
+from jarvis.modules.doctor import contract as doctor_module
 
 ROOT = Path(__file__).resolve().parents[1]
 SECRET = "sk-test-0123456789abcdef"
-# 모듈 CLI 그대로지만 PATH 보강(harness_module.user_path)을 임시 홈의 ~/.local/bin 으로 좁힌다.
+# 모듈 CLI 그대로지만 PATH 보강(harness 계약 층의 user_path)을 임시 홈의 ~/.local/bin 으로 좁힌다.
 # 실제 보강은 기기의 /usr/local/bin·Homebrew 도 붙여 이 기기의 하네스가 섞인다(보강 자체는 test_harness_module 이 본다)
-CLI = ("import os, sys; from pathlib import Path; from jarvis import harness_module as h; "
+CLI = ("import os, sys; from pathlib import Path; from jarvis.modules.harness import contract as h; "
        "h.user_path = lambda p: str(Path.home() / '.local' / 'bin') + os.pathsep + p; "
        "from jarvis.__main__ import main; sys.exit(main())")
 

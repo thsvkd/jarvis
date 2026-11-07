@@ -1,6 +1,6 @@
 """setup 모듈의 계약 층(docs/SPEC.md): 하네스·플러그인·스킬·CodeGraph·MCP·줄바꿈 키·Claude 전용 설정·도구의 설치.
 
-엔진은 modules/setup(ai-setup 에서 옮긴 res/stages.py 와 워커 스크립트)이다. 계획은 ai-setup 의
+엔진은 이 폴더(ai-setup 에서 옮긴 res/stages.py 와 워커 스크립트)다. 계획은 ai-setup 의
 `--stages all`(agentsmd 제외)과 같은 액션 목록이고, 이미 설치한 설정은 배포본이 바뀌었을 때만 다시 적용한다
 (ai-setup 에서 `--keybinds`·`--skills` 등을 다시 실행하던 갱신 경로). AGENTS.md 는 프로젝트 폴더 단위라
 기기 모듈에 넣지 않는다(`python -m jarvis agentsmd`).
@@ -17,11 +17,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import module, session_retention
-from .config import STATE_DIR
-from .harness_module import user_path
+from ... import module, session_retention
+from ...config import STATE_DIR
+from ..harness.contract import user_path
 
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modules", "setup")
+ROOT = os.path.dirname(os.path.abspath(__file__))
 REFRESH_STATE = os.path.join(STATE_DIR, "setup-refresh.json")
 _stages = None
 

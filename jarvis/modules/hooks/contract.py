@@ -1,6 +1,6 @@
 """훅 모듈의 계약 층(docs/SPEC.md): 하네스 세션의 안전장치(danger_guard·rm 대체 래퍼)와 ~/.claude/settings.json 병합.
 
-코드는 modules/hooks(ai-setup 에서 옮긴 것)이고, 설치 흐름(ai-setup 의 setup_hooks.sh·setup_hooks.ps1)을 여기서 다시 쓴다.
+코드는 이 폴더(ai-setup 에서 옮긴 것)이고, 설치 흐름(ai-setup 의 setup_hooks.sh·setup_hooks.ps1)을 여기서 다시 쓴다.
 status·plan 은 읽기만 한다(병합은 메모리에서 미리 돌려 본다. 셀프테스트는 guard.log 를 쓰므로 apply 에서만 돈다).
 영수증(~/.claude/.claude-code-setup.json)의 hook_files·권한 기록은 ai-setup 과 같은 키라, ai-setup 이 설치한 기기도 이어서 관리한다.
 """
@@ -18,9 +18,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import module
+from ... import module
 
-HOOKS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modules", "hooks")
+HOOKS = os.path.dirname(os.path.abspath(__file__))  # 설치하는 파일은 FILES 에 적은 것뿐이다. 이 파일은 사용자 홈으로 복사되지 않는다
 FRAGMENT = os.path.join(HOOKS, "settings.json")
 WINDOWS = sys.platform == "win32"
 FILES = ("danger_guard.py", "shims/rm") + (("send_to_trash.py", "shims/RmShim.psm1", "graft_sync_hidden.cjs") if WINDOWS else ())

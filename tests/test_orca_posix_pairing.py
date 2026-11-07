@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from jarvis import orca_module as m
+from jarvis.modules.orca import contract as m
 
 
 FAKE_ORCA = r'''

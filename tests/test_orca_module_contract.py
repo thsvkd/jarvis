@@ -9,7 +9,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-from jarvis import module, orca_module
+from jarvis import module
+from jarvis.modules.orca import contract as orca_module
 
 
 def tree(root):
@@ -377,7 +378,7 @@ class Apply(Fixture):
         """X6·X7 — apply --dry-run 은 거절한다. 자식 프로세스가 fd 1 에 쓴 것도 표준 출력의 JSON 을 깨지 않는다."""
         import subprocess
         import sys as _sys
-        script = ("import json, subprocess, sys; from unittest import mock; from jarvis import module, orca_module\n"
+        script = ("import json, subprocess, sys; from unittest import mock; from jarvis import module; from jarvis.modules.orca import contract as orca_module\n"
                   "def status():\n    subprocess.run([sys.executable, '-c', 'print(\"apt: Removing orca-ide\")'])\n"
                   "    return {'module': 'orca'}\n"
                   "with mock.patch.object(orca_module, 'status', status):\n"
@@ -394,7 +395,7 @@ class Apply(Fixture):
         """kgolf 실측: Windows 콘솔(cp949)에서 한글 JSON 이 깨졌다. 표준 출력의 계약은 UTF-8 JSON 이다."""
         import subprocess
         import sys as _sys
-        script = ("from jarvis import module, orca_module\n"
+        script = ("from jarvis import module; from jarvis.modules.orca import contract as orca_module\n"
                   "orca_module.status = lambda: {'module': 'orca', 'error': '데스크톱 앱이 열려 있음'}\n"
                   "module.cli(['orca', 'status', '--json'])\n")
         p = subprocess.run([_sys.executable, "-c", script], capture_output=True, timeout=60,
@@ -408,7 +409,7 @@ class Apply(Fixture):
         import sys as _sys
         script = ("import os, sys; sys.modules['pwd'] = None\nif hasattr(os, 'getuid'): del os.getuid\n"
                   "from jarvis import module\n"
-                  "import jarvis.orca_module\n")
+                  "import jarvis.modules.orca.contract\n")
         p = subprocess.run([_sys.executable, "-c", script], capture_output=True, text=True, timeout=60,
                            cwd=str(pathlib.Path(__file__).resolve().parents[1]), env={**os.environ, "JARVIS_CONFIG": "/dev/null"})
         self.assertEqual(p.returncode, 0, p.stderr)

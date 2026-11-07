@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from jarvis import hooks_module as hooks
+from jarvis.modules.hooks import contract as hooks
 
 
 class HooksModuleTest(unittest.TestCase):

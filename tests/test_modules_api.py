@@ -10,7 +10,8 @@ import urllib.request
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from jarvis import config, core, modules_api, orca_module, server  # noqa: E402
+from jarvis import config, core, modules_api, server  # noqa: E402
+from jarvis.modules.orca import contract as orca_module  # noqa: E402
 from test_core import Gateway, serve  # noqa: E402
 from test_orca import FakeCollector  # noqa: E402
 

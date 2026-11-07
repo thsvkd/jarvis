@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from jarvis import harness_module as harness
+from jarvis.modules.harness import contract as harness
 
 
 class FakeUpdateAi:

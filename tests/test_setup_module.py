@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from jarvis import setup_module as setup
+from jarvis.modules.setup import contract as setup
 
 
 class SetupModuleTest(unittest.TestCase):

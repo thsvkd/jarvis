@@ -18,9 +18,9 @@ import time
 import sys
 from pathlib import Path
 
-from . import module
+from ... import module
 
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modules", "setup")
+ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "setup")
 UPDATE_AI = os.path.join(ROOT, "res", "update", "update_ai.py")
 TIMEOUT = 3000  # 하네스 여러 개를 차례로 받는다(update-ai 는 단계마다 900초). 게이트웨이의 apply 제한(3600초)보다 먼저 끝낸다
 _tools = None
@@ -110,7 +110,7 @@ def _version(u, path, scratch):
     (gemini·opencode 는 --version 만 불러도 홈에 상태 파일을 쓴다). 그 홈에서 판을 내지 못하는 것(래퍼를 거치는
     codex, 설정이 있어야 도는 grok)은 update-ai 와 같은 실제 홈으로 다시 읽는다. 판정이 update-ai 와 갈리면
     계획한 갱신이 끝나도 실패로 남기 때문이다."""
-    from .doctor_module import tools as doctor
+    from ..doctor.contract import tools as doctor
     out = u.run_quiet([path, "--version"], timeout=30, env=doctor().probe_env(scratch))
     match = out and out.returncode == 0 and u.VERSION_RE.search((out.stdout or "") + (out.stderr or ""))
     return match.group(0).rstrip(".") if match else u.version_of(path)

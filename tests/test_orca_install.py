@@ -134,7 +134,7 @@ class SkillsTest(unittest.TestCase):
         import hashlib
         import pathlib
         import shutil
-        from jarvis import orca_module
+        from jarvis.modules.orca import contract as orca_module
         self.tools = orca_module.tools()
         self.home = pathlib.Path(tempfile.mkdtemp(prefix="jarvis-skills-"))
         self.addCleanup(shutil.rmtree, self.home, True)

@@ -1,4 +1,4 @@
-"""doctor 모듈의 계약 층(docs/SPEC.md): 하네스·도구 점검(modules/doctor, ai-setup 에서 옮긴 코드)을 status 로 낸다.
+"""doctor 모듈의 계약 층(docs/SPEC.md): 하네스·도구 점검(이 폴더의 doctor.py, ai-setup 에서 옮긴 코드)을 status 로 낸다.
 
 홈 아래 어떤 파일도 쓰거나 지우지 않는다. 바꾸는 것은 하나뿐이다: 정식 Orca 서버와 Orca SSH 호스트 연결 orcad 가 함께 돌면(orca_split)
 열린 터미널이 0 인 그 orcad 프로세스를 승인받은 plan_id 로만 멈춘다(DOCTOR-9). 그 밖에는 plan 이 단계가 없고 apply 는 current 다.
@@ -16,10 +16,10 @@ from pathlib import Path
 
 import psutil
 
-from . import module, orca, orca_rpc
-from .harness_module import _env_path
+from ... import module, orca, orca_rpc
+from ..harness.contract import _env_path
 
-TOOLS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modules", "doctor", "doctor.py")
+TOOLS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "doctor.py")
 _tools = None
 
 

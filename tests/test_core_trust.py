@@ -305,7 +305,7 @@ class NoHttpPath(unittest.TestCase):
         """covers: CORE-6"""
         self.assertNotIn("core-trust", module.MODULES)
         self.assertNotIn("core_trust", module.MODULES)
-        for f in (ROOT / "jarvis").glob("*.py"):
+        for f in [*(ROOT / "jarvis").glob("*.py"), *(ROOT / "jarvis" / "modules").glob("*/contract.py")]:
             if f.name in ("core_trust.py", "__main__.py"):
                 continue
             self.assertIsNone(re.search(r"core[-_]trust", f.read_text(encoding="utf-8")), f.name)
