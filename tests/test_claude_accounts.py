@@ -1,4 +1,4 @@
-"""Claude 계정 모듈: 독립·호환 경로의 신선도, 만료 경고, 상태 문구, 기기 로그인 상태. 임시 저장소와 가짜 hswap 응답만 쓴다."""
+"""Claude 계정 모듈: 사용량 경로의 신선도, 만료 경고, 상태 문구, 기기 로그인 상태. 임시 저장소와 가짜 hswap 응답만 쓴다."""
 import json
 import os
 import subprocess

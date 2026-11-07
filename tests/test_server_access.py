@@ -181,11 +181,12 @@ class CheckTest(unittest.TestCase):
 
 
 class EntryPointTest(unittest.TestCase):
-    """실제 진입점을 임시 홈과 빈 설정으로 돌린다(임시 홈이면 런처가 받아 둔 릴리스로 넘어가지 않고 이 코드가 돈다)."""
+    """실제 진입점을 임시 홈과 빈 설정으로 돌린다. JARVIS_RELEASES 도 임시 폴더라 런처가 받아 둔 릴리스로 넘어가지 않고 이 코드가 돈다(Windows 는 릴리스 위치가 HOME 을 따르지 않는다)."""
 
     def run_cli(self, *args):
         with tempfile.TemporaryDirectory() as home:
-            env = {**os.environ, "HOME": home, "JARVIS_CONFIG": os.devnull, "PYTHONUSERBASE": site.getuserbase()}
+            env = {**os.environ, "HOME": home, "USERPROFILE": home, "JARVIS_RELEASES": home, "JARVIS_CONFIG": os.devnull,
+                   "PYTHONUSERBASE": site.getuserbase()}
             return subprocess.run([sys.executable, "-m", "jarvis", *args], cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
 
     def test_version_and_doctor_run_and_the_orca_module_is_unknown(self):
