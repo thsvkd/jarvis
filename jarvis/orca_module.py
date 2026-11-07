@@ -5,7 +5,6 @@ jarvis 본체는 읽기만 한다. 페어링 링크·코드가 든 경로나 값
 """
 
 import getpass
-import importlib.util
 import os
 import platform
 import socket
@@ -14,23 +13,11 @@ import sys
 import time
 
 from . import module, orca_install, orca_pairing, orca_rpc, orca_serve, orca_update
+from .orca_install import TOOLS, tools
 from .util import run
 
-TOOLS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modules", "orca")
-_tools = None
 # 영수증의 서버 기록 가운데 내보내도 되는 것(페어링 파일 경로·환경 ID 는 뺀다)
 SERVER_KEYS = ("state", "service_manager", "service_task")
-
-
-def tools():
-    """modules/orca/orca.py. Windows 러너가 단독 실행하는 파일이라 패키지가 아니고 경로로 읽는다."""
-    global _tools
-    if _tools is None:
-        spec = importlib.util.spec_from_file_location("jarvis_orca_tools", os.path.join(TOOLS, "orca.py"))
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        _tools = mod
-    return _tools
 
 
 def _receipt_path():

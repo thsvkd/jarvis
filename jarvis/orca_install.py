@@ -1,4 +1,5 @@
 """플랫폼마다 공식 설치본 하나를 읽는다. Mac 갱신은 Orca 자체 업데이터에 맡긴다(Windows 는 S4U 설치기, orca_update)."""
+import importlib.util
 import json
 import os
 import plistlib
@@ -18,6 +19,19 @@ from .util import run
 MAC_APP = "/Applications/Orca.app"
 USER_DEB = os.path.expanduser("~/.local/opt/orca")
 SKILLS_MARK = os.path.join(config.STATE_DIR, "orca-skills-version")  # 번들 스킬을 마지막으로 맞춘 Orca 판
+TOOLS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modules", "orca")
+_tools = None
+
+
+def tools():
+    """modules/orca/orca.py. Windows 러너가 단독 실행하는 파일이라 패키지가 아니고 경로로 읽는다."""
+    global _tools
+    if _tools is None:
+        spec = importlib.util.spec_from_file_location("jarvis_orca_tools", os.path.join(TOOLS, "orca.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _tools = mod
+    return _tools
 
 
 def profile():
@@ -84,8 +98,7 @@ def skills():
 
 
 def _record_owned_skills():
-    from . import orca_module
-    t = orca_module.tools()
+    t = tools()
     path = t.home_dir() / ".claude/.claude-code-setup.json"
     receipt = t.read_receipt(path)
     owned = (receipt.get("tool_installs") or {}).get("orca")
