@@ -7,7 +7,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from jarvis import orca_update
+from jarvis import orca_update, release_download
 
 
 YML = """version: 1.4.232
@@ -45,11 +45,11 @@ class ParseTest(unittest.TestCase):
             path = os.path.join(d, "p.deb")
             with open(path, "wb") as f:
                 f.write(body)
-            orca_update.check_file(path, digest, len(body))
+            release_download.check_file(path, digest, len(body))
             with self.assertRaises(RuntimeError):
-                orca_update.check_file(path, digest, len(body) - 1)
+                release_download.check_file(path, digest, len(body) - 1)
             with self.assertRaises(RuntimeError):
-                orca_update.check_file(path, "nope", len(body))
+                release_download.check_file(path, "nope", len(body))
 
 
 class Ops:

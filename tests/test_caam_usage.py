@@ -94,7 +94,7 @@ class InstallTest(unittest.TestCase):
     def fetch(self, data):
         r = mock.MagicMock()
         r.__enter__.return_value.read.return_value = data
-        return mock.patch.object(caam_usage.orca_update, "_open", return_value=r)
+        return mock.patch.object(caam_usage.release_download, "open_url", return_value=r)
 
     def test_verified_install(self):
         import os

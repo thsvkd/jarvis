@@ -12,6 +12,7 @@ import platform
 import psutil
 
 from . import config, orca, orca_rpc
+from .release_download import check_file
 from .util import run
 
 MAC_APP = "/Applications/Orca.app"
@@ -152,7 +153,6 @@ def archive_contract(path, target, arch):
 
 def native_contract(target, meta):
     """공식 업데이터가 받은 바로 그 패키지의 해시와 버전별 계약을 설치 전에 확인한다."""
-    from .orca_update import check_file
     cache = os.path.expanduser("~/Library/Caches/orca-updater/pending")
     with open(os.path.join(cache, "update-info.json"), encoding="utf-8") as f:
         info = json.load(f)

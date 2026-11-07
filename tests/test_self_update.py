@@ -47,7 +47,7 @@ class Releases(unittest.TestCase):
         def fake(req, timeout):
             body = json.dumps(m).encode() if req.full_url == self_update.MANIFEST else data
             return mock.MagicMock(__enter__=lambda s: io.BytesIO(body))
-        return mock.patch.object(self_update.orca_update, "_open", fake)
+        return mock.patch.object(self_update.release_download, "open_url", fake)
 
     def test_update_and_rollback(self):
         data = tgz("1.2.0", {"{p}/jarvis/__init__.py": b'__version__ = "1.2.0"\n', "{p}/static/x.css": b""})

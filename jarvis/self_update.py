@@ -20,7 +20,7 @@ import threading
 import time
 import urllib.request
 
-from . import __version__, launch, orca_issue, orca_update, tray
+from . import __version__, launch, orca_issue, orca_update, release_download, tray
 
 REPO = "thsvkd/jarvis"
 MANIFEST = f"https://github.com/{REPO}/releases/latest/download/manifest.json"
@@ -34,7 +34,7 @@ _lock = threading.Lock()
 def latest():
     """최신 릴리스 manifest. 형식이 다르거나 이 저장소의 릴리스 주소가 아니면 예외."""
     req = urllib.request.Request(MANIFEST, headers={"User-Agent": "jarvis-self-update"})
-    with orca_update._open(req, timeout=30) as r:  # GitHub·릴리스 저장소로만 리다이렉트를 따른다
+    with release_download.open_url(req, timeout=30) as r:  # GitHub·릴리스 저장소로만 리다이렉트를 따른다
         m = json.loads(r.read(1 << 16))
     v = m.get("version") if isinstance(m, dict) else None
     if not (isinstance(v, str) and VER_RE.match(v) and isinstance(m.get("sha256"), str)
@@ -76,7 +76,7 @@ def install(m):
     if launch.path(v):
         return
     req = urllib.request.Request(m["url"], headers={"User-Agent": "jarvis-self-update"})
-    with orca_update._open(req, timeout=60) as r:
+    with release_download.open_url(req, timeout=60) as r:
         data = r.read(MAX_BYTES + 1)
     if len(data) > MAX_BYTES:
         raise ValueError("릴리스 묶음이 너무 큽니다")

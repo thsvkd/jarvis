@@ -21,7 +21,7 @@ import threading
 import time
 import urllib.request
 
-from . import config, orca_update
+from . import config, release_download
 from .util import Installer, parse_iso, scrub_home, which_local
 
 CACHE_S = 120  # limits 는 부를 때마다 프로필마다 사용량 API 를 부른다
@@ -58,9 +58,9 @@ def _install():
     if not a:
         raise RuntimeError(f"caam 릴리스가 없는 플랫폼입니다({sys.platform}/{platform.machine()})")
     name, digest = a
-    # GitHub·릴리스 저장소로만 리다이렉트를 따른다(orca_update 와 같은 opener). 무결성은 고정 SHA256 이 맡는다
+    # GitHub·릴리스 저장소로만 리다이렉트를 따른다. 무결성은 고정 SHA256 이 맡는다
     req = urllib.request.Request(URL.format(v=VERSION, name=name), headers={"User-Agent": "jarvis-caam-install"})
-    with orca_update._open(req, timeout=60) as r:
+    with release_download.open_url(req, timeout=60) as r:
         data = r.read(64 << 20)
     if hashlib.sha256(data).hexdigest() != digest:
         raise RuntimeError("caam 릴리스의 SHA256 이 고정한 값과 다릅니다")

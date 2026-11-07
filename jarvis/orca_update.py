@@ -23,19 +23,16 @@ import sys
 import tempfile
 import threading
 import time
-import urllib.error
-import urllib.parse
 import urllib.request
 import uuid
 
 import psutil
 
 from . import config, orca, orca_issue, orca_install, orca_rpc, orca_sessions
+from .release_download import open_url
 from .util import run
 
 RELEASE = "https://github.com/stablyai/orca/releases"
-HOSTS = {"github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com",
-         "github-releases.githubusercontent.com"}
 ARCH_YML = {"arm64": "latest-linux-arm64.yml", "amd64": "latest-linux.yml"}
 MARK = os.path.join(config.STATE_DIR, "orca-update.json")
 RESULT = os.path.join(config.STATE_DIR, "orca-update-result.json")
@@ -43,19 +40,6 @@ LOCK = os.path.join(config.STATE_DIR, "orca-update.lock")  # 프로세스 사이
 VER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 _lock = orca_issue._lock  # 발급과 갱신은 같은 재진입 잠금으로 배타적으로 시작한다.
 job = None  # {state, phase, error, from_version, to_version, app, skills, started_at, finished_at}
-
-
-class _GitHub(urllib.request.HTTPRedirectHandler):
-    """릴리스 다운로드는 GitHub 와 그 릴리스 저장소로만 따라간다."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        host = urllib.parse.urlsplit(newurl).hostname
-        if host not in HOSTS:
-            raise urllib.error.URLError(f"릴리스 리다이렉트 호스트가 아닙니다: {host}")
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
-
-
-_open = urllib.request.build_opener(urllib.request.ProxyHandler({}), _GitHub).open
 
 
 def version_key(v):
@@ -95,20 +79,6 @@ def parse_manifest(text, arch):
     if not meta:
         raise RuntimeError(f"매니페스트에 {name} 이 없습니다")
     return version, {"name": name, "sha512": meta["sha512"], "size": meta["size"]}
-
-
-def check_file(path, sha512_b64, size):
-    """파일이 매니페스트의 크기·sha512(base64) 와 같은지."""
-    h, got = hashlib.sha512(), 0
-    with open(path, "rb") as f:
-        while buf := f.read(1 << 20):
-            got += len(buf)
-            if got > size:
-                raise RuntimeError("deb 가 매니페스트보다 큽니다")
-            h.update(buf)
-    digest = base64.b64encode(h.digest()).decode()
-    if got != size or not hmac.compare_digest(digest, sha512_b64):
-        raise RuntimeError("deb 해시가 매니페스트와 다릅니다")
 
 
 def _expected(target):
@@ -380,7 +350,7 @@ class Live:
         yml = p.get("manifest") or ARCH_YML[arch]
         url = f"{RELEASE}/latest/download/{yml}"
         try:
-            with _open(urllib.request.Request(url, headers={"User-Agent": "jarvis-orca-update"}), timeout=60) as r:
+            with open_url(urllib.request.Request(url, headers={"User-Agent": "jarvis-orca-update"}), timeout=60) as r:
                 text = r.read(1 << 20).decode()
         except Exception as e:
             raise RuntimeError(f"릴리스 매니페스트를 받지 못했습니다: {e}") from e
@@ -438,7 +408,7 @@ class Live:
         req = urllib.request.Request(meta["url"], headers={"User-Agent": "jarvis-orca-update", "Accept": "application/octet-stream"})
         end, got, h = time.monotonic() + 1200, 0, hashlib.sha512()
         try:
-            with _open(req, timeout=120) as r, open(tmp, "wb") as f:
+            with open_url(req, timeout=120) as r, open(tmp, "wb") as f:
                 while buf := r.read(1 << 20):
                     if time.monotonic() > end:
                         raise TimeoutError("deb 다운로드가 너무 오래 걸립니다")
