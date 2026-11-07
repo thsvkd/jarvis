@@ -2,7 +2,7 @@
 하위 프로세스로 돌리고, core 는 기기마다 그것을 모으거나 전달한다.
 
 module.cli 는 fd 1 을 표준 오류로 돌리므로 서버 스레드 안에서 부르지 않는다. apply 는 한 번에 하나만 돌린다
-(Orca 설치처럼 몇 분 걸리고, 모듈끼리 영수증을 함께 쓴다).
+(설치처럼 몇 분 걸리고, 모듈끼리 영수증을 함께 쓴다).
 """
 import json
 import os
@@ -20,7 +20,7 @@ from . import config, module, occupancy
 from .core import PRE, jarvis_line
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TTL = {"orca": 60, "doctor": 600, "hooks": 300, "setup": 300, "harness": 1800}  # status 캐시(초). doctor 는 하네스마다 --version 을,
+TTL = {"doctor": 600, "hooks": 300, "setup": 300, "harness": 1800}  # status 캐시(초). doctor 는 하네스마다 --version 을,
 # harness 는 최신 버전을 레지스트리·릴리스에 물어 수 초 걸린다
 STATUS_TIMEOUT_S = 120
 PLAN_TIMEOUT_S = 120
@@ -78,10 +78,6 @@ def _busy():
     """이 서버에서 기기를 바꾸는 다른 작업. 모듈 적용과 동시에 돌면 서로를 끊거나(재시작) 같은 파일을 쓴다."""
     if occupancy.held(occupancy.SELF_UPDATE):
         return "jarvis 갱신이 끝난 뒤에 적용하세요"
-    if occupancy.held(occupancy.ORCA_UPDATE) or occupancy.held(occupancy.ORCA_UPDATE_MARK):
-        return "Orca 업데이트(복구·세션 검증 포함)가 끝난 뒤에 적용하세요"
-    if occupancy.held(occupancy.ORCA_ISSUE):
-        return "페어링 코드 발급이 끝난 뒤에 적용하세요"
     return None
 
 

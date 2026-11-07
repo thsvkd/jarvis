@@ -453,11 +453,6 @@ class Collector:
             cs = self.raw.get("containers") or []
         return {ip for c in cs if c["name"] == config.CADDY_CONTAINER for ip in c.get("ips") or []}
 
-    def tailnet_v4(self):
-        with self.lock:
-            ips = ((self.raw.get("tailscale") or {}).get("self") or {}).get("ips") or []
-        return next((ip for ip in ips if ":" not in ip), None)
-
     # ------------------------------------------------ 스냅샷
     def snapshot(self):
         """(json bytes, gzip bytes). 1초 이내 재요청은 캐시."""

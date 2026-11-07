@@ -5,9 +5,6 @@
 """
 
 SELF_UPDATE = "self_update"  # 자체 갱신이 잠금을 쥐고 있다
-ORCA_UPDATE = "orca_update"  # Orca 업데이트가 도는 중이다. 답은 그 작업(job)이다
-ORCA_UPDATE_MARK = "orca_update_mark"  # 끝나지 않은 Orca 업데이트 기록이 있다(복구·세션 검증 전)
-ORCA_ISSUE = "orca_issue"  # 페어링 코드 발급이 도는 중이다. 답은 그 작업(job)이다
 MODULE_APPLY = "module_apply"  # 모듈 적용(이 기기 또는 SSH 기기)이 도는 중이다
 
 _answers = {}

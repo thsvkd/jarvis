@@ -9,13 +9,11 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from jarvis import config, core, server
-from test_orca import FakeCollector
+from test_server_access import FakeCollector
 
 SNAP = {"meta": {"host": "gw", "version": "1.0.0"}, "summary": {"status": "warn", "alerts": {"crit": 0, "warn": 1}},
         "system": {"host": {"model": "Pi"}, "cpu": {"usage_pct": 12.5}, "memory": {"usage_pct": 40},
                    "disks": [{"mount": "/boot", "usage_pct": 1}, {"mount": "/", "usage_pct": 75.9}]}}
-ORCA = {"installed": True, "running": True, "endpoint": "ws://100.1.2.3:6768",
-        "codes": {"desktop": None, "mobile": {"url": "orca://pair?code=abc", "device_id": "m1"}}}
 
 
 class Gateway(BaseHTTPRequestHandler):
@@ -52,7 +50,6 @@ def serve(handler):
 class CoreTest(unittest.TestCase):
     def setUp(self):
         Gateway.routes = {"/api/snapshot": (200, json.dumps(SNAP).encode(), True),
-                          "/api/orca": (200, json.dumps(ORCA).encode(), False),
                           "/api/changes": (200, b'{"changes":[]}', False)}
         self.gw = serve(Gateway)
         url = f"http://127.0.0.1:{self.gw.server_address[1]}"
@@ -88,28 +85,15 @@ class CoreTest(unittest.TestCase):
         self.assertEqual((row["reachable"], row["fails"], row["error"], row["host"]), (False, 1, "HTTP 500", "gw"))
         self.assertIsNotNone(self.core.snapshot("gw")[0])
 
-    def test_orca(self):
-        o = self.core.orca("gw")
-        self.assertTrue(o["supported"])
-        self.assertIsNone(o["codes"]["desktop"])
-        self.assertTrue(o["codes"]["mobile"]["qr"] is None or set("".join(o["codes"]["mobile"]["qr"])) <= {"0", "1"})
-        for code, word in ((404, "지원하지"), (403, "core")):
-            Gateway.routes["/api/orca"] = (code, b"{}", False)
-            o = self.core.orca("gw")
-            self.assertFalse(o["supported"])
-            self.assertIn(word, o["error"])
-        with self.assertRaises(urllib.error.URLError):
-            self.core.orca("down")
-
     def test_usage(self):
-        Gateway.routes["/api/orca/usage"] = (200, b'{"installed":true,"providers":[{"id":"claude"}]}', False)
-        Gateway.routes["/api/orca/usage?refresh=1"] = (200, b'{"installed":true,"refreshed":true,"providers":[]}', False)
-        self.assertEqual(self.core.usage("gw"), (200, {"installed": True, "providers": [{"id": "claude"}]}))
+        Gateway.routes["/api/usage/independent"] = (200, b'{"mode":"independent","providers":[{"id":"claude"}]}', False)
+        Gateway.routes["/api/usage/independent?refresh=1"] = (200, b'{"mode":"independent","refreshed":true,"providers":[]}', False)
+        self.assertEqual(self.core.usage("gw"), (200, {"mode": "independent", "providers": [{"id": "claude"}]}))
         self.assertTrue(self.core.usage("gw", force=True)[1]["refreshed"])
         rows = {r["id"]: r for r in self.core.usage_all()["devices"]}
         self.assertEqual((rows["gw"]["status"], rows["gw"]["providers"]), (200, [{"id": "claude"}]))
         self.assertEqual(rows["down"]["status"], 502)  # 한 대가 죽어도 나머지는 준다
-        del Gateway.routes["/api/orca/usage"]
+        del Gateway.routes["/api/usage/independent"]
         code, body = self.core.usage("gw")
         self.assertEqual(code, 501)
         self.assertIn("갱신 필요", body["error"])
@@ -127,7 +111,7 @@ class CoreTest(unittest.TestCase):
         self.core._same_org_names([body(bad, unnamed), body(good, row("Text", "k3", "y"), row("Huge", "k3", 1e308))])
         self.assertEqual([unnamed["org"], bad["org"], good["org"]], ["K-Golf", "Good", "Good"])
         # 옛 이름을 가진 기기만 새로고침해도 앞서 본 새 이름을 쓴다
-        Gateway.routes["/api/orca/usage"] = (200, json.dumps(body(row("케이골프", "k1", 100))).encode(), False)
+        Gateway.routes["/api/usage/independent"] = (200, json.dumps(body(row("케이골프", "k1", 100))).encode(), False)
         self.assertEqual(self.core.usage("gw")[1], body({"label": "a@example.com", "org": "K-Golf"}))
         rows = {r["id"]: r for r in self.core.usage_all()["devices"]}
         self.assertEqual(rows["gw"]["providers"][0]["accounts"], [{"label": "a@example.com", "org": "K-Golf"}])
@@ -139,21 +123,21 @@ class CoreTest(unittest.TestCase):
         """covers: USAGE-3"""
         Gateway.routes["/api/usage/independent"] = (200, b'{"mode":"independent","providers":[]}', False)
         Gateway.routes["/api/usage/independent?refresh=1"] = (200, b'{"mode":"independent","providers":[],"refreshed":true}', False)
-        self.assertEqual(self.core.usage("gw", independent=True)[1]["mode"], "independent")
-        self.assertTrue(self.core.usage("gw", force=True, independent=True)[1]["refreshed"])
-        rows = {r["id"]: r for r in self.core.usage_all(independent=True)["devices"]}
+        self.assertEqual(self.core.usage("gw")[1]["mode"], "independent")
+        self.assertTrue(self.core.usage("gw", force=True)[1]["refreshed"])
+        rows = {r["id"]: r for r in self.core.usage_all()["devices"]}
         self.assertEqual(rows["gw"]["mode"], "independent")
         self.assertEqual(rows["down"]["status"], 502)
         del Gateway.routes["/api/usage/independent"]
-        self.assertEqual(self.core.usage("gw", independent=True)[0], 501)
+        self.assertEqual(self.core.usage("gw")[0], 501)
 
     def test_no_redirect(self):
-        # 장악된 게이트웨이가 core 를 자기 자신(루프백)의 /api/orca 로 보내도 따라가지 않는다
-        Gateway.routes["/api/changes"] = (302, b"/api/orca", False)
+        # 장악된 게이트웨이가 core 를 자기 자신(루프백)의 core 전용 경로로 보내도 따라가지 않는다
+        Gateway.routes["/api/changes"] = (302, b"/api/usage/independent", False)
         with self.assertRaises(urllib.error.HTTPError) as e:
             self.core.relay("gw", "/api/changes")
         self.assertEqual(e.exception.code, 302)
-        Gateway.routes["/api/snapshot"] = (302, b"/api/orca", False)
+        Gateway.routes["/api/snapshot"] = (302, b"/api/usage/independent", False)
         self.core.poll("gw")
         self.assertIsNone(self.core.snapshot("gw")[0])
 
@@ -172,11 +156,6 @@ class CoreTest(unittest.TestCase):
         self.core.state["gw"]["ok_at"] -= core.STALE_S + 1
         self.assertIsNone(self.core.snapshot("gw")[0])
 
-    def test_odd_orca(self):
-        Gateway.routes["/api/orca"] = (200, b"[]", False)
-        with self.assertRaises(ValueError):
-            self.core.orca("gw")
-
     def test_size_limit(self):
         old, core.MAX_BYTES = core.MAX_BYTES, 1000
         try:
@@ -188,11 +167,10 @@ class CoreTest(unittest.TestCase):
 
 
 class RouteTest(unittest.TestCase):
-    """core 라우트: 스냅샷 전달, 없는 기기 404, 페어링 버튼은 viewers 만."""
+    """core 라우트: 스냅샷 전달, 없는 기기 404, 로그인·계정 전환은 viewers 만."""
 
     def setUp(self):
-        Gateway.routes = {"/api/snapshot": (200, json.dumps(SNAP).encode(), False),
-                          "/api/orca": (200, json.dumps(ORCA).encode(), False)}
+        Gateway.routes = {"/api/snapshot": (200, json.dumps(SNAP).encode(), False)}
         self.gw = serve(Gateway)
         c = core.Core([{"id": "gw", "url": f"http://127.0.0.1:{self.gw.server_address[1]}"}])
         c.poll("gw")
@@ -219,26 +197,25 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(self.get("/api/devices/nope/snapshot")[0], 404)
         self.assertEqual(self.get("/api/devices/gw/history?range=7d")[0], 400)
         self.assertEqual(self.get("/api/devices/gw/history")[0], 502)  # 가짜 게이트웨이에 history 가 없다
-        st, o = self.get("/api/devices/gw/orca")  # 루프백은 viewer 가 아니다
-        self.assertEqual(st, 403)
-        self.assertNotIn("orca://", json.dumps(o))
+        self.assertEqual(self.get("/api/devices/gw/orca")[0], 404)  # Orca 경로는 없다
+        Gateway.routes["/api/usage/login?provider=codex"] = (200, b'{"state":"waiting"}', False)
+        self.assertEqual(self.get("/api/devices/gw/login?provider=codex")[0], 403)  # 루프백은 viewer 가 아니다
         # viewers 에 적힌 tailnet 기기로 보이게 한다(소켓은 127.0.0.1 에만 붙는다)
         kind, vw = server.client_kind, config.VIEWERS
         server.client_kind, config.VIEWERS = (lambda ip: "tailnet"), ["127.0.0.1"]
         try:
-            st, o = self.get("/api/devices/gw/orca")
+            self.assertEqual(self.get("/api/devices/gw/login?provider=codex"), (200, {"state": "waiting"}))
         finally:
             server.client_kind, config.VIEWERS = kind, vw
-        self.assertEqual((st, o["codes"]["mobile"]["url"]), (200, "orca://pair?code=abc"))
 
     def test_usage_routes(self):
-        Gateway.routes["/api/orca/usage"] = (200, b'{"installed":true,"providers":[]}', False)
-        self.assertEqual(self.get("/api/devices/gw/usage"), (200, {"installed": True, "providers": []}))
+        Gateway.routes["/api/usage/independent"] = (200, b'{"mode":"independent","providers":[]}', False)
+        self.assertEqual(self.get("/api/devices/gw/usage"), (200, {"mode": "independent", "providers": []}))
         st, o = self.get("/api/devices/usage")
         self.assertEqual((st, o["devices"][0]["id"], o["devices"][0]["status"]), (200, "gw", 200))
-        self.assertEqual(self.get("/api/orca/usage")[0], 403)  # 게이트웨이 경로는 설정 core 만
+        self.assertEqual(self.get("/api/usage/independent")[0], 403)  # 게이트웨이 경로는 설정 core 만
         # 강제 새로고침은 맞춤 헤더가 있어야 한다(다른 사이트가 이미지·링크로 부르지 못하게)
-        Gateway.routes["/api/orca/usage?refresh=1"] = (200, b'{"installed":true,"refreshed":true,"providers":[]}', False)
+        Gateway.routes["/api/usage/independent?refresh=1"] = (200, b'{"mode":"independent","refreshed":true,"providers":[]}', False)
         for path in ("/api/devices/usage?refresh=1", "/api/devices/gw/usage?refresh=1"):
             self.assertEqual(self.get(path)[0], 403)
         st, o = self.get("/api/devices/gw/usage?refresh=1", {"X-Jarvis-Action": "usage-refresh"})
@@ -268,15 +245,60 @@ class RouteTest(unittest.TestCase):
         self.core.state["gw"].update(fails=1, error="timed out")  # 폴링 실패 중이면 묻지 않고 바로 502
         self.assertEqual(self.get("/api/devices/usage")[1]["devices"][0]["status"], 502)
 
+    def test_login_and_account_reach_the_gateway_usage_paths(self):
+        """다시 로그인·계정 전환은 viewers 만, 게이트웨이의 /api/usage/* 로 경로와 헤더를 그대로 전달한다"""
+        Gateway.routes["/api/usage/login?provider=codex"] = (200, b'{"url":"https://x","code":"ABCD-EFGH"}', False)
+        Gateway.routes["/api/usage/account?slot=2"] = (200, b'{"switched":true}', False)
+        post = lambda path, action: urllib.request.Request(self.base + path, data=b"", method="POST", headers={"X-Jarvis-Action": action})
+        kind, vw = server.client_kind, config.VIEWERS
+        server.client_kind, config.VIEWERS = (lambda ip: "tailnet"), ["127.0.0.1"]
+        try:
+            with urllib.request.urlopen(post("/api/devices/gw/login?provider=codex", "usage-login")) as r:
+                self.assertEqual(json.loads(r.read())["code"], "ABCD-EFGH")
+            self.assertEqual(Gateway.posted, ("/api/usage/login?provider=codex", "usage-login"))
+            with urllib.request.urlopen(post("/api/devices/gw/account?slot=2", "usage-account")) as r:
+                self.assertEqual(json.loads(r.read()), {"switched": True})
+            self.assertEqual(Gateway.posted, ("/api/usage/account?slot=2", "usage-account"))
+            # 옛 게이트웨이는 그 경로가 없다(404): 다른 경로로 다시 묻지 않고 501 로 알린다
+            for path, action in (("/api/devices/gw/login?provider=grok", "usage-login"), ("/api/devices/gw/account?slot=9", "usage-account")):
+                with self.assertRaises(urllib.error.HTTPError) as e:
+                    urllib.request.urlopen(post(path, action))
+                self.assertEqual(e.exception.code, 501)
+                self.assertIn("갱신 필요", json.loads(e.exception.read())["error"])
+        finally:
+            server.client_kind, config.VIEWERS = kind, vw
+
+    def test_gateway_usage_login_and_account_answer_only_the_configured_core(self):
+        """게이트웨이의 /api/usage/login·account 는 설정 core 만 부르고, 맞춤 헤더 값은 그대로다"""
+        post = lambda path, action: urllib.request.Request(self.base + path, data=b"", method="POST", headers={"X-Jarvis-Action": action})
+        with mock.patch.object(server.cli_login, "start", return_value=(200, {"code": "C"})) as start, \
+                mock.patch.object(server.cli_login, "status", return_value={"state": "done"}), \
+                mock.patch.object(server.claude_accounts, "switch", return_value=(200, {"switched": True})) as switch:
+            for path, action in (("/api/usage/login?provider=codex", "usage-login"), ("/api/usage/account?slot=2", "usage-account")):
+                with self.assertRaises(urllib.error.HTTPError) as e:  # 루프백은 core 가 아니다
+                    urllib.request.urlopen(post(path, action))
+                self.assertEqual(e.exception.code, 403)
+            self.assertEqual(self.get("/api/usage/login?provider=codex")[0], 403)
+            start.assert_not_called()
+            switch.assert_not_called()
+            with mock.patch.object(server, "client_kind", return_value="tailnet"), mock.patch.object(config, "CORE", ["127.0.0.1"]):
+                with urllib.request.urlopen(post("/api/usage/login?provider=codex", "usage-login")) as r:
+                    self.assertEqual(json.loads(r.read()), {"code": "C"})
+                with urllib.request.urlopen(post("/api/usage/account?slot=2", "usage-account")) as r:
+                    self.assertEqual(json.loads(r.read()), {"switched": True})
+                self.assertEqual(self.get("/api/usage/login?provider=codex"), (200, {"state": "done"}))
+            start.assert_called_once_with("codex")
+            switch.assert_called_once_with("2")
+
     def test_independent_usage_routes_are_core_only_and_never_fall_back(self):
         """covers: USAGE-3"""
         Gateway.routes["/api/usage/independent"] = (200, b'{"mode":"independent","providers":[]}', False)
         Gateway.routes["/api/usage/independent?refresh=1"] = (200, b'{"mode":"independent","providers":[],"refreshed":true}', False)
-        self.assertEqual(self.get("/api/devices/gw/usage?independent=1")[1]["mode"], "independent")
-        self.assertEqual(self.get("/api/devices/usage?independent=1")[1]["devices"][0]["mode"], "independent")
+        self.assertEqual(self.get("/api/devices/gw/usage")[1]["mode"], "independent")
+        self.assertEqual(self.get("/api/devices/usage")[1]["devices"][0]["mode"], "independent")
         self.assertEqual(self.get("/api/usage/independent")[0], 403)
-        self.assertEqual(self.get("/api/devices/usage?independent=1&refresh=1")[0], 403)
-        self.assertTrue(self.get("/api/devices/usage?independent=1&refresh=1", {"X-Jarvis-Action": "usage-refresh"})[1]["devices"][0]["refreshed"])
+        self.assertEqual(self.get("/api/devices/usage?refresh=1")[0], 403)
+        self.assertTrue(self.get("/api/devices/usage?refresh=1", {"X-Jarvis-Action": "usage-refresh"})[1]["devices"][0]["refreshed"])
         with mock.patch.object(server, "client_kind", return_value="tailnet"), \
                 mock.patch.object(config, "CORE", ["127.0.0.1"]), \
                 mock.patch.object(server.independent_usage, "read", return_value={"mode": "independent", "providers": []}):

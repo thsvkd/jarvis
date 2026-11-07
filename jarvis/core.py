@@ -2,7 +2,7 @@
 
 - 스냅샷은 마지막 성공본을 들고 있다가 /api/devices(요약)·/api/devices/<id>/snapshot(그대로) 로 준다.
 - history·changes 는 크기가 커서 모아 두지 않고 요청이 올 때 전달한다.
-- Orca 페어링 코드(/api/orca)는 비밀이라 모아 두지 않는다. 페어링 버튼을 누를 때 그 기기 하나만 받아 QR 을 붙여 넘긴다.
+- 사용량·계정 동작은 이메일·로그인 코드가 있어 모아 두지 않고 누를 때 그 기기 하나만 전달한다.
 - 게이트웨이는 기기마다 pull 시점이 달라 버전이 섞인다: 모르는 필드는 무시하고, 없는 API(404)는 '미지원'으로 본다.
 - SSH 로만 닿는 기기(devices 의 ssh)는 `ssh -W` 로 조회하고, AI 셋업 모듈과 jarvis 갱신만 원격 CLI 로 조작한다
   (docs/SPEC.md 의 "SSH 기기"). 그 밖의 조작은 501 이다.
@@ -32,7 +32,6 @@ from . import launch
 
 EVERY_S = 10
 TIMEOUT_S = 5  # 연결·읽기 한 번
-CHECK_TIMEOUT_S = 70  # 업데이트 확인은 게이트웨이가 릴리스 매니페스트를 받느라 60초까지 쓴다
 PULL_TIMEOUT_S = 150  # jarvis 갱신은 게이트웨이가 manifest(30초)와 묶음(60초, 소켓 동작마다)을 받는다
 USAGE_TIMEOUT_S = 70  # 사용량 새로고침은 게이트웨이가 프로바이더 API 를 부른다(수집기 대기 55초)
 LOGIN_TIMEOUT_S = 40  # 게이트웨이가 CLI 의 URL·코드를 30초까지 기다린다
@@ -69,7 +68,7 @@ VERSION_RE = re.compile(r"^jarvis (\d+\.\d+\.\d+)", re.M)
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     """리다이렉트는 따르지 않는다(HTTPError 가 된다). 따르면 장악된 게이트웨이가 core 를 루프백이나 다른 게이트웨이의
-    /api/orca 로 보내, 코드가 viewers 제한이 없는 changes·history·snapshot 경로로 새어 나간다."""
+    core 전용 경로로 보내, 그 응답이 viewers 제한이 없는 changes·history·snapshot 경로로 새어 나간다."""
 
     def redirect_request(self, *a, **k):
         return None
@@ -240,17 +239,6 @@ def why(e):
     return (str(e) or type(e).__name__)[:200]
 
 
-def qr_rows(text):
-    try:
-        import qrcode
-    except ImportError:  # QR 없이 코드만 보인다
-        return None
-    q = qrcode.QRCode(border=2, error_correction=qrcode.constants.ERROR_CORRECT_L)
-    q.add_data(text)
-    q.make(fit=True)
-    return ["".join("1" if c else "0" for c in row) for row in q.get_matrix()]
-
-
 def _summary(s):
     meta, summ, sysm = s.get("meta") or {}, s.get("summary") or {}, s.get("system") or {}
     root = next((d for m in ("/", "/System/Volumes/Data", "C:\\")  # macOS 는 사용자 데이터가 Data 볼륨, Windows 는 C:
@@ -382,8 +370,8 @@ class Core:
         return {"error": SSH_EXIT[code]} if code in SSH_EXIT else None
 
     def _ask(self, i, req, timeout, unsupported):
-        """그 게이트웨이의 Orca 동작 하나를 그대로 전달한다. (http 상태, 응답). 404 는 갱신 전 게이트웨이(501)."""
-        if self.devices[i].get("ssh"):  # CLI 가 없고 비밀(코드·이메일)이 SSH 경로를 지나지 않게
+        """그 게이트웨이의 동작 하나를 그대로 전달한다. (http 상태, 응답). 404 는 갱신 전 게이트웨이(501)."""
+        if self.devices[i].get("ssh"):  # CLI 가 없고 비밀(로그인 코드·이메일)이 SSH 경로를 지나지 않게
             return 501, {"error": SSH_ONLY}
         try:
             with _open(req, timeout=timeout) as r:
@@ -397,22 +385,6 @@ class Core:
                 return e.code, {"error": f"HTTP {e.code}"}
         except Exception as e:
             return 502, {"error": f"{i} 에 닿지 못했습니다: {why(e)}"}
-
-    def orca_issue(self, i, scope):
-        """발급 버튼: 그 게이트웨이 POST /api/orca/issue 를 그대로 전달한다. (http 상태, 응답)."""
-        req = urllib.request.Request(self.devices[i]["url"] + "/api/orca/issue?scope=" + urllib.parse.quote(scope),
-                                     data=b"", method="POST", headers={"X-Jarvis-Action": "orca-issue"})
-        return self._ask(i, req, TIMEOUT_S, "자동 발급을")
-
-    def orca_update_check(self, i):
-        """확인 버튼. 그 게이트웨이 GET /api/orca/update. 설치나 재시작은 없다. (http 상태, 응답)."""
-        return self._ask(i, urllib.request.Request(self.devices[i]["url"] + "/api/orca/update"), CHECK_TIMEOUT_S, "업데이트 확인을")
-
-    def orca_update(self, i):
-        """업데이트 버튼: 그 게이트웨이 POST /api/orca/update 를 그대로 전달한다. (http 상태, 응답)."""
-        req = urllib.request.Request(self.devices[i]["url"] + "/api/orca/update", data=b"", method="POST",
-                                     headers={"X-Jarvis-Action": "orca-update"})
-        return self._ask(i, req, TIMEOUT_S, "Orca 업데이트를")
 
     def jarvis_update(self, i):
         """jarvis 업데이트 버튼: 그 게이트웨이 POST /api/jarvis/update. 받은 코드가 다르면 게이트웨이가 스스로 재시작한다."""
@@ -550,34 +522,3 @@ class Core:
             devices = list(pool.map(one, ids))
         self._same_org_names(devices)
         return {"generated_at": time.time(), "devices": devices}
-
-    def orca_update_all(self):
-        """기기마다 업데이트를 시작한다. 한 대 실패가 나머지를 멈추지 않는다."""
-        ids = list(self.devices)
-
-        def one(i):
-            code, body = self.orca_update(i)
-            return {"id": i, "status": code, **(body if isinstance(body, dict) else {"error": str(body)})}
-
-        with ThreadPoolExecutor(max_workers=max(1, min(8, len(ids)))) as pool:
-            return list(pool.map(one, ids))
-
-    def orca(self, i):
-        """페어링 버튼. 게이트웨이 /api/orca 에 QR 행렬을 붙인다. 캐시하지 않는다(셸 권한 비밀이라 core 에 남기지 않는다)."""
-        if self.devices[i].get("ssh"):
-            return {"supported": False, "error": SSH_ONLY}
-        try:
-            d = json.loads(fetch(self.devices[i]["url"] + "/api/orca")[0])
-            if not isinstance(d, dict) or not isinstance(d.get("codes"), dict):
-                raise ValueError("이상한 /api/orca 응답")
-        except urllib.error.HTTPError as e:
-            if e.code == 404:  # 아직 git pull 하지 않은 게이트웨이
-                return {"supported": False, "error": "이 기기의 jarvis 는 Orca 페어링을 지원하지 않습니다(git pull 필요)"}
-            if e.code == 403:
-                return {"supported": False, "error": "이 기기 jarvis 설정 core 에 이 core 의 tailnet IP 가 없습니다"}
-            raise
-        for c in d["codes"].values():
-            if isinstance(c, dict) and isinstance(c.get("url"), str):
-                c["qr"] = qr_rows(c["url"])
-        d["supported"] = True
-        return d

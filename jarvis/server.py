@@ -20,7 +20,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from . import __version__, claude_accounts, cli_login, config, fleet, independent_usage, modules_api, orca, orca_issue, orca_update, self_update
+from . import __version__, claude_accounts, cli_login, config, fleet, independent_usage, modules_api, self_update
 from .core import why
 from .util import client_kind
 
@@ -128,8 +128,8 @@ def make_handler(collector, core=None):
             return True
 
         def _trusted(self, ips, proxies=()):
-            """Orca 페어링 코드는 셸 권한이다: 목록의 tailnet IP 에만 준다. 게이트웨이 /api/orca 는 설정 core,
-            core 의 페어링 버튼은 설정 viewers 가 목록이다. 루프백은 받지 않는다(같은 기기의 컨테이너·프록시·다른 사용자도
+            """계정·갱신 동작은 목록의 tailnet IP 에만 허용한다. 게이트웨이의 경로는 설정 core,
+            core 의 조작 버튼은 설정 viewers 가 목록이다. 루프백은 받지 않는다(같은 기기의 컨테이너·프록시·다른 사용자도
             루프백으로 온다). tailnet 은 WireGuard 가 출발지를 인증한다. LAN IP 는 목록에 적어도 받지 않는다(가로채기·평문).
             프록시 헤더가 (빈 값으로라도) 있으면 받지 않는다: host 네트워크 Caddy 가 tailnet IP 로 넘겨 주면 출발지가 core 가 된다.
             core 기기 자체는 전부 믿는다(그 기기의 어떤 프로세스든 tailnet 으로 나가면 출발지가 core IP 다).
@@ -208,7 +208,7 @@ def make_handler(collector, core=None):
             return self._json({"error": "not found"}, head, 404)
 
         def _device(self, path, u, head):
-            """core: /api/devices/<id>/(snapshot|inbound|history|changes|orca|usage)."""
+            """core: /api/devices/<id>/(snapshot|inbound|history|changes|login|usage)."""
             parts = path.split("/")
             if len(parts) != 5 or not core.has(parts[3]):
                 return self._json({"error": "not found"}, head, 404)
@@ -223,10 +223,6 @@ def make_handler(collector, core=None):
             if what == "inbound":  # 다른 기기의 프록시를 거쳐 이 기기로 들어오는 길(MAP-6). 스냅샷과 같은 공개 범위
                 return self._json(fleet.inbound(core, dev), head)
             try:
-                if what == "orca":
-                    if not self._trusted(config.VIEWERS, config.PROXIES):
-                        return self._json({"error": "페어링 코드는 허용된 기기(viewers)에서만 볼 수 있습니다"}, head, 403)
-                    return self._json(core.orca(dev), head)
                 if what == "login":
                     if not self._trusted(config.VIEWERS, config.PROXIES):
                         return self._json({"error": "로그인은 허용된 기기(viewers)에서만 할 수 있습니다"}, head, 403)
@@ -262,7 +258,7 @@ def make_handler(collector, core=None):
             self._route(head=False)
 
         def do_POST(self):
-            # 쓰기 동작은 Orca 코드 발급·업데이트, jarvis 갱신, CLI 로그인, Claude 계정 전환뿐이다.
+            # 쓰기 동작은 jarvis 갱신, CLI 로그인, Claude 계정 전환, 모듈 적용뿐이다.
             # 본문·네트워크·Host 검사는 _route 가 GET 과 똑같이 먼저 한다.
             self._route(head=False, post=True)
 
@@ -280,8 +276,7 @@ def make_handler(collector, core=None):
                 return self._text(421, "misdirected request", head)
             # 맞춤 헤더를 요구해 다른 사이트가 브라우저로 대신 보내지 못하게 한다(맞춤 헤더가 있으면 교차 출처 요청은
             # preflight 가 필요한데, 이 서버는 OPTIONS 에 답하지 않는다).
-            if post and self.headers.get("X-Jarvis-Action") not in ("orca-issue", "orca-update", "jarvis-update", "usage-login",
-                                                                        "usage-account", "module-apply"):
+            if post and self.headers.get("X-Jarvis-Action") not in ("jarvis-update", "usage-login", "usage-account", "module-apply"):
                 return self._json({"error": "X-Jarvis-Action 헤더가 필요합니다"}, head, 403)
             u = urlsplit(self.path)
             path = unquote(u.path)
@@ -290,22 +285,6 @@ def make_handler(collector, core=None):
                 return self._json({"error": "기기 목록은 tailnet 에서만 볼 수 있습니다"}, head, 403)
             try:
                 if post:
-                    scope = (parse_qs(u.query).get("scope") or [""])[0]
-                    if path == "/api/orca/issue":
-                        if not self._trusted(config.CORE):
-                            return self._json({"error": "core 로 지정한 기기만 부를 수 있습니다"}, head, 403)
-                        st = orca.status(collector.tailnet_v4())
-                        port = int((st.get("endpoint") or ":6768").rsplit(":", 1)[1])
-                        code, body = orca_issue.start(scope, collector.tailnet_v4(), port)
-                        return self._json(body, head, code)
-                    if core and path.startswith("/api/devices/") and path.endswith("/orca/issue"):
-                        dev = path.split("/")[3]
-                        if path.count("/") != 5 or not core.has(dev):
-                            return self._json({"error": "not found"}, head, 404)
-                        if not self._trusted(config.VIEWERS, config.PROXIES):
-                            return self._json({"error": "페어링 코드는 허용된 기기(viewers)에서만 발급할 수 있습니다"}, head, 403)
-                        code, body = core.orca_issue(dev, scope)
-                        return self._json(body, head, code)
                     if path == "/api/usage/login":
                         if not self._trusted(config.CORE):
                             return self._json({"error": "core 로 지정한 기기만 부를 수 있습니다"}, head, 403)
@@ -332,11 +311,6 @@ def make_handler(collector, core=None):
                             return self._json({"error": "계정 전환은 허용된 기기(viewers)에서만 할 수 있습니다"}, head, 403)
                         code, body = core.usage_switch(dev, (parse_qs(u.query).get("slot") or [""])[0])
                         return self._json(body, head, code)
-                    if path == "/api/orca/update":
-                        if not self._trusted(config.CORE):
-                            return self._json({"error": "core 로 지정한 기기만 부를 수 있습니다"}, head, 403)
-                        code, body = orca_update.start()
-                        return self._json(body, head, code)
                     if path == "/api/jarvis/update":
                         if not self._trusted(config.CORE):
                             return self._json({"error": "core 로 지정한 기기만 부를 수 있습니다"}, head, 403)
@@ -356,18 +330,6 @@ def make_handler(collector, core=None):
                             return self._json({"error": "업데이트는 허용된 기기(viewers)에서만 할 수 있습니다"}, head, 403)
                         code, body = core.jarvis_update(dev)
                         return self._json(body, head, code)
-                    if core and path == "/api/devices/orca/update":
-                        if not self._trusted(config.VIEWERS, config.PROXIES):
-                            return self._json({"error": "업데이트는 허용된 기기(viewers)에서만 할 수 있습니다"}, head, 403)
-                        return self._json({"devices": core.orca_update_all()}, head, 200)
-                    if core and path.startswith("/api/devices/") and path.endswith("/orca/update"):
-                        dev = path.split("/")[3]
-                        if path.count("/") != 5 or not core.has(dev):
-                            return self._json({"error": "not found"}, head, 404)
-                        if not self._trusted(config.VIEWERS, config.PROXIES):
-                            return self._json({"error": "업데이트는 허용된 기기(viewers)에서만 할 수 있습니다"}, head, 403)
-                        code, body = core.orca_update(dev)
-                        return self._json(body, head, code)
                     if _modules_path(path):
                         return self._modules(path, u, head, post=True)
                     return self._json({"error": "not found"}, head, 404)
@@ -386,10 +348,6 @@ def make_handler(collector, core=None):
                     return self._json(collector.history(rng), head)
                 if path == "/api/changes":
                     return self._json({"changes": collector.journal.events()}, head)
-                if path == "/api/orca/update":
-                    if not self._trusted(config.CORE):
-                        return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
-                    return self._json(orca_update.check(), head)
                 if path == "/api/usage/login":
                     if not self._trusted(config.CORE):
                         return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
@@ -399,20 +357,6 @@ def make_handler(collector, core=None):
                         return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
                     body = independent_usage.read(force=parse_qs(u.query).get("refresh") == ["1"])
                     return self._json(body, head)
-                if path == "/api/orca":
-                    if not self._trusted(config.CORE):
-                        return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
-                    st = orca.status(collector.tailnet_v4())
-                    return self._json({**st, "issuable": orca_issue.issuable(st), "issue": orca_issue.job,
-                                       "update": orca_update.snapshot()}, head)
-                if core and path.startswith("/api/devices/") and path.endswith("/orca/update"):
-                    dev = path.split("/")[3]
-                    if path.count("/") != 5 or not core.has(dev):
-                        return self._json({"error": "not found"}, head, 404)
-                    if not self._trusted(config.VIEWERS, config.PROXIES):
-                        return self._json({"error": "업데이트 확인은 허용된 기기(viewers)에서만 할 수 있습니다"}, head, 403)
-                    code, body = core.orca_update_check(dev)
-                    return self._json(body, head, code)
                 if core and path == "/api/devices":
                     return self._json(core.list(), head)
                 if _modules_path(path):

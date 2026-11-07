@@ -108,10 +108,6 @@ def _prune(keep):
 
 def start(running=__version__):
     """(http 상태, 응답). 응답의 restart 가 참이면 호출자가 restart() 를 부른다."""
-    if occupancy.held(occupancy.ORCA_UPDATE):
-        return 409, {"error": "Orca 업데이트가 끝난 뒤에 갱신하세요"}
-    if occupancy.held(occupancy.ORCA_ISSUE):
-        return 409, {"error": "페어링 코드 발급이 끝난 뒤에 갱신하세요"}
     if occupancy.held(occupancy.MODULE_APPLY):  # 적용 중에 재시작·갱신하면 설치가 반쯤 남는다
         return 409, {"error": "모듈 적용이 끝난 뒤에 갱신하세요"}
     if not _lock.acquire(blocking=False):

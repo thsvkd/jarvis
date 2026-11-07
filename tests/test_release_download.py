@@ -1,4 +1,4 @@
-"""리다이렉트 허용 호스트와 그 규칙이 실제 opener 에 걸려 있는지(check_file 은 test_orca_update 의 test_hash 가 본다)."""
+"""리다이렉트 허용 호스트와 그 규칙이 실제 opener 에 걸려 있는지."""
 import importlib.util
 import os
 import threading
