@@ -30,7 +30,6 @@ Linux(지금은 pit5 = Raspberry Pi 5 에서 운영)와 macOS(Mac Studio 로 옮
 |---|---|
 | 홈(개요) — Bento Focus | `/` |
 | 서비스 네트워크 맵 — Atlas | `/map/` — 개념 모드(서비스가 어떤 경로로 노출되는가) · 물리 모드(어느 기기·인터페이스·도커 네트워크 안에 무엇이 있는가). `#focus=<서비스 id>` 로 특정 노드를 연다 |
-| 보관: 시안 갤러리·초안 5종 | `/gallery/`, `/d/<slug>/` (제품 아님, 유지보수하지 않음) |
 
 인증이 없으므로 접근 통제가 전부다. 공개 라우트(Caddy `(public)`)나 터널에 절대 올리지 않는다.
 - 접속 IP: 루프백·사설망·tailnet 만. 도커 대역은 Caddy 컨테이너에서 온 요청만, X-Forwarded-For 원 클라이언트가 허용 대역일 때만.
@@ -77,15 +76,12 @@ jarvis/          수집기 + HTTP 서버 (python3 -m jarvis)
 static/
   index.html     홈(개요, Bento)
   map/           서비스 네트워크 맵(Atlas)
-  setup/         AI 셋업: 기기별 모듈(Orca·doctor) 상태 → 계획 → 실행 → 결과(랩 05 의 C 안, API 는 docs/SPEC.md 의 "AI 셋업 화면")
+  setup/         AI 셋업: 기기별 모듈(Orca·doctor) 상태 → 계획 → 실행 → 결과(API 는 docs/SPEC.md 의 "AI 셋업 화면")
   app/           제품 자산: tokens.css(디자인 토큰·라이트/다크 값), shell.*(공통 헤더·공용 유틸리티·테마), theme-init.js, bento.*, focus-layout.js·focus.js·focus.css(운영 Focus), atlas.*
   shared/        jarvis.js(공용 클라이언트, 전역 JARVIS), API.md(스냅샷 스키마), favicon
                  화면 설정은 localStorage `jarvis.*` 에 두고, 이름을 바꾸기 전 `pit5.*` 값도 이어 읽는다
-  gallery/, d/   시안 비교 단계의 보관본
-  lab/           Bento 콘텐츠 구성 랩 03: 요약·서비스 우선·경보 우선 3종 실시간 데모
 tests/           파서·플랫폼 층·스냅샷 조립 단위 테스트, tests/data/ 는 명령 출력 fixture
 tools/shot.mjs   헤드리스 chromium 스크린샷·콘솔 오류·가로 넘침 검사 (CDP 직접, 의존성 없음)
-tools/check-lab.mjs  디자인 랩 갤러리·3개 시안의 모바일·데스크톱 탐색과 동일 스냅샷 비교 검증
 tools/snapcheck.py  시험 포트로 기동해 /api/snapshot 스키마를 기준선과 비교
 deploy/          systemd 사용자 유닛(Linux)·pm2 ecosystem, launchd plist·LaunchDaemon 전환 스크립트(macOS), 기기별 설정(s2.toml·pit5.toml·gateway.toml·macstudio.toml)
 ```
@@ -105,7 +101,7 @@ deploy/          systemd 사용자 유닛(Linux)·pm2 ecosystem, launchd plist·
 모바일에서는 분류별 막대·운영 통계와 경보 상세를 선택해 펼친다.
 
 서비스 고정·전체 보기·지도 접기·모바일 통계·경보 펼치기는 localStorage `jarvis.home.focus.*`에 저장한다.
-기존 테마·지도 관점·검색 필터의 저장 경로를 유지한다. 랩은 별도 sessionStorage를 사용한다.
+기존 테마·지도 관점·검색 필터의 저장 경로를 유지한다.
 
 ```sh
 node tools/check-home.mjs http://100.64.0.2:9300 /tmp/jarvis-home-check
@@ -113,18 +109,6 @@ node tools/check-home.mjs http://100.64.0.2:9300 /tmp/jarvis-home-check
 
 같은 브라우저 프로필에서 데스크톱→모바일 재접속 시 설정 복원, 헤더 탭 이동(해시가 없으면 개요, 탭마다 섹션 하나),
 검색·필터·상세·경보 이동, 폴링 후 고정 목록 유지, 지도 접기 저장, 실제 수집 오류 키·연결 지연을 검사한다.
-
-## 디자인 랩 — 가독성 시안 비교
-
-`/lab/`에서 기존 Bento 기반 3종을 실시간 데이터로 비교한다. 개별 데모·후보 저장·나란히 비교를 제공하며
-기존 Bento의 디자인과 렌더러를 재사용하며 콘텐츠 순서·접기만 달리한다. 운영 홈은 기존 주소 `/`에 있다.
-같은 Jarvis 서버에서 제공하므로 LAN·Tailnet 접근 제한도 동일하다. [시안별 설계·검증 방법](static/lab/README.md).
-`/lab/usage/` 는 랩 04(AI 구독 사용량 배치 A·B·C, 샘플 데이터·시뮬레이션 새로고침)다. 운영 화면은 C 를 골라 자세히 모드를 더했다.
-`/lab/setup/` 은 랩 05(AI 셋업: 모듈 상태 → 계획 → 승인 → 실행 → 결과, 배치 A·B·C, 샘플 데이터·시뮬레이션 실행)다. 운영 화면은 C(할 일 먼저 + 기기 서랍)를 고른다.
-
-```sh
-node tools/check-lab.mjs http://100.64.0.2:9300 /tmp/jarvis-lab-check
-```
 
 ## 설정
 
@@ -511,7 +495,7 @@ core `GET /api/devices/usage`(전체, `?refresh=1` 강제)·`/api/devices/<id>/u
 
 Claude 계정 행의 **이 계정 사용**(viewers 만)은 core `POST /api/devices/<id>/account?slot=<n>` → 게이트웨이 `POST /api/orca/account`(설정 core 만) →
 `hswap claude switch <n> --json` 으로 그 기기의 Claude Code 로그인을 바꾼다. 슬롯 번호는 기기마다 다르다. Codex 는 jarvis 가 caam activate 를 부르지 않으므로 전환하지 않는다.
-화면은 디자인 랩 04(`/lab/usage/`)의 C 안이다. 간략히(칸마다 최대 사용률, 누르면 계정 상세)와 자세히(칸 안에 계정별 한도 창 전부) 보기를 전환하며, 선택은 localStorage `jarvis.usage.mode` 에 둔다.
+화면은 간략히(칸마다 최대 사용률, 누르면 계정 상세)와 자세히(칸 안에 계정별 한도 창 전부) 보기를 전환한다. 선택은 localStorage `jarvis.usage.mode` 에 둔다.
 기기별 표 위에는 프로바이더별 계정 요약을 표시한다. 같은 프로바이더·이메일·조직의 계정은 사용량이 있는 값 중 최근 값을 한 번 보여 주고, 이메일이 없으면 기기별로 구분한다. 한도 창별 사용률과 출처 기기·확인 시각을 표시하며 프로바이더·주의 필터가 함께 적용된다.
 공식 계약: [계정 RPC](https://github.com/stablyai/orca/blob/main/src/main/runtime/rpc/methods/accounts.ts), [사용량 형식](https://github.com/stablyai/orca/blob/main/src/shared/rate-limit-types.ts).
 

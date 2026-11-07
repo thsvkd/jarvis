@@ -37,12 +37,6 @@ CSP = ("default-src 'self'; script-src 'self'; "
        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; "
        "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data:; "
        "connect-src 'self'; object-src 'none'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'")
-# 보관용 시안(/d/*)·갤러리(/gallery/)는 만들 때의 느슨한 정책을 그대로 쓴다.
-CSP_ARCHIVE = ("default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; "
-               "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data:; "
-               "connect-src 'self'; object-src 'none'; frame-ancestors 'self'; base-uri 'self'; form-action 'none'")
-ARCHIVE_PREFIXES = ("/d/", "/gallery/")
 MAX_CONNS = 48
 PROXY_HEADERS = ("X-Forwarded-For", "Forwarded", "X-Real-IP", "Via", "X-Forwarded-Host", "X-Forwarded-Proto",
                  "Tailscale-User-Login", "Tailscale-Funnel-Request")
@@ -99,8 +93,7 @@ def make_handler(collector, core=None):
             self.send_header("Content-Length", str(len(body)))
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
-            path = urlsplit(self.path).path
-            self.send_header("Content-Security-Policy", CSP_ARCHIVE if path.startswith(ARCHIVE_PREFIXES) else CSP)
+            self.send_header("Content-Security-Policy", CSP)
             for k, v in (extra or {}).items():
                 self.send_header(k, v)
             self.end_headers()
