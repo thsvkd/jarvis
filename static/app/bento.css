@@ -1092,6 +1092,7 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
   .svc:hover, .issue:hover { transform: none; }
+  .dev-tile:hover { translate: none; }
 }
 .embed *, .embed *::before, .embed *::after { animation: none !important; transition: none !important; }
 
@@ -1113,7 +1114,9 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
 .dev-acts button.seg-action:disabled { opacity: .45; cursor: not-allowed; }
 .dev-note { color: var(--text-2); font-size: var(--fs-sm); }
 .dev-err, .dev-note.dev-err { color: var(--crit-ink); font-weight: var(--fw-semibold); }
-.dev-tile { align-self: start; cursor: pointer; }
+.dev-tile { align-self: start; cursor: pointer; transition: translate .35s var(--ease), box-shadow .35s var(--ease); }
+/* .tile 의 rise 애니메이션(fill both)이 transform 을 잡고 있어 translate 로 띄운다 */
+.dev-tile:hover { translate: 0 -3px; box-shadow: var(--shadow-hover); }
 
 /* ------------------------------------------------------------------ AI 구독 사용량(core, usage.js) — 디자인 랩 04 의 C + 자세히 모드 */
 .ul-bar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2_5); margin-bottom: var(--gap); }
