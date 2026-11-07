@@ -10,7 +10,7 @@ import unittest
 import urllib.request
 from unittest import mock
 
-from jarvis import caam_usage, claude_accounts, cswap_cached_usage, cswap_usage, independent_usage, orca_usage, util
+from jarvis import caam_usage, claude_accounts, independent_usage, orca_usage, util
 
 _GUARDS = []
 LIVE_IDENTITY = claude_accounts._live_identity  # StoreCase 가 가짜로 바꾸기 전의 실제 함수
@@ -2107,20 +2107,6 @@ class AuthRecordChangeTest(StoreCase):
         text = json.dumps(claude_accounts.read(force=True), ensure_ascii=False)
         self.assertNotIn("secret-kind", text)
         self.assertIn("알 수 없는 오류", text)
-
-
-class AliasTest(unittest.TestCase):
-    def test_old_names_read_and_patch_the_new_module(self):
-        """covers: USAGE-6. 옛 이름으로 바꿔 끼운 값이 새 모듈에 그대로 닿고, 끝나면 되돌아간다"""
-        live, store = claude_accounts.live, claude_accounts._store_read
-        self.assertIs(cswap_usage.read, live)
-        self.assertIs(cswap_cached_usage.read, store)
-        self.assertIs(cswap_usage.account, claude_accounts.account)
-        with mock.patch.object(cswap_usage, "read", return_value="x"), mock.patch.object(cswap_cached_usage, "_root", return_value="/none"):
-            self.assertEqual(claude_accounts.live(), "x")
-            self.assertEqual(claude_accounts._root(), "/none")
-        self.assertIs(claude_accounts.live, live)
-        self.assertNotEqual(claude_accounts._root(), "/none")
 
 
 NOW, MONO = 1_800_000_000.0, 5000.0

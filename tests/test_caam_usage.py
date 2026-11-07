@@ -151,7 +151,7 @@ class InstallTest(unittest.TestCase):
 class MergeTest(unittest.TestCase):
     def merged(self, orca_body, ca):
         with mock.patch.object(orca_usage, "_orca", return_value=orca_body), \
-                mock.patch.object(orca_usage.cswap_usage, "read", return_value=None), \
+                mock.patch.object(orca_usage.claude_accounts, "live", return_value=None), \
                 mock.patch.object(orca_usage.caam_usage, "read", return_value=ca), \
                 mock.patch.object(orca_usage.claude_accounts, "_keepalive", return_value=None), \
                 mock.patch.object(orca_usage.claude_accounts, "_store_read", return_value=None), \

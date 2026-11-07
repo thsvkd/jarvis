@@ -8,7 +8,7 @@
   쓰기는 core 의 '이 계정 사용' 버튼이 부르는 `hswap claude switch <슬롯> --json` 하나다(자격 교체는 hswap 이 한다).
 - 저장소 캐시(_store_read, _keepalive): hswap(Claude 엔진 claude-swap)과 기존 cswap 이 함께 쓰는 저장소의 계정·마지막 사용량·keepalive.json. 대체값이다.
 jarvis 는 자격 증명 파일을 열지 않는다(갱신 토큰을 따로 돌리면 hswap·Claude Code 의 로그인이 풀릴 수 있다). 계정은 이메일·조직 이름·슬롯 번호만 내보낸다.
-이미 깔린 cswap 은 지우지 않는다. 옛 이름 cswap_usage·cswap_cached_usage 는 이 모듈로 넘기는 호환 이름표다(alias).
+이미 깔린 cswap 은 지우지 않는다.
 
 공식 계약: https://github.com/thsvkd/harness-swap (claude 하위 명령은 claude-swap 의 CLI, src/claude_swap/json_output.py)
 https://github.com/realiti4/claude-swap/blob/v0.28.0/src/claude_swap/usage_store.py
@@ -25,7 +25,6 @@ import subprocess
 import sys
 import threading
 import time
-import types
 
 from . import config, opencode_usage, provider_usage
 from .util import Installer, org, parse_iso, scrub_home, which_local
@@ -643,19 +642,3 @@ def merge_orca(mine, orca_rows):
              and not (a.get("org") is None and email(a) in emails)
              and not (a["label"] == "시스템 기본 계정" and any(m.get("active") for m in mine))]
     return mine + extra
-
-
-def alias(name, names):
-    """옛 모듈 name 을 이 모듈로 넘기는 이름표로 바꾼다. 읽기뿐 아니라 쓰기(테스트의 패치 포함)도 그대로 이 모듈에 닿는다. names: 옛 이름 → 지금 이름."""
-    target = sys.modules[__name__]
-
-    class Alias(types.ModuleType):
-        def __getattr__(self, k):
-            return getattr(target, names.get(k, k))
-
-        def __setattr__(self, k, v):
-            setattr(target, names.get(k, k), v)
-
-        def __delattr__(self, k):
-            delattr(target, names.get(k, k))
-    sys.modules[name].__class__ = Alias

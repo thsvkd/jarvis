@@ -123,8 +123,8 @@ class NormalizeTest(unittest.TestCase):
 
 class ReadTest(unittest.TestCase):
     def setUp(self):  # 이 기기에 설치된 cswap·caam 을 읽거나 설치하지 않게
-        for m in (orca_usage.cswap_usage, orca_usage.caam_usage):
-            p = mock.patch.object(m, "read", return_value=None)
+        for m, name in ((orca_usage.claude_accounts, "live"), (orca_usage.caam_usage, "read")):
+            p = mock.patch.object(m, name, return_value=None)
             p.start()
             self.addCleanup(p.stop)
         for name in ("_keepalive", "_store_read"):  # 이 기기의 hswap 저장소를 읽지 않게

@@ -118,7 +118,7 @@ class IndependentUsageTest(unittest.TestCase):
                 mock.patch.object(independent_usage.minimax_usage, "read", return_value=empty), \
                 mock.patch.object(independent_usage.zcode_usage, "read", return_value=empty), \
                 mock.patch.object(independent_usage.cli_login, "available", return_value=["codex", "grok"]), \
-                mock.patch.object(independent_usage.cswap_usage, "status", return_value={"version": "0.2.0", "pinned": "0.2.1", "note": None}):
+                mock.patch.object(independent_usage.claude_accounts, "status", return_value={"version": "0.2.0", "pinned": "0.2.1", "note": None}):
             data = independent_usage.read(force=True)
         self.assertEqual(data["hswap"], {"version": "0.2.0", "pinned": "0.2.1", "note": None})  # 기기 행의 hswap 버전
         self.assertEqual(data["logins"], ["codex", "grok"])
@@ -157,7 +157,7 @@ class IndependentUsageTest(unittest.TestCase):
                 mock.patch.object(independent_usage.kimi_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
                 mock.patch.object(independent_usage.minimax_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
                 mock.patch.object(independent_usage.zcode_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.cswap_usage, "status", return_value=None):
+                mock.patch.object(independent_usage.claude_accounts, "status", return_value=None):
             data = independent_usage.read(force=True)
         self.assertNotIn("fresh_logins", data)  # 키가 없으면 화면도 버튼을 내지 않는다
         self.assertNotIn("hswap", data)  # 게이트웨이가 아직 확인하지 않았다
@@ -173,7 +173,7 @@ class IndependentUsageTest(unittest.TestCase):
                 mock.patch.object(independent_usage.zcode_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
                 mock.patch.object(independent_usage.kimi_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
                 mock.patch.object(independent_usage.codex_native_usage, "read", return_value=[]), \
-                mock.patch.object(independent_usage.cswap_cached_usage, "read", return_value=claude), \
+                mock.patch.object(independent_usage.claude_accounts, "_store_read", return_value=claude), \
                 mock.patch.object(independent_usage.antigravity_usage, "read", return_value={"status": "ok", "accounts": [{"label": "a@example.com"}]}), \
                 mock.patch.object(independent_usage.caam_usage, "binary", return_value="/fake/caam"), \
                 mock.patch.object(independent_usage.provider_usage, "read_provider", side_effect=provider), \
@@ -195,7 +195,7 @@ class IndependentUsageTest(unittest.TestCase):
                 mock.patch.object(independent_usage.zcode_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
                 mock.patch.object(independent_usage.kimi_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
                 mock.patch.object(independent_usage.codex_native_usage, "read", return_value=[]), \
-                mock.patch.object(independent_usage.cswap_cached_usage, "read", return_value=None), \
+                mock.patch.object(independent_usage.claude_accounts, "_store_read", return_value=None), \
                 mock.patch.object(independent_usage.antigravity_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
                 mock.patch.object(independent_usage.caam_usage, "binary", return_value=None), \
                 mock.patch.object(independent_usage, "which_local", return_value=None):
@@ -220,7 +220,7 @@ class IndependentUsageTest(unittest.TestCase):
                 mock.patch.object(independent_usage.zcode_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
                 mock.patch.object(independent_usage.kimi_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
                 mock.patch.object(independent_usage.codex_native_usage, "read", return_value=[]), \
-                mock.patch.object(independent_usage.cswap_cached_usage, "read", return_value=None), \
+                mock.patch.object(independent_usage.claude_accounts, "_store_read", return_value=None), \
                 mock.patch.object(independent_usage.antigravity_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
                 mock.patch.object(independent_usage.caam_usage, "binary", return_value="/fake/caam"), \
                 mock.patch.object(independent_usage.provider_usage, "read_provider", side_effect=provider), \
@@ -230,21 +230,21 @@ class IndependentUsageTest(unittest.TestCase):
 
     def test_missing_cswap_does_not_start_installer(self):
         """covers: USAGE-3"""
-        with mock.patch.object(independent_usage.cswap_cached_usage, "read", return_value=None), \
-                mock.patch.object(independent_usage.cswap_usage, "read") as read:
+        with mock.patch.object(independent_usage.claude_accounts, "_store_read", return_value=None), \
+                mock.patch.object(independent_usage.claude_accounts, "live") as read:
             self.assertIsNone(independent_usage._claude(False))
         read.assert_not_called()
 
     def test_cswap_disappearing_after_lookup_cannot_start_installer(self):
         """covers: USAGE-3"""
-        with mock.patch.object(independent_usage.cswap_cached_usage, "read", return_value=None), \
-                mock.patch.object(independent_usage.cswap_usage, "ensure") as ensure:
+        with mock.patch.object(independent_usage.claude_accounts, "_store_read", return_value=None), \
+                mock.patch.object(independent_usage.claude_accounts, "ensure") as ensure:
             self.assertIsNone(independent_usage._claude(False))
         ensure.assert_not_called()
 
     def test_cswap_provider_error_does_not_expose_raw_credentials(self):
         """covers: USAGE-3"""
-        account = independent_usage.cswap_usage.account({"usageStatus": "other", "usageError": "Bearer synthetic-secret"})
+        account = independent_usage.claude_accounts.account({"usageStatus": "other", "usageError": "Bearer synthetic-secret"})
         self.assertNotIn("synthetic-secret", str(account))
 
     def test_codex_falls_back_to_native_when_caam_absent(self):

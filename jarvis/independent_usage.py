@@ -6,7 +6,6 @@ import threading
 import time
 
 from . import antigravity_usage, caam_usage, claude_accounts, cli_login, codex_native_usage, gemini_usage, kimi_usage, minimax_usage, opencode_usage, orca_usage, provider_usage, zcode_usage
-from . import cswap_cached_usage, cswap_usage  # noqa: F401 (호환 이름)
 from .util import which_local
 
 _pool = ThreadPoolExecutor(max_workers=5, thread_name_prefix="jarvis-usage")

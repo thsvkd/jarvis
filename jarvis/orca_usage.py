@@ -15,7 +15,7 @@ import re
 import threading
 import time
 
-from . import caam_usage, claude_accounts, cli_login, cswap_usage, orca, orca_rpc  # noqa: F401 (cswap_usage: 호환 이름)
+from . import caam_usage, claude_accounts, cli_login, orca, orca_rpc
 from .util import org, scrub_home
 
 REFRESH_S = 300
