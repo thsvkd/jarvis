@@ -337,7 +337,7 @@ class EntryPoint(unittest.TestCase):
             code, err = self.main(typo, "--json")
             self.assertEqual(code, 1, typo)
             self.assertIn("사용법", err)
-        for argv, code in ((["update"], 11), (["module", "orca", "plan"], 12), (["agentsmd"], 13),
+        for argv, code in ((["update"], 11), (["module", "hooks", "plan"], 12), (["agentsmd"], 13),
                            (["core-trust", "plan"], 14), (["--version"], 0)):
             self.assertEqual(self.main(*argv)[0], code, argv)
         with self.assertRaisesRegex(RuntimeError, "게이트웨이 기동"):

@@ -21,7 +21,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from jarvis import config, core, modules_api, self_update, server  # noqa: E402
-from test_orca import FakeCollector  # noqa: E402
+from test_server_access import FakeCollector  # noqa: E402
 
 PLAN_ID = "b" * 64
 
@@ -213,7 +213,7 @@ class Fetch(Base):
         self.response(http(b'{"changes":[]}'))
         self.assertEqual(self.core.relay("kg", "/api/changes"), b'{"changes":[]}')
         self.assertEqual(self.core.relay("kg", "/api/history?range=24h"), b'{"changes":[]}')
-        for path in ("/api/orca", "/api/history?range=7d", "/api/changes\n", "/api/modules"):
+        for path in ("/api/usage/independent", "/api/history?range=7d", "/api/changes\n", "/api/modules"):
             with self.assertRaises(ValueError):
                 self.core.relay("kg", path)
         self.assertEqual(len(self.calls()), 3)
@@ -292,9 +292,7 @@ class Unsupported(Base):
         self.polled()
         c = self.core
         with mock.patch.object(core, "_open", side_effect=AssertionError("HTTP 를 보냈다")):
-            self.assertEqual(c.orca("kg"), {"supported": False, "error": core.SSH_ONLY})
-            for call in (lambda: c.orca_issue("kg", "mobile"), lambda: c.orca_update_check("kg"), lambda: c.orca_update("kg"),
-                         lambda: c.usage("kg"), lambda: c.usage("kg", True, independent=True),
+            for call in (lambda: c.usage("kg"), lambda: c.usage("kg", True),
                          lambda: c.usage_login("kg", "claude"), lambda: c.usage_login_status("kg", "claude"),
                          lambda: c.usage_switch("kg", "1")):
                 self.assertEqual(call(), (501, {"error": core.SSH_ONLY}))
@@ -311,14 +309,12 @@ class Unsupported(Base):
         self.assertEqual(rows["down"]["status"], 502)
         self.assertEqual(rows["web"]["status"], 502)  # HTTP 기기는 지금처럼 부른다(닿지 않는 주소)
         self.assertIn("닿지 못했습니다", rows["web"]["error"])
-        rows = {r["id"]: r for r in c.orca_update_all()}
-        self.assertEqual((rows["ok"]["status"], rows["down"]["status"]), (501, 501))
         self.assertEqual(self.calls(), [])
 
 
 class LoopbackGateway(Base):
     def test_gateway_answers_public_paths_over_ssh_w(self):
-        """covers: SSH-5 (403 쪽은 test_orca.AccessTest.test_no_loopback,
+        """covers: SSH-5 (403 쪽은 test_server_access.AccessTest.test_no_loopback,
         test_modules_api 의 test_gateway_routes_answer_only_the_configured_core)"""
 
         class Journal:
@@ -376,53 +372,53 @@ class Commands(Base):
         self.polled()
         self.assertEqual(self.mods.plan("kg", "nope")[0], 404)
         for bad in ("b" * 63, "B" * 64, PLAN_ID + "\n", PLAN_ID + "x", "", None):
-            self.assertEqual(self.mods.apply("kg", "orca", bad)[0], 400, repr(bad))
+            self.assertEqual(self.mods.apply("kg", "hooks", bad)[0], 400, repr(bad))
         self.assertEqual(self.mods.apply("kg", "nope", PLAN_ID)[0], 404)
         for v in ("1.7.7", "abc", None, "1.7"):
             self.polled(version=v)
-            code, body = self.mods.plan("kg", "orca")
+            code, body = self.mods.plan("kg", "hooks")
             self.assertEqual(code, 501, v)
             self.assertIn("SSH 조작을 지원하지 않습니다", body["error"])
-            self.assertEqual(self.mods.apply("kg", "orca", PLAN_ID)[0], 501)
+            self.assertEqual(self.mods.apply("kg", "hooks", PLAN_ID)[0], 501)
             self.assertEqual(self.core.jarvis_update("kg")[0], 501)
             self.assertEqual(self.mods.all()["devices"][0]["status"], 501)
         with self.core.lock:
             self.core.state["kg"]["summary"] = None
-        self.assertEqual(self.mods.plan("kg", "orca")[0], 502)
+        self.assertEqual(self.mods.plan("kg", "hooks")[0], 502)
         self.assertEqual(self.core.jarvis_update("kg")[0], 502)
         self.assertEqual(self.calls(), [])
-        for args in (("core-trust", "plan"), ("module", "orca;rm"), ("module", "orca", "x y"), (), ("module\n",),
-                     ("module", "orca", "uninstall"), ("module", "orca")):
+        for args in (("core-trust", "plan"), ("module", "hooks;rm"), ("module", "hooks", "x y"), (), ("module\n",),
+                     ("module", "hooks", "uninstall"), ("module", "hooks")):
             with self.assertRaises(ValueError):
                 core.jarvis_line(*args)
 
     def test_layout_and_stderr(self):
         """covers: SSH-6"""
-        self.assertEqual(core.ssh_run("kg-alias", core.PRE + core.jarvis_line("module", "orca", "status", "--json"), 20)[2],
+        self.assertEqual(core.ssh_run("kg-alias", core.PRE + core.jarvis_line("module", "hooks", "status", "--json"), 20)[2],
                          "원격 진행 로그")  # 읽기 동작의 원격 표준 오류는 core 가 받는다
-        apply = core.PRE + core.jarvis_line("module", "orca", "apply", "--json", "--plan-id", PLAN_ID, write=True)
+        apply = core.PRE + core.jarvis_line("module", "hooks", "apply", "--json", "--plan-id", PLAN_ID, write=True)
         self.assertIn(f"--plan-id {PLAN_ID} </dev/null 2>/dev/null", apply)
         self.assertEqual(core.ssh_run("kg-alias", apply, 20)[2], "")  # 쓰기 동작은 버린다
         self.assertEqual(core.ssh_run("kg-alias", core.PRE + core.jarvis_line("update", write=True), 20)[2], "")
-        self.py({"module orca status": {"out": "x" * 64, "err": "y" * 10000 + "\n끝 줄\n"}})
+        self.py({"module hooks status": {"out": "x" * 64, "err": "y" * 10000 + "\n끝 줄\n"}})
         with mock.patch.object(core, "MAX_BYTES", 16):  # 원격 출력은 상한까지만 읽는다
-            code, out, err = core.ssh_run("kg-alias", core.PRE + core.jarvis_line("module", "orca", "status", "--json"), 20)
+            code, out, err = core.ssh_run("kg-alias", core.PRE + core.jarvis_line("module", "hooks", "status", "--json"), 20)
         self.assertEqual((code, out, err), (0, "x" * 16, "끝 줄"))
         self.py({})
         os.remove(self.python)
         self.polled()
-        self.assertEqual(self.mods.plan("kg", "orca"), (502, {"error": core.SSH_EXIT[90]}))
+        self.assertEqual(self.mods.plan("kg", "hooks"), (502, {"error": core.SSH_EXIT[90]}))
         script(self.python, FAKE_PY)
         os.remove(os.path.join(self.app, "jarvis", "__init__.py"))  # 코드가 없는 app 은 배치가 아니다
-        self.assertEqual(self.mods.plan("kg", "orca"), (502, {"error": core.SSH_EXIT[90]}))
+        self.assertEqual(self.mods.plan("kg", "hooks"), (502, {"error": core.SSH_EXIT[90]}))
         old = os.path.join(self.home, "Workspace", "jarvis")  # 옛 배치·개발 체크아웃(kgolf-macmini)
         os.makedirs(os.path.join(old, "jarvis"))
         open(os.path.join(old, "jarvis", "__init__.py"), "w").close()
-        self.py({"module orca plan": {"out": json.dumps({"plan_id": PLAN_ID, "steps": []}) + "\n"}})
-        self.assertEqual(self.mods.plan("kg", "orca")[0], 200)
+        self.py({"module hooks plan": {"out": json.dumps({"plan_id": PLAN_ID, "steps": []}) + "\n"}})
+        self.assertEqual(self.mods.plan("kg", "hooks")[0], 200)
         self.assertEqual(os.path.realpath(self.py_calls()[-1]["cwd"]), os.path.realpath(old))
         open(os.path.join(self.app, "jarvis", "__init__.py"), "w").close()  # 둘 다 있으면 app 이 먼저다
-        self.assertEqual(self.mods.plan("kg", "orca")[0], 200)
+        self.assertEqual(self.mods.plan("kg", "hooks")[0], 200)
         self.assertEqual(os.path.realpath(self.py_calls()[-1]["cwd"]), os.path.realpath(self.app))
 
 
@@ -430,19 +426,19 @@ class Results(Base):
     def test_last_json_line_and_errors(self):
         """covers: SSH-7"""
         self.polled()
-        plan = {"module": "orca", "plan_id": PLAN_ID, "steps": []}
-        self.py({"module orca plan": {"out": "rc 배너 {괄호}\n" + json.dumps(plan) + "\n"}})
-        self.assertEqual(self.mods.plan("kg", "orca"), (200, plan))
-        self.py({"module orca plan": {"out": "{깨진 json\n", "err": "Traceback\nboom\n", "code": 0}})
+        plan = {"module": "hooks", "plan_id": PLAN_ID, "steps": []}
+        self.py({"module hooks plan": {"out": "rc 배너 {괄호}\n" + json.dumps(plan) + "\n"}})
+        self.assertEqual(self.mods.plan("kg", "hooks"), (200, plan))
+        self.py({"module hooks plan": {"out": "{깨진 json\n", "err": "Traceback\nboom\n", "code": 0}})
         with contextlib.redirect_stdout(io.StringIO()) as log:
-            code, body = self.mods.plan("kg", "orca")
+            code, body = self.mods.plan("kg", "hooks")
         self.assertEqual(code, 502)
         self.assertIn("종료 코드 0", body["error"])
         self.assertNotIn("boom", json.dumps(body))
         self.assertIn("boom", log.getvalue())  # 표준 오류 마지막 줄은 core 로그에만
         self.assertNotIn("sh -c", log.getvalue())
         self.mode("255")
-        code, body = self.mods.plan("kg", "orca")
+        code, body = self.mods.plan("kg", "hooks")
         self.assertEqual((code, body), (502, {"error": "kg 에 닿지 못했습니다: Permission denied (publickey)."}))
 
     def test_timeout_kills_the_process_group(self):
@@ -462,14 +458,14 @@ class Status(Base):
         """covers: SSH-8"""
         n = len(modules_api.module.MODULES)
         self.py({"module doctor status": {"out": json.dumps({"module": "doctor", "health": "ok", "details": ["비밀 위치"]})},
-                 "module orca status": {"out": json.dumps({"module": "orca", "installed": True}), "code": 1}})
+                 "module hooks status": {"out": json.dumps({"module": "hooks", "installed": True}), "code": 1}})
         self.polled()
         row = self.mods.all(full=True)["devices"][0]
         self.assertEqual((row["id"], row["host"], row["status"], row["job"]), ("kg", "kg-host", 200, None))
         self.assertEqual(set(row["modules"]), set(modules_api.module.MODULES))
         self.assertEqual(row["modules"]["doctor"]["details"], ["비밀 위치"])
-        self.assertEqual((row["modules"]["doctor"]["ok"], row["modules"]["orca"]["ok"]), (True, False))
-        self.assertIn("checked_at", row["modules"]["orca"])
+        self.assertEqual((row["modules"]["doctor"]["ok"], row["modules"]["hooks"]["ok"]), (True, False))
+        self.assertIn("checked_at", row["modules"]["hooks"])
         self.assertNotIn("details", self.mods.all()["devices"][0]["modules"]["doctor"])  # viewers 가 아니면 public()
         self.assertEqual(len(self.calls()), n)  # 두 번째 조회는 캐시
         self.mods.all(force=True)
@@ -491,46 +487,46 @@ class Apply(Base):
     def test_plan_and_apply(self):
         """covers: SSH-9"""
         self.polled()
-        self.py({"module orca plan": {"out": json.dumps({"plan_id": PLAN_ID}), "code": 0},
+        self.py({"module hooks plan": {"out": json.dumps({"plan_id": PLAN_ID}), "code": 0},
                  "module setup plan": {"out": json.dumps({"error": "막힘"}), "code": 1},
-                 "module orca apply": {"out": json.dumps({"module": "orca", "status": "stale"}), "code": 3, "sleep": 1.5}})
-        self.assertEqual(self.mods.plan("kg", "orca"), (200, {"plan_id": PLAN_ID}))
+                 "module hooks apply": {"out": json.dumps({"module": "hooks", "status": "stale"}), "code": 3, "sleep": 1.5}})
+        self.assertEqual(self.mods.plan("kg", "hooks"), (200, {"plan_id": PLAN_ID}))
         self.assertEqual(self.mods.plan("kg", "setup"), (502, {"error": "막힘"}))
         self.mods.all()
-        self.assertIn("orca", self.mods._ssh["kg"]["cache"])
+        self.assertIn("hooks", self.mods._ssh["kg"]["cache"])
         with contextlib.redirect_stdout(io.StringIO()) as log:
-            code, job = self.mods.apply("kg", "orca", PLAN_ID)
-            self.assertEqual((code, job["module"], job["plan_id"], job["state"]), (202, "orca", PLAN_ID, "running"))
+            code, job = self.mods.apply("kg", "hooks", PLAN_ID)
+            self.assertEqual((code, job["module"], job["plan_id"], job["state"]), (202, "hooks", PLAN_ID, "running"))
             self.assertTrue(modules_api.running())
-            self.assertEqual(self.mods.apply("kg", "orca", PLAN_ID)[0], 409)
+            self.assertEqual(self.mods.apply("kg", "hooks", PLAN_ID)[0], 409)
             self.assertEqual(self.core.jarvis_update("kg"), (409, {"error": "모듈 적용이 끝난 뒤에 갱신하세요"}))
             self.assertEqual(self_update.start(), (409, {"error": "모듈 적용이 끝난 뒤에 갱신하세요"}))  # core 자신의 갱신
             self.assertTrue(wait_until(lambda: modules_api.ssh_jobs["kg"]["state"] != "running", n=500))
         j = modules_api.ssh_jobs["kg"]
         self.assertEqual((j["state"], j["code"], j["result"]["status"]), ("finished", 3, "stale"))
         self.assertFalse(modules_api.running())
-        self.assertNotIn("orca", self.mods._ssh["kg"]["cache"])
+        self.assertNotIn("hooks", self.mods._ssh["kg"]["cache"])
         self.assertIn(PLAN_ID[:12], log.getvalue())
         self.assertNotIn(PLAN_ID, log.getvalue())
         argv = [c["argv"][-1] for c in self.calls() if "apply" in c["argv"][-1]]
         self.assertEqual(len(argv), 1)
-        self.assertIn(f"module orca apply --json --plan-id {PLAN_ID} </dev/null 2>/dev/null", argv[0])
+        self.assertIn(f"module hooks apply --json --plan-id {PLAN_ID} </dev/null 2>/dev/null", argv[0])
         self.assertEqual(self.mods.all(full=True)["devices"][0]["job"]["state"], "finished")
         modules_api.ssh_updating.add("kg")
-        self.assertEqual(self.mods.apply("kg", "orca", PLAN_ID), (409, {"error": "jarvis 갱신이 끝난 뒤에 적용하세요"}))
+        self.assertEqual(self.mods.apply("kg", "hooks", PLAN_ID), (409, {"error": "jarvis 갱신이 끝난 뒤에 적용하세요"}))
         modules_api.ssh_updating.clear()
         self.mode("255")
         with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(self.mods.apply("kg", "orca", PLAN_ID)[0], 202)
+            self.assertEqual(self.mods.apply("kg", "hooks", PLAN_ID)[0], 202)
             self.assertTrue(wait_until(lambda: modules_api.ssh_jobs["kg"]["state"] != "running"))
         self.assertEqual(modules_api.ssh_jobs["kg"]["state"], "interrupted")
         self.mode("")
         with mock.patch.object(core, "SSH_BIN", "/nonexistent/ssh"), contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(self.mods.plan("kg", "orca")[0], 502)  # 500 이 아니다
-            self.assertEqual(self.mods.apply("kg", "orca", PLAN_ID)[0], 202)
+            self.assertEqual(self.mods.plan("kg", "hooks")[0], 502)  # 500 이 아니다
+            self.assertEqual(self.mods.apply("kg", "hooks", PLAN_ID)[0], 202)
             self.assertTrue(wait_until(lambda: modules_api.ssh_jobs["kg"]["state"] != "running"))
             with mock.patch.object(self.core, "ssh", side_effect=RuntimeError("버그")):  # 어떤 예외든 running 으로 남지 않는다
-                self.assertEqual(self.mods.apply("kg", "orca", PLAN_ID)[0], 202)
+                self.assertEqual(self.mods.apply("kg", "hooks", PLAN_ID)[0], 202)
                 self.assertTrue(wait_until(lambda: modules_api.ssh_jobs["kg"]["state"] != "running"))
         self.assertEqual(modules_api.ssh_jobs["kg"]["state"], "interrupted")
         self.assertFalse(modules_api.running())

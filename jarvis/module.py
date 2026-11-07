@@ -13,7 +13,7 @@ import json
 import os
 import sys
 
-MODULES = {name: f"jarvis.modules.{name}.contract" for name in ("orca", "doctor", "hooks", "setup", "harness")}
+MODULES = {name: f"jarvis.modules.{name}.contract" for name in ("doctor", "hooks", "setup", "harness")}
 EXIT = {"done": 0, "current": 0, "failed": 1, "deferred": 2, "stale": 3}
 
 

@@ -1,5 +1,5 @@
 <#
-jarvis 설치기(Windows): 최신 릴리스를 받아 게이트웨이(deploy\install-windows.ps1)를 설치하고 모듈(Orca·훅·셋업)을 적용한다.
+jarvis 설치기(Windows): 최신 릴리스를 받아 게이트웨이(deploy\install-windows.ps1)를 설치하고 모듈(훅·셋업)을 적용한다.
 관리자 PowerShell 에서 실행한다(install-windows.ps1 이 tailnet 에만 여는 방화벽 규칙을 만든다). 다시 실행해도 된다.
 
   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/thsvkd/jarvis/main/install.ps1))) -Core <core 의 tailnet IP>
@@ -39,7 +39,7 @@ function Find-Python {
     return $null
 }
 
-if (-not (Test-Path $cfg) -and -not $Core) { Fail "처음 설치에는 -Core <core 의 tailnet IP> 가 필요합니다(이 기기의 Orca 페어링을 받아 갈 기기)" }
+if (-not (Test-Path $cfg) -and -not $Core) { Fail "처음 설치에는 -Core <core 의 tailnet IP> 가 필요합니다(이 기기의 사용량·모듈을 모아 볼 기기)" }
 $octet = '(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)'
 if ($Core -and $Core -notmatch "^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.$octet\.$octet$") { Fail "-Core 에는 tailnet IP(100.64.0.0/10)만 받습니다: $Core" }
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -58,7 +58,7 @@ if ($relocate) { $steps += "relocate $old -> $repo (python -m jarvis.relocate fr
 elseif (-not (Test-Path $repo)) { $steps += "release bundle -> $repo (sha256 verified)" }
 if (-not (Test-Path $cfg)) { $steps += "config $cfg (core = $Core)" }
 if (-not $task) { $steps += "deploy\install-windows.ps1 (firewall rule jarvis-9300, scheduled task jarvis)" }
-$steps += "modules: orca, hooks, setup (plan -> apply with its plan_id)"
+$steps += "modules: hooks, setup (plan -> apply with its plan_id)"
 if ($DryRun) { $steps | ForEach-Object { "would: $_" }; return }
 
 # 1. Python 3.11+
@@ -114,7 +114,7 @@ if (-not $task) { & (Join-Path $repo "deploy\install-windows.ps1") -Python $py }
 [Console]::OutputEncoding = New-Object Text.UTF8Encoding $false
 Push-Location $repo
 try {
-    foreach ($m in "orca", "hooks", "setup") {
+    foreach ($m in "hooks", "setup") {
         # 5.1 은 Stop 에서 네이티브 stderr(진행 로그)를 종료 오류로 바꾼다. 이 호출만 Continue 로 두고 종료 코드로 판정한다
         $raw = & { $ErrorActionPreference = "Continue"; & $py -m jarvis module $m plan --json 2>$null }
         if ($LASTEXITCODE -ne 0) { Write-Host "${m}: 계획을 세우지 못했습니다" -ForegroundColor Yellow; continue }
@@ -135,5 +135,5 @@ try {
 jarvis 를 설치했습니다: http://127.0.0.1:9300/api/health
 남은 일(계정·네트워크라 직접 합니다):
 - core 설정의 devices 에 이 기기를 넣은 뒤 core 를 재시작합니다
-- Orca 와 하네스(claude·codex 등)에 로그인합니다
+- 하네스(claude·codex 등)에 로그인합니다
 "@

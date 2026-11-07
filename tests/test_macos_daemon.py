@@ -976,7 +976,7 @@ if [ "$1" = venv ]; then mkdir -p "$4/bin" && printf '#!/bin/sh\\nexec "%s" "$@"
         self.assertNotIn("/Users/USER", plistlib.dumps(d).decode())
         calls = self.calls()
         self.assertFalse([c for c in calls if "bootstrap gui" in c])
-        self.assertLess(calls.index(f"sudo -n /bin/launchctl bootstrap system {self.daemon}"), calls.index("jarvis module orca plan --json"))
+        self.assertLess(calls.index(f"sudo -n /bin/launchctl bootstrap system {self.daemon}"), calls.index("jarvis module hooks plan --json"))
 
         installed = self.read(self.daemon)
         os.remove(self.log)

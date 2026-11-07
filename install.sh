@@ -1,5 +1,5 @@
 #!/bin/sh
-# jarvis 설치기(macOS·Linux): 게이트웨이를 설치해 띄우고 모듈(Orca·훅·셋업)을 적용한다. 다시 실행해도 된다.
+# jarvis 설치기(macOS·Linux): 게이트웨이를 설치해 띄우고 모듈(훅·셋업)을 적용한다. 다시 실행해도 된다.
 # Windows 는 install.ps1 을 쓴다(README 의 운영 절).
 #
 #   curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh -s -- --core <core 의 tailnet IP> [--daemon]
@@ -44,7 +44,7 @@ export PATH="$HOME/.local/bin:$PATH"
 cd "$HOME"  # 이 셸과 자식(파이프의 python 등)이 옛 폴더를 작업 폴더로 쥐지 않게(relocate 가 사용 중으로 본다)
 
 if [ ! -f "$CONFIG" ] && [ -z "$CORE" ]; then
-  echo "처음 설치에는 --core <core 의 tailnet IP> 가 필요합니다(이 기기의 Orca 페어링을 받아 갈 기기)" >&2
+  echo "처음 설치에는 --core <core 의 tailnet IP> 가 필요합니다(이 기기의 사용량·모듈을 모아 볼 기기)" >&2
   exit 1
 fi
 
@@ -194,7 +194,7 @@ fi
 
 # 6. 모듈: 계획을 보이고 그 plan_id 로 적용한다. app 의 런처가 받아 둔 릴리스(versions/)로 넘긴다
 cd "$APP"
-for m in orca hooks setup; do
+for m in hooks setup; do
   plan=$("$PY" -m jarvis module "$m" plan --json) || { echo "$m: 계획을 세우지 못했습니다" >&2; continue; }
   id=$(printf '%s' "$plan" | "$PY" -c '
 import json, sys
@@ -216,5 +216,5 @@ cat <<EOF
 jarvis 를 설치했습니다: http://127.0.0.1:9300/api/health
 남은 일(계정·네트워크라 직접 합니다):
 - Tailscale 에 로그인하고, core 설정의 devices 에 이 기기를 넣은 뒤 core 를 재시작합니다
-- Orca 와 하네스(claude·codex 등)에 로그인합니다
+- 하네스(claude·codex 등)에 로그인합니다
 EOF

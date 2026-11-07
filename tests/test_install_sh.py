@@ -1,4 +1,4 @@
-"""설치기(install.sh): 가짜 uname·uv·launchctl·systemctl 과 가짜 jarvis 릴리스로 돌린다. 실제 홈·launchd·systemd·Orca 는 건드리지 않는다."""
+"""설치기(install.sh): 가짜 uname·uv·launchctl·systemctl 과 가짜 jarvis 릴리스로 돌린다. 실제 홈·launchd·systemd 는 건드리지 않는다."""
 import hashlib
 import json
 import os
@@ -49,7 +49,7 @@ FAKE_MAIN = '''import json, os, sys
 with open(os.environ["LOG"], "a") as f:
     f.write("jarvis " + " ".join(sys.argv[1:]) + "\\n")
 if sys.argv[3] == "plan":
-    print(json.dumps({"plan_id": "abc123", "steps": [{"id": "package", "summary": "install Orca"}], "blocked": []}))
+    print(json.dumps({"plan_id": "abc123", "steps": [{"id": "package", "summary": "install hooks"}], "blocked": []}))
 else:
     print(json.dumps({"status": "done", "steps": []}))
 '''
@@ -124,7 +124,7 @@ class InstallTest(unittest.TestCase):
         with open(os.path.join(self.home, *parts)) as f:
             return f.read()
 
-    def test_fresh_mac_gets_gateway_agent_orca_hooks_and_setup(self):
+    def test_fresh_mac_gets_gateway_agent_hooks_and_setup(self):
         """covers: BOOT-1"""
         r = self.run_install("--core", "100.115.245.91")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -139,10 +139,9 @@ class InstallTest(unittest.TestCase):
             log = f.read().splitlines()
         self.assertIn("launchctl bootstrap gui/%d %s/Library/LaunchAgents/dev.jarvis.plist" % (os.getuid(), self.home), log)
         self.assertEqual([line for line in log if line.startswith("jarvis ")],
-                         ["jarvis module orca plan --json", "jarvis module orca apply --json --plan-id abc123",
-                          "jarvis module hooks plan --json", "jarvis module hooks apply --json --plan-id abc123",
+                         ["jarvis module hooks plan --json", "jarvis module hooks apply --json --plan-id abc123",
                           "jarvis module setup plan --json", "jarvis module setup apply --json --plan-id abc123"])
-        self.assertIn("install Orca", r.stderr)
+        self.assertIn("install hooks", r.stderr)
 
     def test_rerun_keeps_existing_config_and_does_not_download_again(self):
         """covers: BOOT-1"""
@@ -197,8 +196,7 @@ class InstallTest(unittest.TestCase):
         self.assertIn("systemctl --user enable --now jarvis", log)
         self.assertNotIn("uv pip install --quiet --python %s/.local/share/jarvis/venv/bin/python psutil pystray pillow" % self.home, log)
         self.assertEqual([line for line in log if line.startswith("jarvis ")],
-                         ["jarvis module orca plan --json", "jarvis module orca apply --json --plan-id abc123",
-                          "jarvis module hooks plan --json", "jarvis module hooks apply --json --plan-id abc123",
+                         ["jarvis module hooks plan --json", "jarvis module hooks apply --json --plan-id abc123",
                           "jarvis module setup plan --json", "jarvis module setup apply --json --plan-id abc123"])
 
     def test_linux_rerun_keeps_the_unit_and_does_not_restart_a_running_gateway(self):
@@ -260,7 +258,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(log[i + 1:i + 3], [f"launchctl bootstrap gui/{uid} {agent}"] * 2)  # 한 번 더 했다
         self.assertFalse(os.path.exists(self.old))  # 다시 읽힌 뒤라 옮겼다
         self.assertTrue(os.path.isfile(os.path.join(self.share, "workspace-old", "jarvis", "__init__.py")))
-        self.assertIn("jarvis module orca apply --json --plan-id abc123", log)
+        self.assertIn("jarvis module hooks apply --json --plan-id abc123", log)
         self.assertIn("pending_reload", r.stderr)
         self.assertIn("cleaned", r.stdout)
 
@@ -353,7 +351,7 @@ class InstallTest(unittest.TestCase):
             log = f.read()
         self.assertNotIn("bootout", log)
         self.assertNotIn("bootstrap", log)
-        self.assertIn("jarvis module orca apply --json --plan-id abc123", log)  # 모듈은 체크아웃의 코드로 돈다
+        self.assertIn("jarvis module hooks apply --json --plan-id abc123", log)  # 모듈은 체크아웃의 코드로 돈다
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "relocate 는 실제 플랫폼으로 돈다: Linux 흐름")
     def test_an_old_linux_install_moves_to_app_and_restarts_once(self):
@@ -412,7 +410,7 @@ class InstallTest(unittest.TestCase):
         log = self.lines()
         self.assertFalse([line for line in log if line.startswith("launchctl ")])
         i = log.index(f"macos-daemon cwd={self.home} install")
-        self.assertLess(i, log.index("jarvis module orca plan --json"))
+        self.assertLess(i, log.index("jarvis module hooks plan --json"))
 
     def test_a_failed_hand_off_stops_with_an_error(self):
         """covers: DAEMON-9"""
@@ -443,7 +441,7 @@ class InstallTest(unittest.TestCase):
         self.assertIn("LaunchAgent 를 만들지 않습니다", r.stdout)
         log = self.lines()
         self.assertFalse([line for line in log if line.startswith(("launchctl ", "macos-daemon"))])
-        self.assertIn("jarvis module orca plan --json", log)
+        self.assertIn("jarvis module hooks plan --json", log)
         os.remove(self.log)
         r = self.run_install("--daemon")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -466,7 +464,7 @@ class InstallTest(unittest.TestCase):
                 log = self.lines()
                 self.assertIn(f"launchctl print gui/{uid}/dev.jarvis", log)
                 self.assertFalse([line for line in log if line.startswith("macos-daemon")])
-                self.assertIn("jarvis module orca plan --json", log)
+                self.assertIn("jarvis module hooks plan --json", log)
                 with open(path, "rb") as f:
                     self.assertEqual(f.read(), before)
                 os.remove(self.log)
@@ -488,7 +486,7 @@ class InstallTest(unittest.TestCase):
         r = self.run_install()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertFalse(os.path.exists(self.app))
-        self.assertIn("jarvis module orca plan --json", self.lines())
+        self.assertIn("jarvis module hooks plan --json", self.lines())
 
     def test_an_old_layout_registered_as_a_daemon_gets_no_release_in_app(self):
         """covers: DAEMON-9"""
@@ -498,7 +496,7 @@ class InstallTest(unittest.TestCase):
         r = self.run_install()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertFalse(os.path.exists(self.app))
-        self.assertIn("jarvis module orca plan --json", self.lines())
+        self.assertIn("jarvis module hooks plan --json", self.lines())
 
     @unittest.skipUnless(sys.platform == "darwin", "relocate 는 실제 플랫폼으로 돈다: macOS 흐름")
     def test_a_pending_reload_does_not_load_the_agent_next_to_a_daemon(self):
