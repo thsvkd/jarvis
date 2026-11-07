@@ -17,7 +17,7 @@ LIVE_IDENTITY = claude_accounts._live_identity  # StoreCase 가 가짜로 바꾸
 
 
 def setUpModule():
-    """이 파일의 어떤 경로도 caam·hswap 설치기, 실제 프로세스(codex·hswap 등), 외부 네트워크에 닿지 못한다. 닿으면 호출이 남아 tearDownModule 이 실패한다."""
+    """이 파일의 어떤 경로도 hswap 설치기, 실제 프로세스(codex·hswap 등), 외부 네트워크에 닿지 못한다. 닿으면 호출이 남아 tearDownModule 이 실패한다."""
     for target, name in ((util.Installer, "ensure"), (subprocess, "Popen"), (urllib.request.OpenerDirector, "open")):
         p = mock.patch.object(target, name, side_effect=AssertionError(f"테스트에서 {name} 호출 금지"))
         _GUARDS.append((name, p, p.start()))

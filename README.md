@@ -455,7 +455,7 @@ PyPI 배포본을 버전으로 고정한다(서비스가 최신판을 저절로 
 Codex 는 그 기기에 [caam](https://github.com/Dicklesworthstone/coding_agent_account_manager)(coding_agent_account_manager)이 있고 Codex 프로필을 저장해 두었으면,
 `caam ls codex --json`(프로필 → 이메일)과 `caam limits codex --format json`(한도)으로 계정별 사용량을 더한다. 결과는 2분 묶는다.
 limits 는 caam 금고의 접근 토큰으로 읽기만 한다. jarvis 는 caam refresh·daemon·activate 를 부르지 않는다(Codex 갱신 토큰은 쓸 때마다 바뀐다).
-사용량 경로는 caam 을 설치하지 않는다(caam 은 그 기기에 직접 둔다). 계정은 그 기기에서 caam 으로 직접 저장한다.
+jarvis 는 caam 을 설치하지 않는다(그 기기에 직접 둔다). 계정은 그 기기에서 caam 으로 직접 저장한다.
 caam 의 라이선스는 MIT 에 OpenAI·Anthropic 관련 추가 조항이 붙어 있다(사용자가 확인하고 도입을 정했다).
 core `GET /api/devices/usage`(전체, `?refresh=1` 강제)·`/api/devices/<id>/usage` 는 모아 두지 않고 요청마다 게이트웨이에 묻는다.
 

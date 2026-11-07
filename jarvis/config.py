@@ -97,8 +97,6 @@ CSWAP_INSTALL = str(env("CSWAP_INSTALL", "true")).lower() not in ("0", "false", 
 CLAUDE_STALE_S = int(env("CLAUDE_STALE_S", 900))
 # hswap claude keepalive 의 마지막 확인이 이보다 오래되면(초) '자동 갱신 멈춤'으로 보인다
 CLAUDE_KEEPALIVE_STALE_S = int(env("CLAUDE_KEEPALIVE_STALE_S", 1200))
-# caam 이 없고 Codex CLI 가 있으면 고정 버전 릴리스(SHA256 확인)를 ~/.local/bin 에 둔다(AI 사용량의 Codex 계정별 값). false 로 끈다
-CAAM_INSTALL = str(env("CAAM_INSTALL", "true")).lower() not in ("0", "false", "no", "off")
 
 # Host 헤더 허용 목록에 더할 이름(이 기기의 IP·호스트명·tailnet 이름·모니터 라우트는 자동으로 들어간다).
 EXTRA_HOSTS = [h.lower() for h in env_list("HOSTS")]
@@ -142,7 +140,7 @@ ALLOW_NETS = ",".join(env_list("ALLOW", (
 _LIVE_KEYS = ("INGRESS_DIR", "CADDY_CONTAINER", "TUNNEL_CONTAINER", "TUNNEL_NAME", "DOMAIN",
               "CADDYFILE_CONTAINER_PATH", "HERMES_RE", "HERMES_URL",
               "EXTRA_HOSTS", "INFRA_UNITS", "WATCH_UNITS", "EXPECTED_SERVICES", "EXPECTED_UNITS", "CORE",
-              "VIEWERS", "PROXIES", "PROXY_KEY", "CSWAP_INSTALL", "CAAM_INSTALL", "CLAUDE_STALE_S", "CLAUDE_KEEPALIVE_STALE_S")
+              "VIEWERS", "PROXIES", "PROXY_KEY", "CSWAP_INSTALL", "CLAUDE_STALE_S", "CLAUDE_KEEPALIVE_STALE_S")
 _RESTART_KEYS = ("BIND", "PORT", "ALLOW_NETS", "STATIC_DIR", "STATE_DIR", "DOCKER_SOCK", "USER_UID",
                  "SS_BIN", "PM2_BIN", "TAILSCALE_BIN", "DEVICES")
 CONFIG_RESTART_REQUIRED = []
