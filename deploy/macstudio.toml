@@ -12,7 +12,7 @@ tunnel = ""
 # domain = "example.com"
 # hosts = ["jarvis.example.com"]
 
-# 이 기기 Orca 페어링 코드(/api/orca)를 받아 갈 core(thsvkd-macmini)의 tailnet IP
+# 이 기기의 사용량·계정·모듈 경로를 부를 core(thsvkd-macmini)의 tailnet IP
 core = ["100.64.0.1"]
 
 # docker_sock 은 자동으로 찾는다: /var/run/docker.sock → ~/.orbstack/run/docker.sock → ~/.docker/run/docker.sock

@@ -185,7 +185,7 @@ class HarnessModuleTest(unittest.TestCase):
         self.assertEqual([s["id"] for s in p["steps"]], ["codex-daemon"])
         self.assertEqual(harness.apply(p["plan_id"])["status"], "done")
         self.use(installed={"codex": "0.166.0"}, latest={"codex": "0.166.0"}, daemon=(None, "0.159.3"))
-        # 관리형 설치가 없으면 실행 중 서버는 Orca 등이 띄운 것이라 update-ai 가 맞출 수 없다(pit5 실측). 보고만 한다
+        # 관리형 설치가 없으면 실행 중 서버는 다른 것이 띄운 것이라 update-ai 가 맞출 수 없다(pit5 실측). 보고만 한다
         rows = {r["id"]: r["state"] for r in harness.status()["details"]["tools"]}
         self.assertEqual(rows["codex-server"], "unknown")
         self.assertEqual(harness.plan()["steps"], [])

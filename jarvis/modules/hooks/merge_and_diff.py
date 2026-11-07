@@ -58,7 +58,7 @@ VALID_DEFAULT_MODES = (
 
 def load_manifest(path):
     """설치 영수증을 읽는다. 없으면 빈 dict.
-    영수증은 하네스·도구·Orca 설치 기록도 담으므로, 읽지 못하면 덮어쓰지 않도록 아무것도 쓰기 전에
+    영수증은 하네스·도구 설치 기록도 담으므로, 읽지 못하면 덮어쓰지 않도록 아무것도 쓰기 전에
     오류로 멈춘다. BOM 은 PowerShell 쪽과 같게 허용한다."""
     if not path or not os.path.exists(path):
         return {}

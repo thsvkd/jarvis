@@ -10,10 +10,10 @@ tunnel = ""
 # Hermes 게이트웨이는 core 가 상태 API 로 본다. 2026-10-13 OpenClaw 에서 Hermes(thsvkd-ubuntu-1)로, 2026-11-04 thsvkd-macmini 로 옮김.
 hermes_url = "https://hermes.example.com/api/status"
 
-# 자기 자신도 tailnet IP 로 모은다(/api/orca 는 루프백을 받지 않는다)
+# 자기 자신도 tailnet IP 로 모은다(core 판정은 루프백을 받지 않는다)
 core = ["100.64.0.1"]
 
-# core 홈의 Orca 연결 버튼(페어링 코드)을 누를 수 있는 기기
+# core 홈의 조작 버튼(갱신·로그인·계정 전환·모듈 적용)을 누를 수 있는 기기
 viewers = [
   "100.64.0.5",   # mac-1 (macbookpro)
   "100.64.0.8",    # win-1 (Windows)

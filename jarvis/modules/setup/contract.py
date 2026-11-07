@@ -38,7 +38,7 @@ STAGE_OF = {"newline": "newline", "skills": "skills"}  # 나머지 머리는 cla
 # 설치 액션이 성공하면 그 워커의 배포본을 적용한 것이다(다음 계획에 다시 적용이 바로 생기지 않게)
 INSTALLS = {"newline": "newline", "install-skills": "skills", "output-style": "output_style", "mods": "mods",
             "omc-hud-wrapper": "omc_hud"}
-# jarvis 게이트웨이 자신과 Tailscale 은 지우지 않는다(원격으로 지우면 연결이 끊긴다. Orca 처럼 영수증 기록도 남긴다)
+# jarvis 게이트웨이 자신과 Tailscale 은 지우지 않는다(원격으로 지우면 연결이 끊긴다. 영수증 기록도 남긴다)
 KEEP_ON_UNINSTALL = ("jarvis_unit_owned", "receipt_tools:jarvis", "receipt_tools:tailscale")
 # 앞 단계(stage)가 실패하면 뒤 단계는 돌지 않는다(예: CodeGraph 설치가 실패했는데 MCP 에 없는 바이너리를 등록하지 않게)
 NEEDS = {"codegraph": ("base",), "harness": ("base",), "plugins": ("harness",), "skills": ("harness",),

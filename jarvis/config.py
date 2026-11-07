@@ -79,15 +79,15 @@ HERMES_URL = env("HERMES_URL", "")
 # 1분마다 찔러 봐야 거절 기록만 쌓이는 곳. 그 서비스 자체의 상태는 컨테이너 healthcheck 로 본다.
 PROBE_SKIP = [h.lower() for h in env_list("PROBE_SKIP")]
 
-# 이 기기 Orca 페어링 코드(GET /api/orca)를 받아 갈 core 기기의 tailnet IP. 루프백은 받지 않는다(core 가 자기 자신도
+# 이 기기의 사용량·계정·모듈 경로를 부를 core 기기의 tailnet IP. 루프백은 받지 않는다(core 가 자기 자신도
 # 게이트웨이로 모으면 devices url 을 tailnet IP 로 적는다).
 CORE = env_list("CORE")
-# core 역할: 모을 게이트웨이 [{id, url}, …](설정 파일 전용). 있으면 core 기능이 켜진다. viewers 는 페어링 버튼(페어링 코드)을
+# core 역할: 모을 게이트웨이 [{id, url}, …](설정 파일 전용). 있으면 core 기능이 켜진다. viewers 는 core 화면의 조작 버튼(갱신·로그인·계정 전환·모듈 적용)을
 # 누를 수 있는 tailnet IP 다(루프백은 받지 않는다).
 DEVICES = _FILE.get("devices") or []
 VIEWERS = env_list("VIEWERS")
 # viewers 판정에서 X-Forwarded-For 를 믿을 리버스 프록시의 tailnet IP(도메인을 받아 이 core 로 넘기는 Caddy).
-# 이 프록시를 장악하면 viewer 를 사칭할 수 있다. core 의 /api/orca 판정에는 쓰지 않는다.
+# 이 프록시를 장악하면 viewer 를 사칭할 수 있다. 게이트웨이의 core 판정에는 쓰지 않는다.
 PROXIES = env_list("PROXIES")
 # 그 프록시가 X-Jarvis-Proxy-Key 로 붙이는 비밀(설정 파일은 0600). 비어 있으면 proxies 를 믿지 않는다.
 PROXY_KEY = str(env("PROXY_KEY", ""))

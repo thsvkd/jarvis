@@ -118,7 +118,7 @@ class HooksModuleTest(unittest.TestCase):
         (self.claude / "settings.json").write_text('{"model": "sonnet", "permissions": {"allow": ["Bash(ls:*)"]}}')
         self.install()
         r = self.receipt()
-        r["tool_installs"] = {"orca": {"version": "1"}}
+        r["tool_installs"] = {"orca": {"version": "1"}}  # 이 모듈이 모르는 기록(옛 Orca 기록 포함)은 그대로 둔다
         (self.claude / ".claude-code-setup.json").write_text(json.dumps(r))
         dry = hooks.uninstall(dry_run=True)
         self.assertTrue(all((self.claude / "hooks" / n).exists() for n in hooks.FILES))

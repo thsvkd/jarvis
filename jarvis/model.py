@@ -538,7 +538,7 @@ def build(raw):
             sid_tail = f"pm2:{rt['name']}"
         elif okind in ("unit", "user-unit"):
             sid_tail = owner
-        else:  # 스코프 이름(app-orca-2223882.scope)은 재시작마다 바뀌므로 프로세스 이름과 포트로 만든다
+        else:  # 스코프 이름(app-foo-2223882.scope)은 재시작마다 바뀌므로 프로세스 이름과 포트로 만든다
             sid_tail = f"{l0['process'] or 'proc'}:{tcp_ports[0]}"
         desc = rt.get("description") if rt["type"] == "systemd" else None
         if rt["type"] == "process":

@@ -96,7 +96,7 @@ def _rows():
                     managed = any(name == "codex-daemon" for name, *_ in daemon_rows)
                     for name, st, have, want in daemon_rows:
                         # update-ai 처럼 데몬이 CLI 보다 새로우면 그대로 둔다(내리지 않는다). 관리형 설치가 없으면
-                        # 실행 중 서버는 다른 것(Orca 등)이 띄운 것이라 update-ai 가 맞출 수 없다: 보고만 한다
+                        # 실행 중 서버는 다른 것이 띄운 것이라 update-ai 가 맞출 수 없다: 보고만 한다
                         current = st == "up to date" or (have and want and u.is_current(have, want))
                         rows.append({"id": name, "method": "codex daemon", "version": have, "latest": want,
                                      "state": "current" if current else "outdated" if managed else "unknown"})

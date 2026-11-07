@@ -2,7 +2,7 @@
 #   - 설정: %USERPROFILE%\.config\jarvis\config.toml (없을 때만 deploy\windows.toml 을 복사)
 #   - 방화벽: TCP 9300 을 Tailscale 인터페이스의 tailnet(100.64.0.0/10)에서만 받는다(공용 와이파이의 CGNAT 같은 대역은 막는다)
 #   - 예약 작업 'jarvis': 이 사용자 로그온 때와 5분마다 pythonw 로 deploy\jarvis-win.pyw 를 띄운다(이미 돌면 IgnoreNew 로 건너뛴다.
-#     작업 스케줄러의 '실패 시 다시 시작'은 프로세스가 죽은 경우를 다시 띄우지 않는다). Orca 데스크톱 런타임도 로그온 세션에서 돈다.
+#     작업 스케줄러의 '실패 시 다시 시작'은 프로세스가 죽은 경우를 다시 띄우지 않는다).
 #     SSH 세션에서 띄운 프로세스는 세션이 끝나면 함께 죽으므로 예약 작업으로 돌린다. 로그: %LOCALAPPDATA%\jarvis\jarvis.log
 # 다시 실행해도 된다(작업을 갈아 끼우고 재시작). 코드 갱신 뒤 재시작만: Stop-ScheduledTask jarvis; Start-ScheduledTask jarvis
 param([string]$Python = "")

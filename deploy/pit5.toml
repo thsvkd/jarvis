@@ -17,7 +17,7 @@ probe_skip = ["admin.example.com", "*.admin.example.com"]
 
 # jarvis.example.com 는 이 Caddy 가 thsvkd-macmini 의 jarvis core 로 넘긴다(이 기기 jarvis 가 아니다). Hermes 감시도 core 가 한다.
 
-# 이 기기 Orca 페어링 코드(/api/orca)를 받아 갈 core(thsvkd-macmini)의 tailnet IP
+# 이 기기의 사용량·계정·모듈 경로를 부를 core(thsvkd-macmini)의 tailnet IP
 core = ["100.64.0.1"]
 
 [infra_units]

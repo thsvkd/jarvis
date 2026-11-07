@@ -63,8 +63,8 @@ def console_python(argv):
 
 
 def hide_child_consoles():
-    """콘솔 없이(pythonw) 돌 때만 모든 자식 프로세스에 CREATE_NO_WINDOW 를 붙인다. ai-setup 에서 옮긴 Orca 모듈처럼
-    플래그 없이 powershell·schtasks·orca CLI 를 부르는 곳까지 한 번에 막는다. 콘솔에서 돌면(터미널·ssh) 자식이 그 콘솔을
+    """콘솔 없이(pythonw) 돌 때만 모든 자식 프로세스에 CREATE_NO_WINDOW 를 붙인다. ai-setup 에서 옮긴 모듈처럼
+    플래그 없이 powershell·schtasks 를 부르는 곳까지 한 번에 막는다. 콘솔에서 돌면(터미널·ssh) 자식이 그 콘솔을
     그대로 쓰게 두고, 새 콘솔이나 분리를 고른 호출은 건드리지 않는다."""
     if not _NO_WINDOW:
         return
