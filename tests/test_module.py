@@ -43,18 +43,21 @@ class Cli(unittest.TestCase):
         return code, out.getvalue(), err.getvalue()
 
     def test_cli_prints_one_json_document_and_sends_module_logs_to_stderr(self):
+        """covers: MODULE-3"""
         self.fake.status.side_effect = lambda: (print("진행 로그"), {"module": "fake"})[1]
         code, out, err = self.cli("fake", "status", "--json")
         self.assertEqual((code, json.loads(out)), (0, {"module": "fake"}))
         self.assertIn("진행 로그", err)
 
     def test_cli_refuses_apply_without_a_plan_id(self):
+        """covers: MODULE-1"""
         code, out, err = self.cli("fake", "apply", "--json")
         self.assertEqual((code, out), (1, ""))
         self.assertIn("--plan-id", err)
         self.fake.apply.assert_not_called()
 
     def test_cli_refuses_apply_with_dry_run(self):
+        """covers: MODULE-1"""
         code, out, _ = self.cli("fake", "apply", "--json", "--dry-run", "--plan-id", "x")
         self.assertEqual((code, out), (1, ""))
         self.fake.apply.assert_not_called()
@@ -64,6 +67,7 @@ class Cli(unittest.TestCase):
         self.fake.apply.assert_called_once_with("abc")
 
     def test_uninstall_needs_a_plan_id_unless_it_is_a_dry_run(self):
+        """covers: MODULE-1"""
         code, out, err = self.cli("fake", "uninstall", "--json")
         self.assertEqual((code, out), (1, ""))
         self.assertIn("--plan-id", err)
@@ -75,6 +79,7 @@ class Cli(unittest.TestCase):
         self.fake.uninstall.assert_called_once_with(False, "abc")
 
     def test_an_update_held_for_open_terminals_is_deferred_with_exit_code_2(self):
+        """covers: MODULE-2"""
         result = {"status": "deferred", "steps": [{"id": "package", "result": "deferred", "message": "열린 터미널이 있어 보류합니다"}]}
         self.fake.apply.return_value = self.fake.uninstall.return_value = result
         for action in ("apply", "uninstall"):
@@ -82,6 +87,7 @@ class Cli(unittest.TestCase):
             self.assertEqual((code, json.loads(out)), (2, result), action)
 
     def test_a_plan_id_that_no_longer_matches_is_stale_with_exit_code_3(self):
+        """covers: MODULE-2"""
         result = {"status": "stale", "plan_id": "지금", "steps": []}
         self.fake.apply.return_value = self.fake.uninstall.return_value = result
         for action in ("apply", "uninstall"):
@@ -89,12 +95,14 @@ class Cli(unittest.TestCase):
             self.assertEqual((code, json.loads(out)["status"]), (3, "stale"), action)
 
     def test_done_and_current_exit_0_and_failed_exits_1(self):
+        """covers: MODULE-2"""
         for status, want in (("done", 0), ("current", 0), ("failed", 1)):
             self.fake.apply.return_value = self.fake.uninstall.return_value = {"status": status, "steps": []}
             for action in ("apply", "uninstall"):
                 self.assertEqual(self.cli("fake", action, "--json", "--plan-id", "abc")[0], want, (status, action))
 
     def test_a_module_that_raises_answers_one_json_error_and_restores_stdout(self):
+        """covers: MODULE-3"""
         self.fake.status.side_effect = RuntimeError("읽지 못함")
         before = os.fstat(1)
         code, out, _ = self.cli("fake", "status", "--json")
@@ -112,6 +120,7 @@ class Process(unittest.TestCase):
     """fd 와 콘솔 인코딩은 실제 프로세스에서만 볼 수 있다."""
 
     def test_apply_refuses_dry_run_and_child_output_never_reaches_stdout(self):
+        """covers: MODULE-1, MODULE-3"""
         script = ("def status():\n"
                   "    subprocess.run([sys.executable, '-c', 'print(\"apt: Removing a-package\")'])\n"
                   "    return {'module': 'fake'}\n"
@@ -125,7 +134,7 @@ class Process(unittest.TestCase):
         self.assertIn(b"rc=0,1", p.stderr)
 
     def test_stdout_is_utf8_json_whatever_the_console_encoding(self):
-        """Windows 콘솔(cp949)에서 한글 JSON 이 깨졌다. 표준 출력의 계약은 UTF-8 JSON 이다."""
+        """covers: MODULE-3. Windows 콘솔(cp949)에서 한글 JSON 이 깨졌다. 표준 출력의 계약은 UTF-8 JSON 이다."""
         script = "fake.status = lambda: {'module': 'fake', 'error': '데스크톱 앱이 열려 있음'}\nmodule.cli(['fake', 'status', '--json'])\n"
         p = run_script(script, PYTHONIOENCODING="cp949")
         self.assertEqual(json.loads(p.stdout.decode("utf-8")), {"module": "fake", "error": "데스크톱 앱이 열려 있음"}, p.stderr)

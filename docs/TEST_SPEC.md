@@ -1,8 +1,16 @@
 # TEST_SPEC
 
-> 상태: 확정(2026-10-30 사용자 확인 K1). 2026-11-07 사용자 결정으로 Orca 절(ORCA-1~15)과 DOCTOR-8·9 를 지우고 SETUP-2·14·SSH-4·5 와 USAGE 항목을 Orca 없이 고쳤다(SETUP-2 의 페어링 링크 요구는 일반 비밀 요구로 바꿨다). 셋업·하네스 갱신·AGENTS.md 절과 BOOT-2·3 은 2026-11-01 사용자가 확정했다. 실행본 이전 절(RELOC)과 CORE-8 의 `relocate` 는 2026-11-05 손팡님 A안으로 더했다. macOS LaunchDaemon 절(DAEMON)은 2026-11-06 작업 승인으로 더했다. 목록의 추가·수정·삭제는 사용자만 닫는다.
+> 상태: 확정(2026-10-30 사용자 확인 K1). 2026-11-07 사용자 결정으로 Orca 절(ORCA-1~15)과 DOCTOR-8·9 를 지우고 SETUP-2·14·SSH-4·5 와 USAGE 항목을 Orca 없이 고쳤다(SETUP-2 의 페어링 링크 요구는 일반 비밀 요구로 바꿨다). 모듈 계약 절(MODULE-1~3)은 2026-11-08 사용자 승인으로 더했다. 셋업·하네스 갱신·AGENTS.md 절과 BOOT-2·3 은 2026-11-01 사용자가 확정했다. 실행본 이전 절(RELOC)과 CORE-8 의 `relocate` 는 2026-11-05 손팡님 A안으로 더했다. macOS LaunchDaemon 절(DAEMON)은 2026-11-06 작업 승인으로 더했다. 목록의 추가·수정·삭제는 사용자만 닫는다.
 > 모든 케이스는 격리된 임시 HOME 과 대체한 명령으로 검증한다. 실제 사용자 홈, 실제 서비스, 실제 설치기는 쓰지 않는다.
 > 테스트는 docstring·주석에 `covers: USAGE-n` 을 적는다. ai-setup 에서 옮긴 테스트는 괄호 안에 원래 ID(AI-n)를 남긴다.
+
+## 모듈 계약
+
+| ID | 케이스 | 테스트 | 상태 |
+| --- | --- | --- | --- |
+| MODULE-1 | WHEN `python -m jarvis module <이름> apply` 에 `--plan-id` 가 없거나 `--dry-run` 이 있으면, 또는 `uninstall` 에 `--dry-run` 도 `--plan-id` 도 없으면 THE SYSTEM SHALL 모듈을 부르지 않고 표준 출력 없이 종료 코드 1 로 끝난다 | `tests/test_module.py` | GREEN (단위) |
+| MODULE-2 | WHEN 모듈 apply·uninstall 이 끝나면 THE SYSTEM SHALL `done`·`current` 는 0, `failed` 는 1, `deferred` 는 2, `stale` 은 3 으로 종료한다 | `tests/test_module.py` | GREEN (단위) |
+| MODULE-3 | WHEN 모듈 명령이 돌면 THE SYSTEM SHALL 표준 출력에 UTF-8 JSON 한 개만 내고, 모듈과 자식 프로세스의 출력은 표준 오류로 보내며, 모듈이 예외를 내면 `{module, error}` 와 종료 코드 1 로 답한다 | `tests/test_module.py` | GREEN (단위) |
 
 ## AI 구독 사용량
 
