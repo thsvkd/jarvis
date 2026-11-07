@@ -1,6 +1,7 @@
 """AI 셋업 화면 API: 게이트웨이의 모듈 실행(가짜 run)과 core 라우트(가짜 게이트웨이). 실제 모듈은 돌리지 않는다."""
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -11,6 +12,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from jarvis import config, core, modules_api, server  # noqa: E402
+from jarvis.modules.hooks import contract as hooks_module  # noqa: E402
 from test_core import Gateway, serve  # noqa: E402
 from test_server_access import FakeCollector  # noqa: E402
 
@@ -157,6 +159,25 @@ class GatewayTest(unittest.TestCase):
         out = modules_api.public(body)
         self.assertEqual(out["modules"]["doctor"], {"module": "doctor", "health": "degraded"})
         self.assertEqual(out["job"], {"module": "hooks", "state": "finished", "status": "failed"})
+
+
+class ApplyMessageTest(unittest.TestCase):
+    """시간 초과 예외의 문자열에는 argv 전체가 들어간다. 오류 문구는 그것을 쓰지 않는다."""
+    ERR = subprocess.TimeoutExpired(["/opt/x/tool", "login", "--token", "SECRET"], 60)
+
+    def test_a_timed_out_module_command_does_not_leak_its_arguments(self):
+        """covers: SETUP-2"""
+        with mock.patch.object(modules_api.subprocess, "run", side_effect=self.ERR):
+            code, body = RUN("hooks", "apply", timeout=60)
+        self.assertEqual(code, 1)
+        self.assertNotIn("SECRET", json.dumps(body))
+        self.assertIn("60초", body["error"])
+
+    def test_a_timed_out_step_names_only_the_command_and_the_time(self):
+        """covers: SETUP-2"""
+        with mock.patch.object(hooks_module.subprocess, "run", side_effect=self.ERR):
+            code, message = hooks_module._run(self.ERR.cmd, 60)
+        self.assertEqual((code, message), (1, "tool 가 60초 안에 끝나지 않았습니다"))
 
 
 class CoreRouteTest(unittest.TestCase):

@@ -1,6 +1,6 @@
 # TEST_SPEC
 
-> 상태: 확정(2026-10-30 사용자 확인 K1). 2026-11-07 사용자 결정으로 Orca 절(ORCA-1~15)과 DOCTOR-8·9 를 지우고 SETUP-14·SSH-4·5 와 USAGE 항목을 Orca 없이 고쳤다. 셋업·하네스 갱신·AGENTS.md 절과 BOOT-2·3 은 2026-11-01 사용자가 확정했다. 실행본 이전 절(RELOC)과 CORE-8 의 `relocate` 는 2026-11-05 손팡님 A안으로 더했다. macOS LaunchDaemon 절(DAEMON)은 2026-11-06 작업 승인으로 더했다. 목록의 추가·수정·삭제는 사용자만 닫는다.
+> 상태: 확정(2026-10-30 사용자 확인 K1). 2026-11-07 사용자 결정으로 Orca 절(ORCA-1~15)과 DOCTOR-8·9 를 지우고 SETUP-2·14·SSH-4·5 와 USAGE 항목을 Orca 없이 고쳤다(SETUP-2 의 페어링 링크 요구는 일반 비밀 요구로 바꿨다). 셋업·하네스 갱신·AGENTS.md 절과 BOOT-2·3 은 2026-11-01 사용자가 확정했다. 실행본 이전 절(RELOC)과 CORE-8 의 `relocate` 는 2026-11-05 손팡님 A안으로 더했다. macOS LaunchDaemon 절(DAEMON)은 2026-11-06 작업 승인으로 더했다. 목록의 추가·수정·삭제는 사용자만 닫는다.
 > 모든 케이스는 격리된 임시 HOME 과 대체한 명령으로 검증한다. 실제 사용자 홈, 실제 서비스, 실제 설치기는 쓰지 않는다.
 > 테스트는 docstring·주석에 `covers: USAGE-n` 을 적는다. ai-setup 에서 옮긴 테스트는 괄호 안에 원래 ID(AI-n)를 남긴다.
 
@@ -121,7 +121,7 @@ ai-setup 의 AI-1~AI-6 을 옮긴 것이다. 테스트 본문은 원본과 같�
 | ID | 케이스 | 테스트 | 상태 |
 | --- | --- | --- | --- |
 | SETUP-1 | WHEN core 의 AI 셋업 화면이 모듈 상태를 물으면 THE SYSTEM SHALL 기기마다 게이트웨이의 모듈 status 를 모으고(모듈별 캐시, 맞춤 헤더가 있을 때만 강제 새로고침), 닿지 않는 기기는 오류로 표시하며, viewers 가 아닌 기기에는 doctor 세부·작업 결과 문구를 빼고 주고, 모듈 출력이 JSON 이 아니면 종료 코드만 오류로 낸다 | `tests/test_modules_api.py` | GREEN (단위) |
-| SETUP-2 | WHEN 화면에서 계획을 보거나 적용하면 THE SYSTEM SHALL viewers 만 계획을 받고, viewers 와 정확한 `X-Jarvis-Action: module-apply` 가 있을 때만 그 plan_id 를 그 기기의 게이트웨이에 전달하며, 게이트웨이는 설정 core 의 요청만 받아 한 번에 하나의 apply 를 뒤에서 돌린다(다른 적용·갱신·발급과 서로 배제, 재시작으로 끊긴 적용은 interrupted, 오류 문구에 페어링 링크를 남기지 않음) | `tests/test_modules_api.py` | GREEN (단위) |
+| SETUP-2 | WHEN 화면에서 계획을 보거나 적용하면 THE SYSTEM SHALL viewers 만 계획을 받고, viewers 와 정확한 `X-Jarvis-Action: module-apply` 가 있을 때만 그 plan_id 를 그 기기의 게이트웨이에 전달하며, 게이트웨이는 설정 core 의 요청만 받아 한 번에 하나의 apply 를 뒤에서 돌린다(다른 적용·갱신과 서로 배제, 재시작으로 끊긴 적용은 interrupted, 오류 문구에 토큰·로그인 코드 같은 비밀을 남기지 않음) | `tests/test_modules_api.py` | GREEN (단위) |
 
 ## 훅
 
