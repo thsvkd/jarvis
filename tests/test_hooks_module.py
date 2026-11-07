@@ -37,6 +37,11 @@ class HooksModuleTest(unittest.TestCase):
         plan = hooks.plan()
         return plan, hooks.apply(plan["plan_id"])
 
+    def test_the_installed_files_are_exactly_the_spec_list(self):
+        """covers: HOOKS-2. 계약 파일이 같은 폴더로 옮겨 왔으므로 설치 목록을 글자로 고정한다(docs/SPEC.md 의 "설치하는 파일")"""
+        want = ("danger_guard.py", "shims/rm") + (("send_to_trash.py", "shims/RmShim.psm1", "graft_sync_hidden.cjs") if hooks.WINDOWS else ())
+        self.assertEqual(hooks.FILES, want)
+
     def test_status_and_plan_only_read(self):
         """covers: HOOKS-1"""
         (self.claude).mkdir()

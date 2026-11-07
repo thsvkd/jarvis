@@ -84,6 +84,11 @@ class HarnessModuleTest(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
 
+    def test_the_engine_path_points_at_the_setup_module(self):
+        """계약 파일의 위치에서 계산한 경로라 옮기면 깨질 수 있다"""
+        self.assertTrue(os.path.isfile(harness.UPDATE_AI), harness.UPDATE_AI)
+        self.assertEqual(os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(harness.UPDATE_AI)))), "setup")
+
     def test_status_and_plan_only_read_and_plan_the_outdated_targets(self):
         """covers: HARNESS-1 (AI-7, AI-8)"""
         self.use(installed={"claude": "2.0.0", "gemini": "0.65.0"}, latest={"claude": "2.0.0", "gemini": "0.66.0"})

@@ -1,6 +1,6 @@
 # 가드 정책
 
-> 훅 모듈(`jarvis/modules/hooks/`)이 설치하는 안전장치의 설계 배경이다. ai-setup README 의 "가드 정책" 절(ai-setup 30a955b 이전)을 옮겼다. 설치·갱신·제거 계약은 `docs/SPEC.md` 의 "훅 모듈" 절이 소유한다. 아래의 `res/hooks/...`·`setup_hooks` 언급은 지금 `jarvis/modules/hooks/...`·`jarvis/hooks_module.py` 를 가리킨다.
+> 훅 모듈(`jarvis/modules/hooks/`)이 설치하는 안전장치의 설계 배경이다. ai-setup README 의 "가드 정책" 절(ai-setup 30a955b 이전)을 옮겼다. 설치·갱신·제거 계약은 `docs/SPEC.md` 의 "훅 모듈" 절이 소유한다. 아래의 `res/hooks/...`·`setup_hooks` 언급은 지금 `jarvis/modules/hooks/...`·`jarvis/modules/hooks/contract.py` 를 가리킨다.
 
 ## 설계 원칙 — 차단이 아니라 복구
 

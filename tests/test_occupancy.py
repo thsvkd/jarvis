@@ -1,6 +1,7 @@
 """작업 점유 답(occupancy): 소유 모듈의 답과, 호출자마다 다른 검사 순서·문구·상태 코드."""
 import os
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -11,6 +12,25 @@ ALL = (occupancy.SELF_UPDATE, occupancy.ORCA_UPDATE, occupancy.ORCA_UPDATE_MARK,
 
 
 class AnswersTest(unittest.TestCase):
+    def test_the_update_answer_does_not_wait_for_the_update_lock(self):
+        """modules_api._busy 가 _job_lock 을 쥔 채 묻고 start 는 _lock 을 쥔 채 _job_lock 을 잡는다: 답이 _lock 을 잡으면 교착이다"""
+        holding, release, answered = threading.Event(), threading.Event(), threading.Event()
+
+        def hold():
+            with orca_update._lock:
+                holding.set()
+                release.wait(5)
+
+        def ask():
+            occupancy.held(occupancy.ORCA_UPDATE)
+            answered.set()
+
+        threading.Thread(target=hold, daemon=True).start()
+        self.addCleanup(release.set)
+        self.assertTrue(holding.wait(5))
+        threading.Thread(target=ask, daemon=True).start()
+        self.assertTrue(answered.wait(2))
+
     def test_an_unregistered_work_is_not_held(self):
         with mock.patch.dict(occupancy._answers, clear=True):
             self.assertIsNone(occupancy.held(occupancy.ORCA_ISSUE))
