@@ -311,7 +311,14 @@ class Harness(unittest.TestCase):
     def _cleanup(self):
         for d, _, _ in os.walk(self.tmp):
             os.chmod(d, 0o755)
-        shutil.rmtree(self.tmp)
+        for attempt in range(50):
+            try:
+                shutil.rmtree(self.tmp)
+                return
+            except OSError:  # sudo keepalive 루프에서 이미 돌던 가짜 sudo 가 스크립트 종료 뒤 로그를 늦게 쓸 수 있다
+                if attempt == 49:
+                    raise
+                time.sleep(0.1)
 
     def calls(self):
         try:
