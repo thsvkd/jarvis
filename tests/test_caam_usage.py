@@ -1,4 +1,4 @@
-"""caam(coding_agent_account_manager) → Codex 계정별 사용량, 고정 릴리스 설치, Orca 값과 합치기."""
+"""caam(coding_agent_account_manager) → Codex 계정별 사용량, 고정 릴리스 설치."""
 import hashlib
 import io
 import json
@@ -7,7 +7,7 @@ import tarfile
 import unittest
 from unittest import mock
 
-from jarvis import caam_usage, orca_usage
+from jarvis import caam_usage
 
 H = 3600 * 10**9  # Go time.Duration 은 나노초
 LS = {"profiles": [
@@ -146,50 +146,6 @@ class InstallTest(unittest.TestCase):
                 mock.patch.object(caam_usage.installer, "ensure", return_value="caam 을 설치하는 중입니다(x)") as e:
             self.assertEqual(caam_usage.ensure(), "caam 을 설치하는 중입니다(x)")
         e.assert_called_once_with("Codex 계정별 사용량")
-
-
-class MergeTest(unittest.TestCase):
-    def merged(self, orca_body, ca):
-        with mock.patch.object(orca_usage, "_orca", return_value=orca_body), \
-                mock.patch.object(orca_usage.claude_accounts, "live", return_value=None), \
-                mock.patch.object(orca_usage.caam_usage, "read", return_value=ca), \
-                mock.patch.object(orca_usage.claude_accounts, "_keepalive", return_value=None), \
-                mock.patch.object(orca_usage.claude_accounts, "_store_read", return_value=None), \
-                mock.patch.object(orca_usage.cli_login, "fresh", return_value=[]):  # 자격 확인은 실제 홈을 읽는다
-            return orca_usage.read()[1]
-
-    def test_orca_live_wins_caam_adds(self):
-        ca = {"accounts": [caam_usage.account(LIMITS[0], LS["profiles"][0]),
-                           caam_usage.account(LIMITS[1], LS["profiles"][1]),
-                           {**caam_usage.account(LIMITS[0], LS["profiles"][0]), "label": "Me@example.com"}], "fetched_at": 5.0}
-        orca_codex = {"id": "codex", "name": "Codex", "accounts": [
-            {"label": "me@example.com", "active": True, "windows": [{"key": "weekly", "used": 15}], "buckets": []},
-            {"label": "old@example.com", "active": False, "windows": [], "buckets": []}]}
-        body = self.merged({"installed": True, "providers": [{"id": "claude", "accounts": []}, orca_codex]}, ca)
-        acc = body["providers"][1]["accounts"]
-        self.assertEqual([(a["label"], a.get("source"), a["active"]) for a in acc],
-                         [("me@example.com", None, True), ("old@example.com", "caam", False), ("work@example.com", "caam", False)])
-
-    def test_workspaces_and_system_default(self):
-        work = caam_usage.account(LIMITS[0], LS["profiles"][0])  # 요금제 pro
-        team = {**work, "plan": "team · t", "active": True}
-        ca = {"accounts": [work, team, {**work, "plan": "plus · p2"}], "fetched_at": 5.0}
-        orca_codex = {"id": "codex", "accounts": [
-            {"label": "시스템 기본 계정", "active": True, "plan": None, "windows": [], "buckets": []},
-            {"label": "work@example.com", "active": False, "plan": "pro", "windows": [{"key": "weekly", "used": 1}], "buckets": []}]}
-        acc = self.merged({"installed": True, "providers": [orca_codex]}, ca)["providers"][0]["accounts"]
-        # Orca 의 pro 는 남고(caam pro 는 같은 계정), 같은 이메일의 team·plus 는 다른 워크스페이스라 더한다.
-        # caam 에 사용 중 계정이 있으면 이메일 모르는 Orca 시스템 기본 계정은 뺀다
-        self.assertEqual([(a["label"], a.get("plan"), a.get("source")) for a in acc],
-                         [("work@example.com", "pro", None), ("work@example.com", "team · t", "caam"),
-                          ("work@example.com", "plus · p2", "caam")])
-
-    def test_codex_provider_created_and_error(self):
-        ca = {"accounts": [caam_usage.account(LIMITS[0], LS["profiles"][0])], "fetched_at": 5.0}
-        body = self.merged({"installed": False, "providers": [{"id": "claude", "accounts": []}]}, ca)
-        self.assertEqual(([p["id"] for p in body["providers"]], body["fetched_at"]), (["claude", "codex"], 5.0))
-        body = self.merged({"installed": True, "providers": []}, {"error": "caam 이 20초 안에 답하지 않았습니다"})
-        self.assertEqual(body["caam_error"], "caam 이 20초 안에 답하지 않았습니다")
 
 
 if __name__ == "__main__":

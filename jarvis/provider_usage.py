@@ -1,4 +1,4 @@
-"""caam 이 제공하는 프로바이더 계정별 사용량을 Orca 없이 읽는다.
+"""caam 이 제공하는 프로바이더 계정별 사용량을 읽는다.
 
 https://github.com/Dicklesworthstone/coding_agent_account_manager/blob/v0.1.24/cmd/caam/cmd/limits.go
 """

@@ -1,6 +1,6 @@
 """Claude 계정의 모든 규칙을 한 곳에 둔다: 신선도, 만료 경고, 상태 문구, 사용 중 판정, 창·Fable·버킷 이름, 기기 로그인 상태.
 
-바깥 인터페이스는 read(force)와 switch(slot)이다. 독립 경로와 호환 경로(orca_usage.read)가 같은 read 를 거치고, 그 뒤에 같은 merge_orca 로 Orca 계정을 보탠다.
+바깥 인터페이스는 read(force)와 switch(slot)이다. 사용량 경로(independent_usage)가 read 를 거친다.
 저장값이 지금 로그인에 아직 맞는지는 판정 함수(_judge_shape, _judge_ask, _judge_rows, _judge_login)가 값만 받아 정한다. 새 신선도·유효성 규칙은 그 함수와 표 테스트만 고친다.
 파일과 프로세스를 읽는 순서는 _read 가, 기억(_state)을 고치는 것은 live·switch·login 이 맡는다.
 안에 어댑터가 둘 있다.
@@ -42,8 +42,8 @@ HSWAP_ERRORS = {**KEEPALIVE_ERRORS, "stores_disagree": KEEPALIVE_ERRORS["split_b
 FATAL_ERRORS = ("config_conflict", "keychain_item_present", "relogin_required")  # keepalive 기록이 옛것이어도 기기 상태에 바로 보이는 type
 LOGIN_WARN_S = 3 * 86400  # 로그인(갱신 토큰) 만료 3일 전부터 '주의 필요'. 새 /login 만이 기한을 늘린다
 CACHE_S = 30  # hswap 자체가 캐시하므로 짧게만 묶는다(요청마다 프로세스를 띄우지 않게)
-READ_BUDGET_S = 40  # 읽기 한 번의 전체 시한. 재시도의 잠금 대기와 hswap 호출이 함께 쓴다. 수집기의 대기(독립 55초, 호환 60초)보다 짧아야 한다
-TIMEOUT_S = 15  # Orca 와 동시에 돈다. core 의 기기당 시간 제한(70초) 안에 들어와야 한다
+READ_BUDGET_S = 40  # 읽기 한 번의 전체 시한. 재시도의 잠금 대기와 hswap 호출이 함께 쓴다. 수집기의 대기(55초)보다 짧아야 한다
+TIMEOUT_S = 15  # 다른 수집기와 동시에 돈다. core 의 기기당 시간 제한(70초) 안에 들어와야 한다
 SWITCH_TIMEOUT_S = 30  # switch 는 현재 로그인을 백업하고 macOS 는 Keychain 도 고친다. core 는 40초를 기다린다
 # usageStatus → (화면 문구, 사람이 손봐야 하는가). ok·api_key·unavailable 은 따로 다룬다
 STATUS = {
@@ -293,17 +293,15 @@ def switch(slot):
         _lock.release()
 
 
-def live(force=False, install=True, shape=None, deadline=None):
+def live(force=False, shape=None, deadline=None):
     """hswap CLI 어댑터. None(hswap 없음·계정 없음) 또는 {"accounts": [...], "fetched_at": 초, "ids": {슬롯: 신원 지문}} 또는 {"error": "..."}. ids 는 read() 안에서만 쓴다.
-    install 이면 hswap 이 없을 때 ensure() 가 설치를 시작하고 그 진행·실패를 error 로 준다(호환 경로만. 독립 경로는 설치하지 않는다).
     hswap 이 답하면 최상위 keychainUnavailable(0.2.2 의 추가 필드. 없으면 아니라고 본다)을 _state.device 에 적는다. 실패한 조회는 건드리지 않는다.
     force 는 jarvis 의 30초 묶음만 건너뛴다(프로바이더 조회 간격은 hswap 이 정한다).
     shape: 이 호출을 정한 저장소 모습. 잠금을 기다린 뒤든 포기한 뒤든 모습이 같은 결과만 다시 쓴다(hswap 은 한 번에 하나만 도니 옛 답은 새 답보다 먼저 온다).
     deadline: 잠금 대기와 hswap 호출이 함께 쓰는 시한(monotonic). 넘기면 hswap 을 부르지 않고 오류를 준다."""
     exe = binary()
     if not exe:
-        msg = ensure() if install else None
-        return {"error": msg} if msg else None
+        return None
     asked = time.monotonic()
     # 동시에 여러 hswap 을 띄우지 않는다. 앞 요청이 끝나지 않으면(멈춘 hswap) 기다리지 않고 마지막 값을 준다
     left = lambda: float("inf") if deadline is None else deadline - time.monotonic()
@@ -410,7 +408,7 @@ def _store_read():
                          "active": identity is not None and _identity(*identity) == who,
                          "usageStatus": "relogin_required" if dead else "ok" if any(_windows(usage)) else "no_saved_usage",
                          "usage": usage, "usageFetchedAt": fetched, "lastGoodUsage": usage, "lastGoodFetchedAt": fetched}, "cswap-cache")
-            # 화면은 이메일+조직 이름으로 같은 계정을 묶는다. Orca 경로와 같은 규칙으로 개인 조직("<email>'s Organization")은 None
+            # 화면은 이메일+조직 이름으로 같은 계정을 묶는다. 개인 조직("<email>'s Organization")은 None
             result.append({**a, "org": org(a["org"], a["label"])})
             org_uuid = _identity(None, ident.get("organizationUuid"))[1]
             if org_uuid:  # hswap 은 조직 이름을 등록할 때만 저장한다: added 가 그 이름의 시점이다
@@ -522,7 +520,7 @@ def _store_shape(store):
     return _judge_shape(store, _keepalive() or {})
 
 
-def _judge_ask(force, install, store, shape, held, discovered, fatal, device, mono, now):
+def _judge_ask(force, store, shape, held, discovered, fatal, device, mono, now):
     """묶음을 다시 쓸지 hswap 에 물을지 정한다. (물을까, 묻지 않을 때 보일 묶음의 답). 값만 받는다.
     held: (monotonic, 답, 물을 때의 모습). discovered·fatal·device: 지난 답의 기억. mono·now: time.monotonic()·time.time().
     계정을 찾은 적도 저장소도 없는 기기는 묻지 않는다. CLI 로 계정을 찾았거나 경고가 있던 기기는 기준이 지나면 다시 묻는다.
@@ -530,7 +528,7 @@ def _judge_ask(force, install, store, shape, held, discovered, fatal, device, mo
     recent = held[1] if held and mono - held[0] < config.CLAUDE_STALE_S else None
     recent = recent if recent and recent.get("accounts") else None
     recheck = discovered or bool(fatal) or (bool(device and device[1]) and not _recent(device, mono))
-    if store is None and recent is None and not force and not install and not recheck:
+    if store is None and recent is None and not force and not recheck:
         return False, None
     changed = recent is not None and shape != held[2]
     return force or changed or recent is None or any(_old(a, now) for a in recent["accounts"]), recent
@@ -584,28 +582,28 @@ def _judge_rows(out, store, hswap, now):
     return rows, [shown(a, why) for a in rows]
 
 
-def read(force=False, install=False):
-    """두 사용량 경로의 공용 읽기. None(저장소도 실값도 없고 알릴 것도 없음) 또는 {"error": "..."} 또는 {"accounts": [...], "login": {...}}.
+def read(force=False):
+    """사용량 읽기. None(저장소도 실값도 없고 알릴 것도 없음) 또는 {"error": "..."} 또는 {"accounts": [...], "login": {...}}.
     login 은 알릴 것이 있을 때만이며 계정 목록과 상관없다: 계정이 없어도 {"accounts": [], "login": {...}}(hswap 오류가 있으면 error 도)를 준다.
     force 이거나, hswap 에 물은 지 신선도 기준이 지났거나, 보일 실값 중 기준보다 오래된 것이 있으면 hswap list 를 실행한다
     (저장소에는 로그인 기한·상태가 없어 만료 경고는 실값에서만 나온다. 예약 실행이 저장소를 늘 새로 써도 경고가 사라지지 않게 한다).
     그 사이에는 마지막 실값을 그대로 준다. 오래된 저장소 값은 실값이 없을 때만 보이므로 따로 보지 않는다. hswap 이 없거나 실패하면 저장소 값을 대체값으로 쓰고 이유를 붙인다.
-    install: 호환 경로만 켠다. 저장소가 없어도 묻고, hswap 이 없으면 설치를 시작한다. 독립 경로는 설치하지 않는다(USAGE-3).
+    읽기는 설치하지 않는다(USAGE-3). hswap 설치는 maintain() 이 맡는다.
     읽는 사이 switch() 가 끝나거나 저장소 모습이 바뀌면 옛 값을 내지 않고 다시 읽는다(진행 중인 이 읽기를 함께 기다리는 쪽도 옛 값을 받지 않는다).
     재시도는 2번까지이고 전체 시한은 READ_BUDGET_S 다. 그 안에 확정하지 못하면 CLI 값 대신 지금 저장소 값과 로그인 상태를 준다."""
     deadline = time.monotonic() + READ_BUDGET_S
     for _ in range(3):
         seen = _state.switched
-        out, settled = _read(force, install, deadline)
+        out, settled = _read(force, deadline)
         if settled and seen == _state.switched:
             return out
         if time.monotonic() >= deadline:
             break
         force = False  # 강제는 첫 시도로 지켰다. 다시 읽을 때는 같은 모습의 새 결과를 쓴다
-    return _read(False, False, deadline, give_up=True)[0]
+    return _read(False, deadline, give_up=True)[0]
 
 
-def _read(force, install, deadline, give_up=False):
+def _read(force, deadline, give_up=False):
     """(결과, 답을 받는 동안 저장소 모습이 그대로였는가). give_up: hswap 을 부르지 않고 지금 저장소로 답한다."""
     settled = True
     store = _store_read()
@@ -615,9 +613,9 @@ def _read(force, install, deadline, give_up=False):
         memory = (_state.cache, _state.discovered, _state.fatal, _state.device)  # switch() 가 도중에 비워도 같은 값을 본다
         mono = time.monotonic()
         shape = _store_shape(store)
-        asked, out = _judge_ask(force, install, store, shape, *memory, mono, time.time())
+        asked, out = _judge_ask(force, store, shape, *memory, mono, time.time())
         if asked:
-            out = live(force, install=install, shape=shape, deadline=deadline)
+            out = live(force, shape=shape, deadline=deadline)
             store = _store_read()  # 사용 중 판정은 hswap 이 답한 뒤의 로그인으로 한다(잠금을 기다리는 사이 로그인이 바뀌었을 수 있다)
             settled = _store_shape(store) == shape
     rows, accounts = _judge_rows(out, store, bool(binary()), time.time())
@@ -629,16 +627,3 @@ def _read(force, install, deadline, give_up=False):
     if (out or {}).get("fetched_at"):
         result["fetched_at"] = out["fetched_at"]
     return ({**result, "login": state} if state else result), settled
-
-
-def merge_orca(mine, orca_rows):
-    """두 경로의 공용 병합: read() 의 계정 + Orca 에만 있는 관리 계정(같은 이메일의 다른 조직 포함)."""
-    email = lambda a: _identity(a["label"])[0]
-    seen = {(email(a), a.get("org")) for a in mine}
-    emails = {email(a) for a in mine}
-    # Orca 의 '시스템 기본 계정'은 hswap 의 사용 중 계정과 같은 로그인이다(hswap 에 사용 중 계정이 있을 때만 뺀다).
-    # 조직을 모르는 Orca 줄(시스템 기본 계정이 조직 이름을 못 빌린 경우)은 같은 이메일이면 같은 로그인으로 본다
-    extra = [a for a in orca_rows if (email(a), a.get("org")) not in seen
-             and not (a.get("org") is None and email(a) in emails)
-             and not (a["label"] == "시스템 기본 계정" and any(m.get("active") for m in mine))]
-    return mine + extra

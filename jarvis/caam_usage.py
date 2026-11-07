@@ -1,4 +1,4 @@
-"""이 기기 caam(coding_agent_account_manager)에 저장한 Codex 계정별 사용량. orca_usage 가 Codex 계정 목록에 합친다.
+"""이 기기 caam(coding_agent_account_manager)에 저장한 Codex 계정별 사용량.
 
 `caam ls codex --json`(프로필 → 이메일·상태)과 `caam limits codex --format json`(한도)만 부른다.
 limits 는 caam 금고(vault)의 접근 토큰으로 ChatGPT 사용량 API 를 읽기만 하고 토큰을 갱신하지 않는다(v0.1.24 cmd/caam/cmd/limits.go).
@@ -27,7 +27,7 @@ from .util import Installer, parse_iso, scrub_home, which_local
 CACHE_S = 120  # limits 는 부를 때마다 프로필마다 사용량 API 를 부른다
 LS_TIMEOUT_S = 10
 TIMEOUT_S = 35  # limits: caam 의 프로필당 HTTP 제한(30초)보다 길게. 한 프로필이 느려도 나머지를 잃지 않게
-BUDGET_S = 50  # 잠금 대기 + ls + limits. orca_usage 가 core 의 70초 안에서 기다린다
+BUDGET_S = 50  # 잠금 대기 + ls + limits. 독립 사용량 수집이 이 안에서 기다린다
 VERSION = "0.1.24"
 # 릴리스 자산의 SHA256 을 코드에 고정한다(같은 릴리스의 SHA256SUMS 만 믿지 않게). 올리기는 사람이 검증한 뒤 여기서
 ASSETS = {

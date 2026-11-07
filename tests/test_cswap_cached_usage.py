@@ -36,7 +36,7 @@ class CswapCachedTest(unittest.TestCase):
             self.assertNotIn("synthetic-secret", json.dumps(rows))
             self.assertNotIn("private-org", json.dumps(rows))
 
-    def test_org_name_matches_the_orca_rule(self):
+    def test_org_name_rule(self):
         """covers: USAGE-1. 개인 조직은 None, 팀 조직은 이름: 기기의 모드가 달라도 같은 계정 키가 된다"""
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(claude_accounts, "_root", return_value=tmp):
             os.mkdir(os.path.join(tmp, "cache"))

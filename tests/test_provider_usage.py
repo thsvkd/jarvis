@@ -1,4 +1,4 @@
-"""Orca 없이 caam 의 프로필과 한도를 읽는다."""
+"""caam 의 프로필과 한도를 읽는다."""
 import json
 import unittest
 from unittest import mock
@@ -7,7 +7,7 @@ from jarvis import provider_usage
 
 
 class CaamProviderTest(unittest.TestCase):
-    def test_grok_and_cursor_read_profile_usage_without_orca(self):
+    def test_grok_and_cursor_read_profile_usage(self):
         """covers: USAGE-3"""
         def read(_exe, *args, **_kwargs):
             provider = args[1]

@@ -10,14 +10,14 @@ import unittest
 import urllib.request
 from unittest import mock
 
-from jarvis import caam_usage, claude_accounts, independent_usage, orca_usage, util
+from jarvis import caam_usage, claude_accounts, independent_usage, util
 
 _GUARDS = []
 LIVE_IDENTITY = claude_accounts._live_identity  # StoreCase 가 가짜로 바꾸기 전의 실제 함수
 
 
 def setUpModule():
-    """이 파일의 어떤 경로도 caam·hswap 설치기, 실제 프로세스(codex·Orca·hswap 등), 외부 네트워크에 닿지 못한다. 닿으면 호출이 남아 tearDownModule 이 실패한다."""
+    """이 파일의 어떤 경로도 caam·hswap 설치기, 실제 프로세스(codex·hswap 등), 외부 네트워크에 닿지 못한다. 닿으면 호출이 남아 tearDownModule 이 실패한다."""
     for target, name in ((util.Installer, "ensure"), (subprocess, "Popen"), (urllib.request.OpenerDirector, "open")):
         p = mock.patch.object(target, name, side_effect=AssertionError(f"테스트에서 {name} 호출 금지"))
         _GUARDS.append((name, p, p.start()))
@@ -77,15 +77,14 @@ class StoreCase(unittest.TestCase):
         self.addCleanup(p.stop)
         return p.start()
 
-    def independent_mocks(self, orca=()):
-        """독립 경로의 Claude 밖 수집기를 비우고 Orca 값만 준다."""
+    def independent_mocks(self):
+        """사용량 경로의 Claude 밖 수집기를 비운다."""
         empty = {"status": "unavailable", "accounts": []}
         patches = [mock.patch.object(independent_usage, "_caam", side_effect=RuntimeError("없음")),
                    mock.patch.object(independent_usage, "_opencode", return_value=empty),
                    mock.patch.object(independent_usage.codex_native_usage, "read", return_value=[]),
                    *[mock.patch.object(m, "read", return_value=empty) for m in (independent_usage.antigravity_usage, independent_usage.kimi_usage,
                                                                                independent_usage.zcode_usage, independent_usage.gemini_usage, independent_usage.minimax_usage)],
-                   mock.patch.object(independent_usage.orca_usage, "_orca", return_value={"providers": list(orca)}),
                    mock.patch.object(independent_usage.cli_login, "available", return_value=[]),
                    mock.patch.object(independent_usage.cli_login, "fresh", return_value=[])]
 
@@ -98,6 +97,17 @@ class StoreCase(unittest.TestCase):
                 for p in patches:
                     p.stop()
         return Together()
+
+    def full_body(self):
+        """화면이 부르는 전체 경로(independent_usage.read)의 응답."""
+        with self.independent_mocks():
+            independent_usage._tasks.clear()
+            self.addCleanup(independent_usage._tasks.clear)
+            return independent_usage.read(force=True)
+
+    def full_read(self):
+        """전체 경로의 Claude 프로바이더."""
+        return next(p for p in self.full_body()["providers"] if p["id"] == "claude")
 
     def keepalive(self, **kw):
         self.write("cache/keepalive.json", {"schemaVersion": 1, "checkedAt": time.time() - 300, "ok": True, "action": "none", "note": None,
@@ -201,11 +211,11 @@ class FreshnessTest(StoreCase):
         with mock.patch.object(claude_accounts, "live", return_value=None) as live:
             self.assertEqual(independent_usage._claude(True)["accounts"][0]["source"], "cswap-cache")
         live.assert_called_once()
-        self.assertEqual((live.call_args.args, live.call_args.kwargs["install"]), ((True,), False))
+        self.assertEqual(live.call_args.args, (True,))
 
 
 class SameRulesTest(StoreCase):
-    """두 어댑터와 두 경로가 같은 규칙을 쓴다."""
+    """두 어댑터와 전체 경로가 같은 규칙을 쓴다."""
 
     def test_window_and_bucket_names(self):
         """covers: USAGE-6"""
@@ -285,130 +295,31 @@ class SameRulesTest(StoreCase):
         self.hswap(hswap_row(organizationName="a@example.com's Organization"))
         self.assertIsNone(claude_accounts.read(force=True)["accounts"][0]["org"])
 
-    def test_active_is_the_same_on_both_paths(self):
+    def test_active_is_the_same_on_the_full_path(self):
         """covers: USAGE-6"""
         self.store(time.time() - 60)
         self.hswap(hswap_row(active=False))
         self.assertTrue(claude_accounts.read(force=True)["accounts"][0]["active"])
         claude_accounts._state.cache = None
-        self.assertTrue(self.compat()["accounts"][0]["active"])
+        self.assertTrue(self.full_read()["accounts"][0]["active"])
 
     def test_bucket_name_with_a_version_keeps_its_name(self):
         """covers: USAGE-6"""
         a = claude_accounts.account(hswap_row(usage={"scoped": [{"name": "Sonnet 4.6", "pct": 1}, {"name": "sonnetish", "pct": 2}]}))
         self.assertEqual([b["name"] for b in a["buckets"]], ["Sonnet 4.6", "모델별 한도 2"])
 
-    def test_same_old_value_gets_the_same_flag_on_both_paths(self):
+    def test_same_old_value_gets_the_same_flag_on_the_full_path(self):
         """covers: USAGE-6"""
         self.store(time.time() - 60)
         self.hswap(hswap_row(usageFetchedAt=iso(time.time() - 2 * 3600)))
         mine = claude_accounts.read(force=True)["accounts"][0]
         claude_accounts._state.cache = None
-        theirs = self.compat()["accounts"][0]
+        theirs = self.full_read()["accounts"][0]
         self.assertTrue(mine["attention"])
         self.assertIn("2시간 전 값", mine["note"])
         self.assertEqual((mine["note"], mine["attention"]), (theirs["note"], theirs["attention"]))
 
-    def test_compat_keeps_store_accounts_without_hswap_and_orca(self):
-        """covers: USAGE-6. 차이는 hswap 이 없으면 설치를 시작한다는 것뿐이다"""
-        self.store(time.time() - 9 * 3600)
-        self.ensure.side_effect = None
-        self.ensure.return_value = None
-        a = self.compat()["accounts"][0]
-        self.ensure.assert_called_once_with()
-        self.assertEqual((a["label"], a["source"], a["attention"]), ("a@example.com", "cswap-cache", True))
-        self.assertIn("9시간 전 값", a["note"])
-
-    def test_compat_reports_the_install_error_in_the_note_when_store_answers(self):
-        """covers: USAGE-6"""
-        self.store(time.time() - 60)
-        self.ensure.side_effect = None
-        self.ensure.return_value = "Claude 계정별 사용량을 위해 hswap 을 설치하는 중"
-        self.assertIn("hswap 을 설치하는 중", self.compat()["accounts"][0]["note"])
-
-    def test_compat_adds_orca_accounts_after_the_shared_read(self):
-        """covers: USAGE-6"""
-        self.store(time.time() - 60)
-        self.hswap().side_effect = RuntimeError("locked")
-        orca = {"id": "claude", "name": "Claude", "accounts": [{"label": "orca-only@example.com", "org": None, "active": False},
-                                                               {"label": "a@example.com", "org": None, "active": False}]}
-        rows = self.compat([orca])["accounts"]
-        self.assertEqual([(a["label"], a.get("source")) for a in rows], [("a@example.com", "cswap-cache"), ("orca-only@example.com", None)])
-        self.assertIn("locked", rows[0]["note"])
-
-    def test_compat_keeps_the_provider_for_login_without_accounts(self):
-        """covers: USAGE-7"""
-        self.ensure.side_effect = None
-        self.ensure.return_value = None
-        self.keepalive(ok=False, error={"type": "relogin_required"})
-        claude = self.compat()
-        self.assertEqual((claude["accounts"], claude["login"]["state"]), ([], "relogin"))
-
-    def test_compat_install_error_without_accounts_is_still_reported(self):
-        """covers: USAGE-6"""
-        self.ensure.side_effect = None
-        self.ensure.return_value = "설치 실패"
-        with mock.patch.object(orca_usage, "_orca", return_value={"installed": False, "providers": []}), \
-                mock.patch.object(orca_usage.caam_usage, "read", return_value=None), \
-                mock.patch.object(orca_usage.cli_login, "available", return_value=[]), \
-                mock.patch.object(orca_usage.cli_login, "fresh", return_value=[]):
-            self.assertEqual(orca_usage.read()[1]["cswap_error"], "설치 실패")
-
-    def rows_on_both_paths(self, orca):
-        """같은 가짜 hswap·Orca 를 두 경로의 전체 흐름에 태워 Claude 행을 준다."""
-        claude_accounts._state.cache = None
-        with self.independent_mocks(orca):
-            independent_usage._tasks.clear()
-            self.addCleanup(independent_usage._tasks.clear)
-            mine = next(p for p in independent_usage.read(force=True)["providers"] if p["id"] == "claude")["accounts"]
-        claude_accounts._state.cache = None
-        return mine, self.compat(orca)["accounts"]
-
-    def assert_same_on_both_paths(self, orca, labels, hot):
-        mine, theirs = self.rows_on_both_paths(orca)
-        pick = lambda rows: [{k: a.get(k) for k in ("label", "org", "active", "status", "attention", "error", "note", "source")} for a in rows]
-        self.assertEqual(pick(mine), pick(theirs))
-        self.assertEqual([(a["label"], a["org"]) for a in mine], labels)
-        count = lambda rows: sum(1 for a in rows if a.get("attention") or a.get("status") == "error")  # 화면 isHot 의 사람 손이 필요한 조건
-        self.assertEqual((count(mine), count(theirs)), (hot, hot))
-
-    def test_same_email_in_another_org_stays_on_both_paths(self):
-        """covers: USAGE-6. Org A 의 hswap 계정이 같은 이메일의 Org B 계정과 그 재로그인 경고를 가리지 않는다"""
-        self.hswap(hswap_row(organizationName="Org A"))
-        org_b = {"label": "a@example.com", "org": "Org B", "active": False, "status": "error", "error": "다시 로그인하세요", "attention": True,
-                 "failure": "auth", "windows": [], "buckets": []}
-        self.assert_same_on_both_paths([{"id": "claude", "name": "Claude", "accounts": [org_b]}],
-                                       [("a@example.com", "Org A"), ("a@example.com", "Org B")], 1)
-
-    def test_orca_rules_match_on_both_paths(self):
-        """covers: USAGE-6"""
-        plain = lambda label, org=None, active=False: {"label": label, "org": org, "active": active, "status": "ok", "windows": [], "buckets": []}
-        orca = [{"id": "claude", "name": "Claude", "accounts": [plain("시스템 기본 계정", active=True), plain("only@example.com"), plain("A@example.com")]}]
-        # 사용 중 계정이 있으면 시스템 기본 계정은 같은 로그인이고, 조직 모르는 같은 이메일도 같은 로그인이다
-        self.hswap(hswap_row())
-        self.assert_same_on_both_paths(orca, [("a@example.com", "Org"), ("only@example.com", None)], 0)
-        # 사용 중 계정이 없으면 시스템 기본 계정을 남긴다
-        self.hswap(hswap_row(active=False))
-        self.assert_same_on_both_paths(orca, [("a@example.com", "Org"), ("시스템 기본 계정", None), ("only@example.com", None)], 0)
-        # hswap 이 계정을 주지 않으면 Orca 값만 남는다
-        self.hswap()
-        self.assert_same_on_both_paths(orca, [("시스템 기본 계정", None), ("only@example.com", None), ("A@example.com", None)], 0)
-
-    def test_store_fallback_merges_the_same_on_both_paths(self):
-        """covers: USAGE-6"""
-        self.store(time.time() - 9 * 3600)
-        self.hswap().side_effect = RuntimeError("locked")
-        orca = [{"id": "claude", "name": "Claude", "accounts": [{"label": "a@example.com", "org": "Org B", "active": False, "status": "ok", "windows": [], "buckets": []}]}]
-        self.assert_same_on_both_paths(orca, [("a@example.com", "Org"), ("a@example.com", "Org B")], 1)
-
-    def compat(self, orca=()):
-        with mock.patch.object(orca_usage, "_orca", return_value={"installed": False, "providers": list(orca)}), \
-                mock.patch.object(orca_usage.caam_usage, "read", return_value=None), \
-                mock.patch.object(orca_usage.cli_login, "available", return_value=[]), \
-                mock.patch.object(orca_usage.cli_login, "fresh", return_value=[]):
-            return next(p for p in orca_usage.read()[1]["providers"] if p["id"] == "claude")
-
-    def test_expiry_and_status_text_match_on_both_paths(self):
+    def test_expiry_and_status_text_match_on_the_full_path(self):
         """covers: USAGE-6"""
         soon = iso(time.time() + 2 * 86400)
         for row in (hswap_row(loginExpiresAt=soon),
@@ -419,17 +330,17 @@ class SameRulesTest(StoreCase):
             claude_accounts._state.cache = None
             mine = claude_accounts.read(force=True)["accounts"][0]
             claude_accounts._state.cache = None
-            theirs = self.compat()["accounts"][0]
+            theirs = self.full_read()["accounts"][0]
             self.assertTrue(mine["note"])
             self.assertEqual((mine["note"], mine["attention"]), (theirs["note"], theirs["attention"]))
 
-    def test_login_state_is_on_both_paths(self):
+    def test_login_state_is_on_the_full_path(self):
         """covers: USAGE-7"""
         self.keepalive(ok=False, error={"type": "refresh_failed", "message": "network"})
         self.hswap(hswap_row())
         self.assertEqual(claude_accounts.read(force=True)["login"]["state"], "failed")
         claude_accounts._state.cache = None
-        self.assertEqual(self.compat()["login"]["state"], "failed")
+        self.assertEqual(self.full_read()["login"]["state"], "failed")
 
 
 class LoginStateTest(StoreCase):
@@ -586,7 +497,7 @@ class LoginStateTest(StoreCase):
                 claude_accounts._state.cache = None
                 body = claude_accounts.read(force=True)
                 claude_accounts._state.cache = None
-                text = json.dumps([body, self.compat_body()], ensure_ascii=False)
+                text = json.dumps([body, self.full_body()], ensure_ascii=False)
                 self.assertIn(want, text, error)
                 for s in (*secrets, "alice", "SECRET", "brand_new_error", "aaaaa"):
                     self.assertNotIn(s, text, error)
@@ -714,20 +625,13 @@ class LoginStateTest(StoreCase):
                 claude_accounts._state.cache = None
                 mine = claude_accounts.read(force=True)
                 claude_accounts._state.cache = None
-                theirs = self.compat_body()
+                theirs = self.full_body()
                 for body in (mine, theirs):
                     text = json.dumps(body, ensure_ascii=False)
                     text.encode("utf-8")  # server.py 의 응답 인코딩이 깨지지 않는다
                     for s in (*secrets[:-1], "alice", "SECRET", "Bearer"):
                         self.assertNotIn(s, text, (kind, slot))
                 self.assertIn("사용량을 읽지 못했습니다.", mine["accounts"][0]["note"])
-
-    def compat_body(self):
-        with mock.patch.object(orca_usage, "_orca", return_value={"installed": False, "providers": []}), \
-                mock.patch.object(orca_usage.caam_usage, "read", return_value=None), \
-                mock.patch.object(orca_usage.cli_login, "available", return_value=[]), \
-                mock.patch.object(orca_usage.cli_login, "fresh", return_value=[]):
-            return orca_usage.read()[1]
 
     def test_usage_error_only_passes_as_an_http_code(self):
         """covers: USAGE-3, USAGE-7. hswap 의 usageError 는 http-NNN 꼴만 받는다"""
@@ -873,7 +777,6 @@ class LoginStateTest(StoreCase):
                 mock.patch.object(independent_usage.zcode_usage, "read", return_value=empty), \
                 mock.patch.object(independent_usage.gemini_usage, "read", return_value=empty), \
                 mock.patch.object(independent_usage.minimax_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.orca_usage, "_orca", return_value={"providers": []}), \
                 mock.patch.object(independent_usage.cli_login, "available", return_value=[]), \
                 mock.patch.object(independent_usage.cli_login, "fresh", return_value=[]):
             independent_usage._tasks.clear()
@@ -995,7 +898,6 @@ class NoAccountsTest(StoreCase):
                 mock.patch.object(independent_usage.zcode_usage, "read", return_value=empty), \
                 mock.patch.object(independent_usage.gemini_usage, "read", return_value=empty), \
                 mock.patch.object(independent_usage.minimax_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.orca_usage, "_orca", return_value={"providers": []}), \
                 mock.patch.object(independent_usage.cli_login, "available", return_value=[]), \
                 mock.patch.object(independent_usage.cli_login, "fresh", return_value=[]):
             independent_usage._tasks.clear()
@@ -1286,19 +1188,17 @@ class StoreAuthFailureTest(StoreCase):
         self.assertNotIn("login", out)
         self.assertFalse(out["accounts"][0]["attention"])
 
-    def test_both_apis_show_it(self):
+    def test_the_usage_api_shows_it(self):
         """covers: USAGE-7. 화면이 부르는 전체 경로"""
         self.two_slots((0, 0))
         self.hswap(*self.rows())
         claude_accounts.read()
         self.two_slots((1, 0))
-        with self.independent_mocks(), mock.patch.object(orca_usage.caam_usage, "read", return_value=None):  # 호환 경로의 caam 은 없으면 설치를 시작한다
+        with self.independent_mocks():
             independent_usage._tasks.clear()
             self.addCleanup(independent_usage._tasks.clear)
-            mine = next(p for p in independent_usage.read()["providers"] if p["id"] == "claude")
-            theirs = next(p for p in orca_usage.read()[1]["providers"] if p["id"] == "claude")
-        for claude in (mine, theirs):
-            self.assertEqual((claude["login"]["state"], claude["accounts"][0]["attention"], claude["accounts"][0]["note"]), ("relogin", True, self.RELOGIN))
+            claude = next(p for p in independent_usage.read()["providers"] if p["id"] == "claude")
+        self.assertEqual((claude["login"]["state"], claude["accounts"][0]["attention"], claude["accounts"][0]["note"]), ("relogin", True, self.RELOGIN))
 
 
 class SlotIdentityTest(StoreCase):
@@ -1391,10 +1291,10 @@ class SlotIdentityTest(StoreCase):
         self.live_identity.return_value = ("a@example.com", "org-uuid-secret")
         self.hswap(hswap_row(organizationUuid="org-uuid-secret"))
         fingerprint = claude_accounts._fingerprint("a@example.com", "org-uuid-secret")
-        with self.independent_mocks(), mock.patch.object(orca_usage.caam_usage, "read", return_value=None):
+        with self.independent_mocks():
             independent_usage._tasks.clear()
             self.addCleanup(independent_usage._tasks.clear)
-            bodies = [claude_accounts.read(), claude_accounts.read(force=True), independent_usage.read(force=True), orca_usage.read()[1]]
+            bodies = [claude_accounts.read(), claude_accounts.read(force=True), independent_usage.read(force=True)]
         self.assertEqual(claude_accounts._state.cache[1]["ids"]["1"], fingerprint)  # 묶음에는 있어 비교할 수 있다
         for body in bodies:
             text = json.dumps(body, ensure_ascii=False)
@@ -1886,15 +1786,8 @@ class IdentityNormalizationTest(StoreCase):
         del row["organizationUuid"]
         return self.with_uuid(row, uuid)
 
-    def compat(self):
-        with mock.patch.object(orca_usage, "_orca", return_value={"installed": False, "providers": []}), \
-                mock.patch.object(orca_usage.caam_usage, "read", return_value=None), \
-                mock.patch.object(orca_usage.cli_login, "available", return_value=[]), \
-                mock.patch.object(orca_usage.cli_login, "fresh", return_value=[]):
-            return next(p for p in orca_usage.read()[1]["providers"] if p["id"] == "claude")
-
     def test_null_org_account_stays_active_without_keepalive(self):
-        """covers: USAGE-6, USAGE-7. 저장소의 organizationUuid 가 null 이어도 hswap 의 active 를 지우지 않는다. 두 경로 모두"""
+        """covers: USAGE-6, USAGE-7. 저장소의 organizationUuid 가 null 이어도 hswap 의 active 를 지우지 않는다. 전체 경로에서도"""
         self.roster(uuid=None)
         self.logged_in(uuid=None)
         self.hswap(self.cli_row(uuid=None))
@@ -1902,7 +1795,7 @@ class IdentityNormalizationTest(StoreCase):
         self.assertTrue(out["accounts"][0]["active"])
         self.assertNotIn("login", out)
         claude_accounts._state.cache = None
-        self.assertTrue(self.compat()["accounts"][0]["active"])
+        self.assertTrue(self.full_read()["accounts"][0]["active"])
 
     def test_null_org_account_keeps_login_and_slot_with_keepalive(self):
         """covers: USAGE-7. 사용 중 슬롯이 맞으면 keepalive 기록은 이 계정의 것이다: 이전 계정의 기록으로 보거나(/login 을 빼는 안내) 슬롯을 빼지 않는다"""
@@ -1975,23 +1868,6 @@ class IdentityNormalizationTest(StoreCase):
         claude_accounts._state.cache = None
         a = claude_accounts.read(force=True)["accounts"][0]
         self.assertEqual((a["active"], a["note"]), (False, None))  # 같은 슬롯이라도 조직이 다른 CLI 행에 옮기지 않는다
-
-    def test_orca_default_account_borrows_the_org_by_the_same_rule(self):
-        """covers: USAGE-6. 시스템 기본 계정의 조직 이름을 같은 규칙의 UUID 로 빌린다. 빈 UUID 로는 빌리지 않는다"""
-        limits = {"claude": {"status": "ok", "fiveHour": None}}
-        org_of = lambda default_uuid, stored: orca_usage._managed(
-            {"claude": {"accounts": [{"id": "x", "email": "m@example.com", "organizationName": "Team", "organizationUuid": stored}],
-                        "systemDefaultEmail": "d@example.com", "systemDefaultOrganizationUuid": default_uuid}}, "claude", limits)[0]["org"]
-        self.assertEqual(org_of("org-1 ", "ORG-1"), "Team")
-        self.assertIsNone(org_of("org-2", "ORG-1"))
-        self.assertIsNone(org_of(None, None))
-        self.assertIsNone(org_of("", ""))
-
-    def test_orca_merge_uses_the_same_email_rule(self):
-        """covers: USAGE-6. 공백·대소문자만 다른 Orca 행은 같은 계정이다. 다른 조직은 남는다"""
-        mine = [{"label": "a@example.com", "org": "Team", "active": True}]
-        orca = [{"label": " A@EXAMPLE.com ", "org": "Team"}, {"label": "A@example.com ", "org": None}, {"label": "a@example.COM", "org": "Other"}]
-        self.assertEqual([a["org"] for a in claude_accounts.merge_orca(mine, orca)], ["Team", "Other"])
 
 
 class AuthRecordChangeTest(StoreCase):
@@ -2224,8 +2100,8 @@ class JudgeAskTest(unittest.TestCase):
 
     SHAPE = "지금 모습"
 
-    def judge(self, force=False, install=False, store=None, held=None, discovered=False, fatal=None, device=None):
-        return claude_accounts._judge_ask(force, install, store, self.SHAPE, held, discovered, fatal, device, MONO, NOW)
+    def judge(self, force=False, store=None, held=None, discovered=False, fatal=None, device=None):
+        return claude_accounts._judge_ask(force, store, self.SHAPE, held, discovered, fatal, device, MONO, NOW)
 
     def test_table(self):
         """covers: USAGE-6. 표의 칸: 이름, 입력, 물을까, 묶음을 돌려주는가"""
@@ -2235,7 +2111,6 @@ class JudgeAskTest(unittest.TestCase):
         store = store_value()
         cases = (("찾은 적도 저장소도 없음", {}, False, False),
                  ("강제", {"force": True}, True, False),
-                 ("설치 경로", {"install": True}, True, False),
                  ("저장소가 있다", {"store": store}, True, False),
                  ("계정을 찾은 적이 있다", {"discovered": True}, True, False),
                  ("치명적 오류를 기억한다", {"fatal": (MONO - 1, "config_conflict")}, True, False),

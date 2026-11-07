@@ -1,10 +1,10 @@
-"""hswap claude list --json(claude-swap 엔진) → Claude 계정별 사용량, Orca 값과 합치기."""
+"""hswap claude list --json(claude-swap 엔진) → Claude 계정별 사용량."""
 import json
 import subprocess
 import unittest
 from unittest import mock
 
-from jarvis import claude_accounts, orca_usage
+from jarvis import claude_accounts
 
 ISO = "2026-11-03T01:00:00+00:00"
 ROWS = {"schemaVersion": 1, "activeAccountNumber": 1, "accounts": [
@@ -119,54 +119,6 @@ class RunTest(unittest.TestCase):
         self.assertNotIn("alice", body["error"])
 
 
-class MergeTest(unittest.TestCase):
-    def merged(self, orca_body, cs, ca=None):
-        with mock.patch.object(orca_usage, "_orca", return_value=orca_body), \
-                mock.patch.object(orca_usage.claude_accounts, "live", return_value=cs), \
-                mock.patch.object(orca_usage.caam_usage, "read", return_value=ca), \
-                mock.patch.object(orca_usage.claude_accounts, "_keepalive", return_value=None), \
-                mock.patch.object(orca_usage.claude_accounts, "_store_read", return_value=None), \
-                mock.patch.object(orca_usage.cli_login, "fresh", return_value=[]):  # 자격 확인은 실제 홈을 읽는다
-            return orca_usage.read()[1]
-
-    def test_cswap_replaces_orca_system_default(self):
-        cs = {"accounts": [claude_accounts.account(r) for r in ROWS["accounts"][:3]], "fetched_at": 5.0}
-        orca_claude = {"id": "claude", "name": "Claude", "accounts": [
-            {"label": "시스템 기본 계정", "org": None, "active": True},
-            {"label": "orca-only@example.com", "org": None, "active": False},
-            {"label": "ME@example.com", "org": None, "active": False},     # 대소문자만 다른 같은 계정
-            {"label": "me@example.com", "org": "Team", "active": False}]}  # 같은 이메일의 다른 조직
-        body = self.merged({"installed": True, "fetched_at": 9.0, "providers": [{"id": "codex", "accounts": []}, orca_claude]}, cs)
-        self.assertEqual([p["id"] for p in body["providers"]], ["claude", "codex"])
-        self.assertEqual([(a["label"], a["org"]) for a in body["providers"][0]["accounts"]],
-                         [("me@example.com", None), ("work@example.com", "Acme"), ("old@example.com", None),
-                          ("orca-only@example.com", None), ("me@example.com", "Team")])
-        self.assertEqual(cs["accounts"][0]["org"], "me@example.com's Organization")  # cswap 캐시는 그대로
-        self.assertEqual(body["fetched_at"], 9.0)
-
-    def test_team_login_not_doubled(self):
-        # Orca 는 시스템 기본 계정의 조직 이름을 모르면 None 이다. cswap 의 같은 로그인(Acme)과 한 줄로 본다
-        row = {**ROWS["accounts"][1], "active": True}
-        cs = {"accounts": [claude_accounts.account(row)], "fetched_at": 5.0}
-        orca_claude = {"id": "claude", "accounts": [{"label": "work@example.com", "org": None, "active": True}]}
-        acc = self.merged({"installed": True, "providers": [orca_claude]}, cs)["providers"][0]["accounts"]
-        self.assertEqual([(a["label"], a["org"]) for a in acc], [("work@example.com", "Acme")])
-
-    def test_system_default_kept_without_cswap_active(self):
-        cs = {"accounts": [claude_accounts.account(ROWS["accounts"][1])], "fetched_at": 5.0}
-        orca_claude = {"id": "claude", "accounts": [{"label": "시스템 기본 계정", "org": None, "active": True}]}
-        labels = [a["label"] for a in self.merged({"installed": True, "providers": [orca_claude]}, cs)["providers"][0]["accounts"]]
-        self.assertEqual(labels, ["work@example.com", "시스템 기본 계정"])
-
-    def test_without_orca_and_cswap_error(self):
-        cs = {"accounts": [claude_accounts.account(ROWS["accounts"][0])], "fetched_at": 5.0}
-        body = self.merged({"installed": False, "running": False, "providers": []}, cs)
-        self.assertEqual((body["installed"], body["providers"][0]["id"], body["fetched_at"]), (False, "claude", 5.0))
-        body = self.merged({"installed": True, "providers": []}, {"error": "locked"})
-        self.assertEqual((body["providers"], body["cswap_error"]), ([], "locked"))
-        self.assertNotIn("cswap_error", self.merged({"installed": True, "providers": []}, None))
-
-
 @mock.patch.dict(vars(claude_accounts._state), clear=True)
 class InstallTest(unittest.TestCase):
     def setUp(self):
@@ -263,7 +215,7 @@ class InstallTest(unittest.TestCase):
             claude_accounts.installer.at -= claude_accounts.installer.RETRY_S + 1
             claude_accounts.ensure()
             self.assertEqual(r.call_count, 2)
-        self.assertEqual(claude_accounts.live()["error"].split("(")[0], "hswap 설치 실패")
+        self.assertEqual(err.split("(")[0], "hswap 설치 실패")
 
     def test_running_message(self):
         class Later:  # 뒤에서 아직 도는 설치
@@ -280,7 +232,6 @@ class InstallTest(unittest.TestCase):
         with mock.patch.object(claude_accounts.subprocess, "run") as r:
             self.which["claude"] = None  # Claude Code 가 없으면 cswap 이 쓸모없다
             self.assertIsNone(claude_accounts.ensure())
-            self.assertIsNone(claude_accounts.live())
             self.which["claude"] = "/x/claude"
             with mock.patch.object(claude_accounts.config, "CSWAP_INSTALL", False):
                 self.assertIsNone(claude_accounts.ensure())

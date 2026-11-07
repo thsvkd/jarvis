@@ -1,11 +1,11 @@
-"""Orca 상태와 별개로 사용할 수 있는 사용량 수집기를 묶는다. Orca 가 있으면 독립 수집기가 못 읽은 계정만 보충한다."""
+"""이 기기의 프로바이더별 사용량 수집기를 묶는다."""
 from concurrent.futures import ThreadPoolExecutor, wait
 import os
 import sys
 import threading
 import time
 
-from . import antigravity_usage, caam_usage, claude_accounts, cli_login, codex_native_usage, gemini_usage, kimi_usage, minimax_usage, opencode_usage, orca_usage, provider_usage, zcode_usage
+from . import antigravity_usage, caam_usage, claude_accounts, cli_login, codex_native_usage, gemini_usage, kimi_usage, minimax_usage, opencode_usage, provider_usage, zcode_usage
 from .util import which_local
 
 _pool = ThreadPoolExecutor(max_workers=5, thread_name_prefix="jarvis-usage")
@@ -54,25 +54,6 @@ def _claude_after(running):
     return _claude(True)
 
 
-def _orca(force):
-    """Orca 로컬 RPC 의 계정만 읽는다(cswap·caam 은 실행하지 않는다). Orca 가 없거나 실패하면 빈 목록."""
-    return orca_usage._orca(force).get("providers", [])
-
-
-def _merge(mine, orca):
-    """독립 수집 계정에 Orca 계정을 보충한다. 이메일 모르는 기본 계정만 있으면 Orca 의 이메일 계정이 같은 로그인이다."""
-    emails = {a["label"].lower() for a in mine if "@" in a["label"]}
-    extra = [o for o in orca if "@" in o["label"] and o["label"].lower() not in emails]
-    if not mine:
-        return list(orca)
-    if extra and not emails:
-        # 내 쪽 활성 기본 계정 하나와 Orca 이메일 계정 하나는 같은 로그인이다. 사용 중 표시를 넘긴다(Orca 사본은 바꾸지 않는다)
-        if len(extra) == 1 and sum(1 for a in mine if a.get("active")) == 1:
-            extra = [{**extra[0], "active": True}]
-        return extra
-    return mine + extra
-
-
 def read(force=False):
     """독립 수집 결과만 반환한다. 실패 원문이나 자격 증명은 내보내지 않는다."""
     jobs = {"claude": lambda: _claude(force), "codex": _codex,
@@ -91,15 +72,7 @@ def read(force=False):
             elif force and name == "claude" and not previous[2]:  # 새로고침은 강제 작업에만 얹힌다. 보통 읽기는 어느 쪽에든 얹힌다
                 previous = _tasks[name] = (now, _pool.submit(_claude_after, previous[1]), True)
             selected[name] = previous[1]
-        previous = _tasks.get("orca")
-        if previous is None or (previous[1].done() and (force or now - previous[0] >= 30)):
-            previous = _tasks["orca"] = (now, _pool.submit(_orca, force))
-        orca = previous[1]
-    wait([*selected.values(), orca], timeout=55)
-    try:
-        extra = {p["id"]: p["accounts"] for p in orca.result(0)} if orca.done() else {}
-    except Exception:
-        extra = {}
+    wait(selected.values(), timeout=55)
     providers, unavailable = [], []
     for name, future in selected.items():
         accounts, failed, login = [], True, None
@@ -117,17 +90,12 @@ def read(force=False):
                 failed = not future.done()
         except Exception:
             pass
-        if extra.get(name):
-            # Claude 는 이메일과 조직으로 계정을 가른다(호환 경로와 같은 규칙). 이메일만 보면 같은 이메일의 다른 조직과 그 경고를 잃는다
-            accounts = (claude_accounts.merge_orca if name == "claude" else _merge)(accounts, extra[name])
-        if failed and not extra.get(name) or not accounts:
+        if failed or not accounts:
             unavailable.append(name)
         if accounts or login:  # 계정이 없어도 기기 로그인 상태의 경고·복구 안내를 보일 칸은 남긴다
             providers.append({"id": name, "name": _names[name], "accounts": accounts, **({"login": login} if login else {})})
-    # Orca 경로와 같은 후속 처리: Grok 토큰 위임 갱신(grok CLI), 화면의 '다시 로그인' 버튼을 낼 CLI 목록
-    if any(a.get("failure") == "delegated-refresh-required" for p in providers if p["id"] == "grok" for a in p["accounts"]):
-        cli_login.refresh_grok()
     body = {"mode": "independent", "providers": providers, "unavailable": unavailable, "fetched_at": time.time()}
+    # 화면의 '다시 로그인' 버튼을 낼 CLI 목록
     if logins := cli_login.available():
         body["logins"] = logins
     # 저장한 자격가 없어 새로 로그인해도 잃을 게 없는 프로바이더(기기 행의 '로그인' 버튼). 알 수 없으면 넣지 않는다
