@@ -145,20 +145,6 @@ Describe "setup.ps1 dispatcher" {
         (& $listHome) | Should -Be $before
     }
 
-    # Orca 는 jarvis 가 관리한다. 예전 진입점은 안내만 내고 프로필을 그대로 둔 채 exit 1 로 끝난다.
-    It "-Tools orca, --tools orca and --orca-desktop point to jarvis and change nothing (covers: AI-66)" {
-        $pointer = [regex]::Escape("Orca is now managed by jarvis; ai-setup no longer installs, updates or removes it. From a jarvis checkout run: py -3 -m jarvis module orca plan --json (uninstall: module orca uninstall --json --dry-run).")
-        $r = Invoke-Script $script:Setup @("-Tools", "orca")
-        $r.ExitCode | Should -Be 1 -Because $r.Output
-        $r.Output | Should -Match $pointer
-        foreach ($a in @("--tools orca", "--tools=orca", "-Tools orca -Uninstall", "--orca-desktop", "--stages tools --orca-desktop", "--help --tools orca")) {
-            $r = Invoke-ScriptInline $script:Setup $a
-            $r.ExitCode | Should -Be 1 -Because $a
-            $r.Output | Should -Match $pointer -Because $a
-        }
-        Test-Path (Join-Path $env:USERPROFILE ".claude") | Should -Be $false
-    }
-
     # 조용히 무시하면 오타(--keybind)가 '전체 설치' 로 둔갑한다.
     It "an unknown option exits 1 and shows the usage too" {
         $r = Invoke-ScriptInline $script:Setup "--keybind"
@@ -206,9 +192,9 @@ Describe "real install path (S2)" {
         Remove-Item -Recurse -Force $script:sandbox -ErrorAction SilentlyContinue
     }
 
-    # 전체 -Uninstall 은 훅을 지우지 않는다. jarvis 훅 모듈이 훅 파일과 영수증의 훅 기록을, jarvis 의 Orca 모듈이
-    # Orca 기록을 이어 읽는다. 영수증을 다시 쓰는 워커(여기서는 키바인드)가 그 키를 지우면 안 된다.
-    It "-Uninstall keeps the hooks, their receipt records and the Orca records for jarvis (covers: AI-67, AI-69)" {
+    # 전체 -Uninstall 은 훅을 지우지 않는다. jarvis 훅 모듈이 훅 파일과 영수증의 훅 기록을 이어 읽는다.
+    # 옛 Orca 기록은 모르는 키다. 영수증을 다시 쓰는 워커(여기서는 키바인드)가 그 키들을 지우면 안 된다.
+    It "-Uninstall keeps the hooks, their receipt records and old Orca records (covers: SETUP-14, AI-69)" {
         (Invoke-Script $script:Setup @("-Keybinds")).ExitCode | Should -Be 0
         $claudeDir = Join-Path $env:USERPROFILE ".claude"
         $hooksDir = Join-Path $claudeDir "hooks"

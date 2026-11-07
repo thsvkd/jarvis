@@ -338,34 +338,6 @@ def test_an_install_newer_than_the_latest_release_counts_as_up_to_date(monkeypat
     assert "latest is" not in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("args", [["orca"], ["Orca"], ["--only", "ORCA"], ["--check", "--only", "claude,orca"]])
-def test_update_ai_orca_points_to_jarvis_and_updates_nothing(tmp_path, args):
-    """covers: AI-66 — Orca 는 jarvis 가 관리한다. 안내만 내고 exit 1 로 끝나며 아무것도 부르지 않는다."""
-    bin_dir = tmp_path / "bin"
-    make_stub(bin_dir, "orca")
-    make_stub(bin_dir, "claude")
-    log = tmp_path / "calls.log"
-    home = tmp_path / "home"
-    result = run_update(home, [bin_dir], log, *args)
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "Orca is now managed by jarvis; ai-setup no longer installs, updates or removes it. " \
-        "From a jarvis checkout run: python3 -m jarvis module orca plan --json " \
-        "(uninstall: module orca uninstall --json --dry-run)." in result.stderr
-    assert calls(log) == []
-    assert list(home.iterdir()) == []
-
-
-def test_plain_update_ai_does_not_list_orca(tmp_path):
-    """covers: AI-66 — 대상을 주지 않은 update-ai 는 Orca 를 대상으로 보지 않는다."""
-    bin_dir = tmp_path / "bin"
-    make_stub(bin_dir, "orca")
-    log = tmp_path / "calls.log"
-    result = run_update(tmp_path / "home", [bin_dir], log, "--check")
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "orca" not in result.stdout.lower()
-    assert calls(log) == []
-
-
 def test_codegraph_catalog_updates_through_npm_without_an_upgrade_command():
     """npm 탐지가 실패해도 update 배열이 codegraph upgrade 로 떨어지면 안 된다."""
     assert "graft" not in CATALOG

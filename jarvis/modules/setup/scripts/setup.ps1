@@ -20,7 +20,6 @@ param(
     [switch]$AgentsMd,
     [switch]$Keybinds,
     [switch]$Skills,
-    [string]$Tools = "",
     [switch]$Omc,
     [switch]$OutputStyle,
     [switch]$Mods,
@@ -49,7 +48,6 @@ $ErrorActionPreference = "Stop"
 # PS 7.4+ 는 네이티브 명령의 0이 아닌 종료 코드를 종료 오류로 승격시킬 수 있다 ($true 가 기본인
 # 빌드/프로필이 있음). 이 스크립트들은 실패를 $LASTEXITCODE 로 직접 판정하므로 명시적으로 끈다.
 $PSNativeCommandUseErrorActionPreference = $false
-$toolsGiven = $PSBoundParameters.ContainsKey("Tools")
 
 function Show-Usage {
     Write-Host @"
@@ -102,7 +100,6 @@ $stageRun = $false
 $stagesValue = ""
 $jarvisRole = ""
 $herdrFlag = $false
-$orcaDesktop = $false
 $ssCaps = $false
 for ($i = 0; $i -lt $Rest.Count; $i++) {
     switch -Regex ($Rest[$i]) {
@@ -118,7 +115,6 @@ for ($i = 0; $i -lt $Rest.Count; $i++) {
         '^--dry-run$'            { $DryRun = $true }
         '^--no-onboard$'         { $NoOnboard = $true }
         '^--doctor$'             { $Doctor = $true }
-        '^--tools(=.*)?$'        { $toolsGiven = $true }
         '^--newline=(.*)$'       { $Newline = $Matches[1]; $newlineGiven = $true }
         '^--harness=(.*)$'       { $Harness = @($Matches[1]); $harnessGiven = $true }
         '^--harness$' {
@@ -143,18 +139,12 @@ for ($i = 0; $i -lt $Rest.Count; $i++) {
             if (-not $jarvisRole) { Write-Host "--jarvis-role requires gateway or core."; exit 1 }
         }
         '^--herdr$' { $herdrFlag = $true }
-        '^--orca-desktop$' { $orcaDesktop = $true }
         '^--ss-caps$' { $ssCaps = $true }
         default { $unknownArgs += $Rest[$i] }
     }
 }
 
-# Orca 관리는 jarvis 로 옮겨 갔다. 예전 진입점은 아무것도 바꾸지 않고 이 안내만 낸다.
-if ($toolsGiven -or $orcaDesktop) {
-    Write-Host "Orca is now managed by jarvis; ai-setup no longer installs, updates or removes it. From a jarvis checkout run: py -3 -m jarvis module orca plan --json (uninstall: module orca uninstall --json --dry-run)." -ForegroundColor Red
-    exit 1
-}
-# doctor 도 jarvis 로 옮겨 갔다(res/stages.py 의 doctor_moved 와 같은 문구).
+# doctor 는 jarvis 로 옮겨 갔다(res/stages.py 의 doctor_moved 와 같은 문구).
 if ($Doctor) {
     Write-Host "Doctor is now run by jarvis; ai-setup no longer runs it. From a jarvis checkout run: py -3 -m jarvis module doctor status --json." -ForegroundColor Red
     exit 1

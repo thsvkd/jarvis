@@ -10,7 +10,6 @@
   파일을 지우거나 바꾸지 않기 때문이다. 세션을 실제로 끊을 수 있는 단계(이전 설치 npm -g·winget,
   codex 관리형 데몬 교체)만 세션이 돌 때 --allow-interrupt 를 요구하고, 없으면 보류(실패)로 남긴다.
 - 하나가 실패해도 나머지를 계속하고, 결과 표를 찍은 뒤 exit 1 로 끝난다.
-- Orca 는 jarvis 가 관리한다. `update-ai orca` 는 안내만 내고 exit 1 로 끝난다.
 
 exit: 0 = 모두 성공, 1 = 하나 이상 실패(또는 다른 실행이 잠금을 쥠), 2 = 인자 오류.
 """
@@ -32,7 +31,6 @@ sys.path.insert(0, str(ROOT / "res" / "tools"))
 sys.path.insert(0, str(ROOT / "res"))
 from host import kill_tree, locations, platform_key  # noqa: E402
 import npm_release  # noqa: E402
-from stages import ORCA_MOVED  # noqa: E402
 
 CATALOG = ROOT / "res" / "catalog.json"
 # 시험은 UPDATE_AI_CODEX_LATEST 로 가짜 주소(file://)를 준다(네트워크에 닿지 않게)
@@ -509,9 +507,6 @@ def main(argv=None):
         return 2
     ids = [e["id"] for e in catalog]
     only = [t for item in args.only + args.targets for t in item.split(",") if t]
-    if "orca" in (t.lower() for t in only):
-        print(ORCA_MOVED, file=sys.stderr)
-        return 1
     unknown = [t for t in only if t not in ids]
     if unknown:
         print("unknown target: {} (choose from: {})".format(", ".join(unknown), ",".join(ids)), file=sys.stderr)

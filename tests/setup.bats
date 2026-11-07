@@ -72,18 +72,6 @@ teardown() {
     [ "$(find "$HOME" | sort; cat "$HOME/.claude/.claude-code-setup.json" "$HOME/.claude/hooks/danger_guard.py")" = "$before" ]
 }
 
-@test "setup.sh Orca options point to jarvis and change nothing (covers: AI-66)" {
-    pointer="Orca is now managed by jarvis; ai-setup no longer installs, updates or removes it. From a jarvis checkout run: python3 -m jarvis module orca plan --json (uninstall: module orca uninstall --json --dry-run)."
-    before="$(find "$HOME" | sort)"
-    for args in "--tools orca" "--tools=orca" "--tools orca --uninstall" "--orca-desktop" "--stages tools --orca-desktop" "--hooks --tools orca" "--help --tools orca"; do
-        # shellcheck disable=SC2086
-        run bash "$REPO_ROOT/scripts/setup.sh" $args
-        [ "$status" -eq 1 ] || { echo "setup.sh $args -> $status"; return 1; }
-        [[ "$output" == *"$pointer"* ]] || { echo "setup.sh $args: $output"; return 1; }
-    done
-    [ "$(find "$HOME" | sort)" = "$before" ]
-}
-
 # 아래는 dry-run 이 아닌 '실제 설치' 경로다. bash 3.2 (macOS 기본) 는 set -u 에서 빈 배열의
 # "${arr[@]}" 확장을 unbound variable 로 취급하는데, --dry-run 일 때는 배열이 비어있지 않아
 # 그 버그가 드러나지 않는다. 실제 설치를 밟는 테스트가 없으면 macOS 전체가 깨진 채로 통과한다.
@@ -99,8 +87,8 @@ teardown() {
 }
 
 # 전체 --uninstall 은 훅을 지우지 않는다. jarvis 훅 모듈이 훅 파일과 영수증의 훅 기록(hook_files·권한 기록)을
-# 이어 읽고, jarvis 의 Orca 모듈이 Orca 기록을 읽는다. 영수증을 다시 쓰는 워커가 그 키를 지우면 안 된다.
-@test "setup.sh --uninstall keeps the hooks, their receipt records and the Orca records for jarvis (covers: AI-67, AI-69)" {
+# 이어 읽는다. 옛 Orca 기록은 모르는 키다. 영수증을 다시 쓰는 워커가 그 키들을 지우면 안 된다.
+@test "setup.sh --uninstall keeps the hooks, their receipt records and old Orca records (covers: SETUP-14, AI-69)" {
     _keybind_sandbox
     bash "$REPO_ROOT/scripts/setup.sh" --keybinds
     mkdir -p "$HOME/.claude/hooks/shims"

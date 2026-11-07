@@ -161,14 +161,13 @@ def test_skipped_stage_is_absent():
     assert any(action.stage == "skills" for action in actions)
 
 
-def test_generic_skills_are_bundled_names_without_orca_skills():
+def test_generic_skills_are_bundled_names():
     actions = stages.plan_actions(_full(), _empty())
     skills = [action for action in actions if action.stage == "skills"]
     assert len(skills) == 1
     detail = skills[0].detail.lower()
     assert "design-lab" in detail
     assert "tailnet-report" in detail
-    assert "orca" not in detail
 
 
 def test_skills_stage_writes_nothing_without_claude():
@@ -1525,24 +1524,6 @@ def test_windows_native_uninstall_removes_the_binaries_it_names(tmp_path):
     assert all(path.is_file() for path in kept)
 
 
-def test_orca_desktop_points_to_jarvis_and_changes_nothing(monkeypatch, tmp_path, capsys):
-    """covers: AI-66 — Orca 는 jarvis 가 관리한다. 계획을 세우기 전에 안내만 내고 exit 1 로 끝난다."""
-    home = _home(monkeypatch, tmp_path)
-    monkeypatch.setattr(stages, "probe_world", lambda *a, **k: pytest.fail("planned after --orca-desktop"))
-    recorded = _record_runs(monkeypatch)
-    assert stages.main(["--plan", "--stages", "tools", "--orca-desktop", "--project-dir", str(tmp_path)]) == 1
-    assert stages.ORCA_MOVED in capsys.readouterr().err
-    assert stages.orca_moved(windows=False) == (
-        "Orca is now managed by jarvis; ai-setup no longer installs, updates or removes it. "
-        "From a jarvis checkout run: python3 -m jarvis module orca plan --json "
-        "(uninstall: module orca uninstall --json --dry-run)."
-    )
-    # Windows 의 python3 은 Store alias 일 수 있다: setup.ps1·install.ps1 과 같이 py -3 을 안내한다
-    assert "run: py -3 -m jarvis module orca plan --json" in stages.orca_moved(windows=True)
-    assert recorded == []
-    assert list(home.iterdir()) == []
-
-
 def test_doctor_pointer_names_the_jarvis_doctor_module():
     """covers: AI-68 — doctor 는 jarvis 로 옮겨 갔다. setup·install 스크립트의 --doctor·-Doctor 안내가 이 문구를 쓴다."""
     assert stages.doctor_moved(windows=False) == (
@@ -1557,9 +1538,9 @@ def test_doctor_pointer_names_the_jarvis_doctor_module():
     (["--stages", "tools"], True),
     (["--stages", "all", "--uninstall"], True),
 ])
-def test_tools_and_full_uninstall_leave_orca_and_its_receipt_records_to_jarvis(
+def test_tools_and_full_uninstall_keep_old_orca_receipt_records(
         monkeypatch, tmp_path, args, recorded_before):
-    """covers: AI-67 — jarvis 의 Orca 모듈이 같은 영수증 키를 읽고 제거하므로 ai-setup 은 손대지 않는다."""
+    """covers: SETUP-14 — 기기 영수증의 옛 Orca 기록은 모르는 키다. 지우지 않고 그대로 둔다."""
     home = _home(monkeypatch, tmp_path)
     claude = home / ".claude"
     claude.mkdir()
@@ -1569,7 +1550,6 @@ def test_tools_and_full_uninstall_leave_orca_and_its_receipt_records_to_jarvis(
     } if recorded_before else {}
     receipt_path = claude / ".claude-code-setup.json"
     receipt_path.write_text(json.dumps({"tool_installs": dict(orca_records, tailscale=True)}), encoding="utf-8")
-    # 호스트에 Orca 가 깔려 있어도 결과가 같아야 한다. 예전 tools 단계는 orca 가 PATH 에 없으면 설치했다.
     monkeypatch.setattr(stages, "_which_bins", lambda names: [])
     recorded = _record_runs(monkeypatch)
     project = tmp_path / "proj"

@@ -15,20 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-# Orca 관리는 jarvis 로 옮겨 갔다(jarvis 결정 D11·D16, ORCA-12). 예전 진입점은 이 안내만 내고 exit 1 로 끝난다.
-# Windows 의 python3 은 Store alias 일 수 있어 py -3 을 안내한다.
-def orca_moved(windows: bool = os.name == "nt") -> str:
-    return (
-        "Orca is now managed by jarvis; ai-setup no longer installs, updates or removes it. "
-        f"From a jarvis checkout run: {'py -3' if windows else 'python3'} -m jarvis module orca plan --json "
-        "(uninstall: module orca uninstall --json --dry-run)."
-    )
-
-
-ORCA_MOVED = orca_moved()
-
-
-# doctor 도 jarvis 로 옮겨 갔다(jarvis 결정 D11, DOCTOR-1~7). --doctor·-Doctor 는 이 안내만 내고 exit 1 로 끝난다.
+# doctor 는 jarvis 로 옮겨 갔다(jarvis 결정 D11, DOCTOR-1~7). --doctor·-Doctor 는 이 안내만 내고 exit 1 로 끝난다.
 def doctor_moved(windows: bool = os.name == "nt") -> str:
     return (
         "Doctor is now run by jarvis; ai-setup no longer runs it. "
@@ -1461,9 +1448,6 @@ def _ensure_user_bin_on_path() -> None:
 
 
 def main(argv) -> int:
-    if "--orca-desktop" in argv:
-        print(ORCA_MOVED, file=sys.stderr)
-        return 1
     _ensure_user_bin_on_path()
     opts = _cli(argv)
     if opts is None:
