@@ -36,11 +36,10 @@ code,.mono{font-family:var(--mono)}
 .su-flow li[data-s=now]::before{background:var(--accent)}
 
 /* 상태 */
-.su-orca{display:grid;gap:var(--sp-3_5);outline:0}
+.su-panel{display:grid;gap:var(--sp-3_5);outline:0}
 .su-status{display:flex;align-items:center;flex-wrap:wrap;gap:var(--sp-2) var(--sp-3)}
 .su-ver{display:inline-flex;align-items:baseline;gap:var(--sp-1_5);font-variant-numeric:tabular-nums}
 .su-ver b{font-size:var(--fs-lg)}
-.su-to{color:var(--info-ink);font-family:var(--mono);font-size:var(--fs-sm);font-weight:var(--fw-semibold)}
 .su-facts{flex-basis:100%;display:flex;flex-wrap:wrap;gap:var(--sp-1) var(--sp-4);color:var(--text-3);font-size:var(--fs-sm)}
 .su-facts b{color:var(--text-2);font-weight:var(--fw-semibold)}
 .su-note{flex-basis:100%;font-size:var(--fs-sm);color:var(--tone-ink);background:var(--tone-soft);padding:var(--sp-2) var(--sp-2_5);border-radius:var(--r-xs);overflow-wrap:anywhere}

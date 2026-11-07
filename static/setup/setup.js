@@ -5,7 +5,7 @@
  *   GET  /api/devices/<id>/modules/<이름>/plan                                  모듈 계약의 plan(viewers 만)
  *   POST /api/devices/<id>/modules/<이름>/apply?plan_id=…  (X-Jarvis-Action: module-apply, viewers 만) → 202 작업.
  *        게이트웨이의 job 은 기기마다 하나(job.module 로 어느 모듈인지 안다)이고 한 번에 하나만 돈다
- * 모듈: 실행할 수 있는 모듈(Orca·훅·셋업·하네스)은 같은 흐름(상태 → 계획 → 승인 → 실행 → 결과)으로, doctor 는 읽기 전용 점검으로,
+ * 모듈: 실행할 수 있는 모듈(훅·셋업·하네스)은 같은 흐름(상태 → 계획 → 승인 → 실행 → 결과)으로, doctor 는 읽기 전용 점검으로,
  *   이 화면이 모르는 모듈은 이름·health 만 보인다(다음 모듈이 와도 깨지지 않게).
  * 승인 목록·휴대폰 알림·결과 기록 API 는 아직 없다(D7): '승인 대기'는 이 화면에서 연 계획 중 승인이 필요한 것이고, 실행을 누르는 것이 승인이다.
  * 시크릿: doctor 는 파일 위치와 키 이름만 준다. 이 화면도 그것만 보인다. */
@@ -34,29 +34,15 @@
   const HOOK_FILE = { ok: ["ok", "같음"], missing: ["info", "없음 — 새로 씀"], changed: ["info", "옛 판 — 새로 씀"],
     foreign: ["crit", "덮어쓰지 않음(설치 기록에 없는 파일)"] };
   const LEGACY = "ai-setup 의 기능을 모두 jarvis 모듈로 옮겼습니다. AGENTS.md 는 프로젝트 폴더 단위라 python -m jarvis agentsmd 로 씁니다.";
-  const MIGRATION = [["Orca(시범)", true], ["doctor", true], ["훅", true], ["하네스", true], ["스킬·플러그인·MCP", true], ["나머지 설정", true]];
+  const MIGRATION = [["doctor", true], ["훅", true], ["하네스", true], ["스킬·플러그인·MCP", true], ["나머지 설정", true]];
   const VIEWERS_ONLY = "doctor 세부·계획·실행은 허용된 기기(viewers)에서만 볼 수 있습니다.";
   const POLL_RUN = 3000, POLL_IDLE = 60000;
   const tone = (t, label) => ({ tone: t, label });
 
   // ---------------------------------------------------------------- 모듈별 해석
-  const newer = (a, b) => { // a 가 b 보다 새 판인가(점으로 나눈 숫자)
-    const x = String(a).split(".").map(Number), y = String(b).split(".").map(Number);
-    for (let i = 0; i < Math.max(x.length, y.length); i++) { const k = (x[i] || 0) - (y[i] || 0); if (k) return k > 0; }
-    return false;
-  };
   const hookCount = (x, st) => (x.files || []).filter((f) => f.state === st).length;
   // run: 계획·실행 흐름을 갖는가. state(s): 모듈 status → {tone, label}. todo: 할 일로 올릴 상태 이름
   const MODS = {
-    orca: { name: "Orca", run: true, todo: new Set(["설치 안 됨", "갱신 가능", "상태 저하", "서버 응답 없음", "상태 확인 실패"]),
-      state(s) {
-        if (!s.installed) return tone("muted", "설치 안 됨");
-        if (s.latest && s.version && newer(s.latest, s.version)) return tone("info", "갱신 가능");
-        if (s.health === "down") return tone("crit", "서버 응답 없음");
-        if (s.health !== "ok") return tone("warn", "상태 저하");
-        return tone("ok", s.latest ? "최신" : "설치됨");
-      },
-      brief: (s) => (s.version ? s.version + (s.latest && newer(s.latest, s.version) ? " → " + s.latest : "") : s.latest ? "→ " + s.latest : "") },
     hooks: { name: "훅", run: true, todo: new Set(["설치 안 됨", "갱신 필요", "막힘", "상태 확인 실패"]),
       state(s) {
         const x = s.details;
@@ -92,7 +78,7 @@
       brief: (s) => (s.details ? (s.details.tools || []).filter((t) => t.state === "outdated").map((t) => t.id + " → " + t.latest).join(" · ") : "") },
     doctor: { name: "doctor", run: false },
   };
-  const ORDER = ["orca", "hooks", "setup", "harness", "doctor"];
+  const ORDER = ["hooks", "setup", "harness", "doctor"];
   const TOOL = { current: ["ok", "최신"], outdated: ["info", "갱신 가능"], unknown: ["muted", "최신 확인 불가"] };
   const rank = (m) => (ORDER.includes(m) ? ORDER.indexOf(m) : ORDER.length);
   const label = (m) => (MODS[m] ? MODS[m].name : m);
@@ -171,13 +157,7 @@
     if (!s) return html`<div class="su-status">${pill(st.tone, st.label)}</div>`;
     const x = s.details || {}, facts = [], notes = [s.error];
     let head = html`<div class="su-ver"><span class="su-k">판</span>${ver(s.version)}</div>`, extra = "";
-    if (m === "orca") {
-      head = html`<div class="su-ver"><span class="su-k">설치본</span>${ver(s.version)}${s.latest && s.version && newer(s.latest, s.version) ? html`<span class="su-to">→ ${s.latest}</span>` : ""}</div>`;
-      if (x.kind) facts.push(html`<span>설치 형태 <b>${x.kind}</b></span>`);
-      if (s.installed && s.details) facts.push(html`<span>실행 중인 판 <b>${x.running_version || "확인 안 됨"}</b></span>`); // 공개 모양에는 details 가 없다
-      if (x.server) facts.push(html`<span>서버 <b>${[x.server.service_manager, x.server.state].filter(Boolean).join(" · ") || "기록됨"}</b></span>`);
-      notes.push(x.error, x.update_supported === false && x.update_reason ? "갱신 불가: " + x.update_reason : null);
-    } else if (m === "hooks") {
+    if (m === "hooks") {
       head = html`<div class="su-ver"><span class="su-k">배포본</span>${s.version ? html`<code class="su-pid" title="배포본 파일들의 다이제스트">${s.version}</code>` : ver(null)}</div>`;
       if (s.details) {
         const files = x.files || [];
@@ -246,9 +226,9 @@
   // 실행할 수 있는 모듈 하나의 흐름: 상태 → 계획 → (승인) → 실행 → 결과
   function runFlow(d, m) {
     const id = d.id, k = K(id, m);
-    if (!reach(d)) return html`<div class="su-orca">${status(d, m)}<p class="su-muted">${d.error || "기기에 닿지 못했습니다."}</p></div>`;
+    if (!reach(d)) return html`<div class="su-panel">${status(d, m)}<p class="su-muted">${d.error || "기기에 닿지 못했습니다."}</p></div>`;
     const p = plan(id, m), j = job(d, m), err = S.applyErr[k];
-    if (!full()) return html`<div class="su-orca" data-flow="${k}" tabindex="-1">${status(d, m)}${j && j.state === "running" ? html`<div class="su-prog su-prog-run" aria-hidden="true"><i></i></div><p class="su-hint su-run" role="status">적용 실행 중 · ${ago(j.started_at)} 시작</p>` : j && S.dismissed[k] !== jend(j) ? result(j) : ""}<p class="su-note" data-tone="muted">계획·실행은 허용된 기기(viewers)에서만 할 수 있습니다.</p></div>`;
+    if (!full()) return html`<div class="su-panel" data-flow="${k}" tabindex="-1">${status(d, m)}${j && j.state === "running" ? html`<div class="su-prog su-prog-run" aria-hidden="true"><i></i></div><p class="su-hint su-run" role="status">적용 실행 중 · ${ago(j.started_at)} 시작</p>` : j && S.dismissed[k] !== jend(j) ? result(j) : ""}<p class="su-note" data-tone="muted">계획·실행은 허용된 기기(viewers)에서만 할 수 있습니다.</p></div>`;
     const mine = j && p && j.plan_id && p.sent === j.plan_id;
     const showResult = j && j.state !== "running" && S.dismissed[k] !== jend(j) && (mine || !p);
     let idx = 0, body;
@@ -272,7 +252,7 @@
     } else {
       body = html`${err ? errBox(err) : ""}<div class="su-acts">${act("plan", id, mod(d, m) && mod(d, m).installed === false ? "설치 계획 미리 보기" : "계획 미리 보기", "primary", "", m)}<span class="su-hint">계획은 아무것도 바꾸지 않습니다(dry-run)</span></div>`;
     }
-    return html`<div class="su-orca" data-flow="${k}" tabindex="-1">${status(d, m)}${flow(idx, p && p.plan && !needs(p.plan).length)}${body}</div>`;
+    return html`<div class="su-panel" data-flow="${k}" tabindex="-1">${status(d, m)}${flow(idx, p && p.plan && !needs(p.plan).length)}${body}</div>`;
   }
   function fbody(f) {
     const x = f.m, c = (s) => html`<code>${s}</code>`;
@@ -335,10 +315,10 @@
         return html`<span class="su-dl"><span class="su-k">doctor</span>${t ? html`<span data-tone="${t[0]}" class="su-dn"><i class="shape" aria-hidden="true"></i>${t[1]}</span>` : html`<span class="su-muted">점검 못 함</span>`}</span>`;
       }
       const st = mstate(d, m);
-      return html`<span class="su-dl"><span class="su-k">${label(m)}</span>${m === "orca" ? ver(mod(d, m) && mod(d, m).version) : ""}${pill(st.tone, st.label)}</span>`;
+      return html`<span class="su-dl"><span class="su-k">${label(m)}</span>${pill(st.tone, st.label)}</span>`;
     };
-    const tiles = html`<div class="sec-head su-sh"><h2>기기</h2><span class="sec-sub">누르면 서랍에서 모듈별 상세를 봅니다</span></div><ul class="su-devs">${devs.map((d) => { const o = mod(d, "orca");
-      return html`<li><button type="button" class="tile su-dev" data-act="open" data-id="${d.id}" data-off="${!reach(d)}"><span class="su-dh"><b>${name(d)}</b><span class="su-os">${o && o.details && o.details.kind ? o.details.kind : d.host && d.host !== d.id ? d.id : ""}</span></span>${reach(d) ? modsOf(d).map((m) => line(d, m)) : html`<span class="su-dl">${pill(offline(d).tone, offline(d).label)}</span>`}</button></li>`; })}</ul><div class="su-legacy"><p class="su-muted">${LEGACY}</p>${order()}</div>`;
+    const tiles = html`<div class="sec-head su-sh"><h2>기기</h2><span class="sec-sub">누르면 서랍에서 모듈별 상세를 봅니다</span></div><ul class="su-devs">${devs.map((d) => {
+      return html`<li><button type="button" class="tile su-dev" data-act="open" data-id="${d.id}" data-off="${!reach(d)}"><span class="su-dh"><b>${name(d)}</b><span class="su-os">${d.host && d.host !== d.id ? d.id : ""}</span></span>${reach(d) ? modsOf(d).map((m) => line(d, m)) : html`<span class="su-dl">${pill(offline(d).tone, offline(d).label)}</span>`}</button></li>`; })}</ul><div class="su-legacy"><p class="su-muted">${LEGACY}</p>${order()}</div>`;
     const limited = full() ? "" : html`<p class="su-note su-limited" data-tone="info">이 기기는 허용된 기기(viewers)가 아니라 상태만 봅니다. ${VIEWERS_ONLY}</p>`;
     return html`${S.error ? errBox(S.error) : ""}${limited}${kpi}<div class="bento su-cgrid"><div class="span-7 su-col">${approvals()}${liveT}${todoT}</div><div class="span-5 su-col">${hist}</div></div>${tiles}`;
   }

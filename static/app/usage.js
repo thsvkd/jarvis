@@ -1,5 +1,5 @@
 /* core 홈의 AI 구독 사용량(설정 devices 가 있는 jarvis 에서만 보인다). 디자인 랩 04 의 C(한도 레이더) + 자세히 모드.
- * /api/devices/usage?independent=1 이 기기마다 Orca 와 무관한 사용량을 모아 준다.
+ * /api/devices/usage 가 기기마다 사용량을 모아 준다.
  * 간략히: 기기 × 프로바이더 칸에 계정별 최대 사용률의 평균, 누르면 계정별 상세. 자세히: 칸 안에 계정마다 한도 창을 모두 펼친다(행이 길어진다).
  * 보기 방식은 localStorage jarvis.usage.mode 에 둔다. */
 (function(){
@@ -39,7 +39,7 @@
  const KINDS=[
   ["auth","로그인 만료","로그인이 만료되었거나 풀렸습니다. 다시 로그인하세요.",/delegated-refresh|auth|401|unauthori[sz]ed|sign[- ]?in|log ?in|token|credential/i],
   ["rate","요청 제한","프로바이더가 잠시 요청을 막았습니다. 잠시 뒤 새로고침하세요.",/429|rate.?limit|too many/i],
-  ["perm","권한 문제","jarvis 가 Orca 에 접근할 권한이 없습니다.",/관리자 권한|permission|denied|403/i],
+  ["perm","권한 문제","이 기기에서 사용량을 읽을 권한이 없습니다.",/관리자 권한|permission|denied|403/i],
   ["net","네트워크 오류","프로바이더에 닿지 못했습니다. 잠시 뒤 새로고침하세요.",/time.?out|timed out|network|connect|ENOTFOUND|EAI_|DNS|fetch failed|socket/i],
   ["server","프로바이더 오류","프로바이더 서버가 오류를 냈습니다. 잠시 뒤 새로고침하세요.",/\b5\d\d\b|server error|unavailable|bad gateway/i],
  ];
@@ -55,18 +55,13 @@
  const better=(x,y)=>{const [a,b]=[rank(x),rank(y)];return a[0]!==b[0]?a[0]>b[0]:a[1]>b[1];};
 
  function state(d){
-  const some=(d.providers||[]).length>0; // Orca 가 없거나 실패해도 hswap(Claude)·caam(Codex) 계정은 있을 수 있다
-  if(d.status===200&&d.mode==="independent")return some?["ok","독립 조회",""]:["warn","조회 결과 없음","확인 가능한 사용량이 없습니다."];
-  if(d.status===200&&d.installed===false)return some?["ok","Orca 없음",""]:["muted","Orca 없음","이 기기에는 Orca 가 없습니다."];
-  if(d.status===200&&d.error&&some)return ["warn","Orca 응답 없음",d.error+" · 보이는 계정은 hswap·caam 값입니다."];
-  if(d.status===200&&d.error)return ["warn","Orca 응답 없음",d.error];
-  if(d.status===200)return ["ok","Orca 실행 중",""];
+  if(d.status===200)return (d.providers||[]).length>0?["ok","독립 조회",""]:["warn","조회 결과 없음","확인 가능한 사용량이 없습니다."];
   if(d.status===501)return ["muted","미지원",d.error];
   if(d.status===403)return ["crit","권한 없음",d.error];
   return ["crit","접속 불가",d.error||("HTTP "+d.status)];
  }
- const ok=d=>d.status===200&&(d.mode==="independent"?(d.providers||[]).length>0:((d.providers||[]).length>0||(d.installed!==false&&!d.error)));
- const failed=d=>!ok(d)&&!(d.status===200&&d.installed===false)&&d.status!==501; // Orca 없음·갱신 전 jarvis 는 실패가 아니다
+ const ok=d=>d.status===200&&(d.providers||[]).length>0;
+ const failed=d=>!ok(d)&&d.status!==501; // 갱신 전 jarvis 는 실패가 아니다
  const provs=d=>(ok(d)?d.providers||[]:[]).filter(p=>S.prov==="all"||p.id===S.prov);
  const shown=(d,p)=>p.accounts.filter(a=>!S.hot||isHot(a));
  // 게이트웨이가 저장한 자격이 없다고 확인한( fresh_logins ) 프로바이더 중 계정 행이 없는 것: 그 칸에 로그인 카드를 낸다.
@@ -126,8 +121,8 @@
  const badge=d=>{const [t,l]=state(d);return html`<span class="badge" data-tone="${t}">${l}</span>`;};
  function devMeta(d){
   const busy=S.busy.has(d.id),unknown=(d.unavailable||[]).filter(id=>!fresh(d).includes(id));
-  if((d.status===200&&d.installed===false&&!(d.providers||[]).length)||d.status===501)return ""; // Orca·hswap 모두 없거나 갱신 전 jarvis 는 다시 물어도 같다
-  return html`<p class="ul-meta">${d.fetched_at?html`<span>${P.fmt.ago(d.fetched_at)} 수집</span>`:""}${refBtn(d.id,(d.host||d.id)+" 새로고침",busy)}</p>${d.mode==="independent"&&unknown.length?html`<span class="ul-muted">확인 불가: ${unknown.map(id=>PROVIDER[id]||id).join(" · ")}</span>`:""}${hswapMeta(d.hswap)}`;
+  if(d.status===501)return ""; // 갱신 전 jarvis 는 다시 물어도 같다
+  return html`<p class="ul-meta">${d.fetched_at?html`<span>${P.fmt.ago(d.fetched_at)} 수집</span>`:""}${refBtn(d.id,(d.host||d.id)+" 새로고침",busy)}</p>${unknown.length?html`<span class="ul-muted">확인 불가: ${unknown.map(id=>PROVIDER[id]||id).join(" · ")}</span>`:""}${hswapMeta(d.hswap)}`;
  }
  // 게이트웨이가 확인한 hswap 버전. 고정 버전과 다르거나 설치 중·실패면 그 사실을 붙인다
  const hswapMeta=h=>h?html`<span class="ul-muted">hswap ${h.version||"없음"}${h.version!==h.pinned?` (고정 ${h.pinned})`:""}${h.note?" · "+h.note:""}</span>`:"";
@@ -154,7 +149,7 @@
    const err=list.some(isErr),act=list.some(a=>a.attention),pk=list.map(peak).filter(v=>v!=null),avg=pk.length?pk.reduce((x,y)=>x+y,0)/pk.length:null;
    return html`<td data-label="${c.name}"><button type="button" class="ul-cell" data-cell="${d.id+":"+c.id}" data-tone="${err||act?"crit":tone(avg)}"><b>${err&&avg==null?kind(list.find(isErr))[1]:pct(avg)}</b><span>${pk.length>1?"평균 · ":""}계정 ${list.length}${err&&avg!=null?" · "+kind(list.find(isErr))[1]+" 포함":""}${act?" · 조치 필요":""}</span></button>${L}</td>`;
   };
-  return html`${kpi}${soon}${summary}<div class="tile ul-mx" data-mode="${S.mode}"><table style="${"--n:"+cols.length}"><thead><tr><th scope="col">기기</th>${cols.map(c=>html`<th scope="col">${dot(c.id)}${c.name}</th>`)}</tr></thead><tbody>${rows.map(d=>html`<tr aria-busy="${String(S.busy.has(d.id))}"><th scope="row"><b>${d.host||d.id}</b> ${badge(d)}${devMeta(d)}${state(d)[2]?html`<span class="ul-muted">${state(d)[2]}</span>`:ok(d)&&!(d.providers||[]).length?html`<span class="ul-muted">${d.mode==="independent"&&(d.unavailable||[]).length?"확인한 사용량이 없습니다.":"로그인한 구독 계정이 없습니다."}</span>`:""}${[["cswap",d.cswap_error],["caam",d.caam_error]].filter(x=>x[1]).map(([n,e])=>html`<span class="ul-muted">${e.includes(n)?"":n+": "}${e}</span>`)}</th>${cols.map(c=>cell(d,c))}</tr>`)}</tbody></table></div>`;
+  return html`${kpi}${soon}${summary}<div class="tile ul-mx" data-mode="${S.mode}"><table style="${"--n:"+cols.length}"><thead><tr><th scope="col">기기</th>${cols.map(c=>html`<th scope="col">${dot(c.id)}${c.name}</th>`)}</tr></thead><tbody>${rows.map(d=>html`<tr aria-busy="${String(S.busy.has(d.id))}"><th scope="row"><b>${d.host||d.id}</b> ${badge(d)}${devMeta(d)}${state(d)[2]?html`<span class="ul-muted">${state(d)[2]}</span>`:""}</th>${cols.map(c=>cell(d,c))}</tr>`)}</tbody></table></div>`;
  }
  const dlg=$("#ulDlg");
  function dlgDraw(){
@@ -214,7 +209,7 @@
   const mine=force&&S.devs?S.devs.map(d=>d.id).filter(i=>!S.busy.has(i)):[];
   if(force){mine.forEach(i=>S.busy.add(i));allBusy(true);note("프로바이더에서 다시 읽는 중…");if(S.devs)draw();}
   try{
-   const r=await fetch("/api/devices/usage?independent=1"+(force?"&refresh=1":""),{cache:"no-store",headers:force?{"X-Jarvis-Action":"usage-refresh"}:{}});
+   const r=await fetch("/api/devices/usage"+(force?"?refresh=1":""),{cache:"no-store",headers:force?{"X-Jarvis-Action":"usage-refresh"}:{}});
    if(r.status===404){sec.hidden=true;showNav(false);return;} // core 가 아닌 jarvis(게이트웨이)
    if(!r.ok)throw new Error("HTTP "+r.status);
    const o=await r.json();
@@ -232,11 +227,10 @@
   if(S.busy.has(id))return;
   S.busy.add(id);draw();
   try{
-   const r=await fetch("/api/devices/"+encodeURIComponent(id)+"/usage?independent=1"+(soft?"":"&refresh=1"),{cache:"no-store",headers:soft?{}:{"X-Jarvis-Action":"usage-refresh"}}),o=await r.json();
+   const r=await fetch("/api/devices/"+encodeURIComponent(id)+"/usage"+(soft?"":"?refresh=1"),{cache:"no-store",headers:soft?{}:{"X-Jarvis-Action":"usage-refresh"}}),o=await r.json();
    const i=S.devs.findIndex(d=>d.id===id);
    S.devs[i]={...o,id,host:S.devs[i].host,status:r.status};
-   const good=r.ok&&(!o.error||(o.providers||[]).length>0); // Orca 가 실패해도 hswap 값은 읽혔을 수 있다
-   note(good?"":(S.devs[i].host||id)+": "+(o.error||"HTTP "+r.status),!good);
+   note(r.ok?"":(S.devs[i].host||id)+": "+(o.error||"HTTP "+r.status),!r.ok);
   }catch(e){note((e.message||String(e)),true);}
   S.busy.delete(id);draw();
  }

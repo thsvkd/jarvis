@@ -31,7 +31,7 @@ const ctx = { window: {}, document, location: { search: "", hash: "" }, URLSearc
 vm.runInNewContext(readFileSync(new URL("../static/shared/jarvis.js", import.meta.url), "utf8"), ctx);
 vm.runInNewContext(readFileSync(new URL("../static/app/usage.js", import.meta.url), "utf8"), ctx);
 await new Promise(resolve => setImmediate(resolve));
-assert.equal(urls[0], "/api/devices/usage?independent=1");
+assert.equal(urls[0], "/api/devices/usage");
 const rendered = () => element("ulBody").innerHTML;
 const summary = () => rendered().match(/<div class="ul-summary"[\s\S]*?<\/section><\/div>/)?.[0] || "";
 const initial = summary();
@@ -62,7 +62,6 @@ assert.match(rendered(), /독립 조회/);
 assert.match(rendered(), /확인 불가: Gemini/);
 assert.match(rendered(), /조회 결과 없음/);
 assert.match(rendered(), /읽지 못한 기기<\/span><b>1<\/b>/);
-assert.doesNotMatch(rendered(), /Orca 실행 중/);
 
 const click = (dataset, id = "") => element("usage").click({ target: { closest: () => ({ dataset, id, getAttribute: () => null }) } });
 click({ prov: "codex" });

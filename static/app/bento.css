@@ -1104,7 +1104,7 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
   .tile, .svc { box-shadow: none; border: 1px solid #ccc; break-inside: avoid; }
 }
 
-/* ---------------------------------------------------------------- core: 기기 목록 · Orca 페어링 */
+/* ---------------------------------------------------------------- core: 기기 목록 */
 .dev-bar { margin: var(--sp-3) 0; padding: var(--sp-2_5) var(--sp-3_5); border-radius: var(--r-xs); background: var(--tile-3); font-size: var(--fs-sm); }
 .dev-bar a { margin-left: var(--sp-2); white-space: nowrap; }
 .dev-stats { color: var(--text-2); font-size: var(--fs-sm); margin: var(--sp-2) 0; overflow-wrap: anywhere; }
@@ -1114,20 +1114,6 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
 .dev-note { color: var(--text-2); font-size: var(--fs-sm); }
 .dev-err, .dev-note.dev-err { color: var(--crit-ink); font-weight: var(--fw-semibold); }
 .dev-tile { align-self: start; cursor: pointer; }
-.dev-tile .dev-orca { cursor: auto; }
-.dev-orca:not(:empty) { margin-top: var(--sp-3); }
-.orca-state { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-sm); margin-bottom: var(--sp-3); }
-.orca-help { color: var(--text-2); font-size: var(--fs-sm); margin-bottom: var(--sp-3); }
-.orca-help code { overflow-wrap: anywhere; }
-.orca-codes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); }
-.orca-code { min-width: 0; }
-.orca-qr { display: block; width: 100%; max-width: 220px; aspect-ratio: 1; border-radius: var(--r-xs); margin-bottom: var(--sp-2); }
-.orca-copy { display: flex; gap: var(--sp-2); }
-.orca-copy input { flex: 1; min-width: 0; font: var(--fs-xs) var(--mono); padding: var(--sp-1_5) var(--sp-2); background: var(--tile-3); color: var(--text); border: 1px solid var(--line); border-radius: var(--r-xs); }
-.orca-copy .seg-action { padding: var(--sp-1_5) var(--sp-3); }
-.orca-none { color: var(--text-2); font-size: var(--fs-sm); }
-.orca-reused { margin: var(--sp-2) 0 0; color: var(--text-2); font-size: var(--fs-sm); }
-@media (max-width: 520px) { .orca-codes { grid-template-columns: 1fr; } .orca-qr { margin-inline: auto; } }
 
 /* ------------------------------------------------------------------ AI 구독 사용량(core, usage.js) — 디자인 랩 04 의 C + 자세히 모드 */
 .ul-bar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2_5); margin-bottom: var(--gap); }
