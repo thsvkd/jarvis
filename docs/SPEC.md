@@ -95,7 +95,7 @@ core 홈의 AI 셋업 화면(디자인 랩 05 의 C 안)은 기기마다 모듈 
 
 ## 훅 모듈
 
-코드는 `jarvis/modules/hooks/` 다. `danger_guard.py`(PreToolUse 판정), `merge_and_diff.py`(settings.json 병합), `send_to_trash.py`, `graft_sync_hidden.cjs`, `shims/rm`·`shims/RmShim.psm1`(rm 대체 래퍼)과 조각 `settings.json` 은 ai-setup `res/hooks`·`res/settings.json` 을 옮긴 것이다. 설치 흐름(ai-setup 의 `setup_hooks.sh`·`setup_hooks.ps1`)은 계약 층 `jarvis/hooks_module.py` 가 대신한다.
+코드는 `jarvis/modules/hooks/` 다. `danger_guard.py`(PreToolUse 판정), `merge_and_diff.py`(settings.json 병합), `send_to_trash.py`, `graft_sync_hidden.cjs`, `shims/rm`·`shims/RmShim.psm1`(rm 대체 래퍼)과 조각 `settings.json` 은 ai-setup `res/hooks`·`res/settings.json` 을 옮긴 것이다. 설치 흐름(ai-setup 의 `setup_hooks.sh`·`setup_hooks.ps1`)은 계약 층 `jarvis/modules/hooks/contract.py` 가 대신한다.
 
 - 설치하는 파일: POSIX 는 `danger_guard.py`·`shims/rm`, Windows 는 여기에 `send_to_trash.py`·`shims/RmShim.psm1`·`graft_sync_hidden.cjs` 를 더한다. 위치는 `~/.claude/hooks/`.
 - 단계: `trash`(install, 휴지통 도구가 없을 때. POSIX 는 `pip --user trash-cli`, Windows 는 `pip send2trash`) → `trash_apt`(sudo, POSIX 에 apt-get 이 있을 때만 계획에 보인다. pip 로 깔리지 않았을 때만 `sudo -n apt-get install -y trash-cli`) → `files`(config, 배포본과 다이제스트가 다른 파일만. 계획은 지금 파일의 다이제스트도 묶고, 쓰기 직전에 다시 확인한다) → `settings`(config, `merge_and_diff` 로 권한·훅 등록과 비어 있는 기본값(model 등)만 병합, 나머지 최상위 키 보존, 바뀌면 백업, 영수증에는 지금 배포본과 같은 파일만 기록) → `selftest`(read, 세션이 훅을 부르는 python 으로 정해진 입력의 판정을 확인. 실패하면 apply 는 failed).
@@ -107,7 +107,7 @@ core 홈의 AI 셋업 화면(디자인 랩 05 의 C 안)은 기기마다 모듈 
 
 ## setup 모듈
 
-코드는 `jarvis/modules/setup/` 이다. ai-setup 의 `res/`(단계 엔진 `stages.py`, 카탈로그, 플러그인 목록, 번들 스킬, 키바인드·출력 스타일·mod·OMC HUD 워커, npm-release, update-ai, AGENTS.md 틀)와 `scripts/`(워커와 `setup.sh`·`setup.ps1`)를 같은 배치로 옮겼다. 온보딩 TUI 와 `install.sh`·`install.ps1` 부트스트랩은 옮기지 않았다. 옮긴 `setup.sh`·`setup.ps1` 은 개별 옵션(`--keybinds`·`--skills` 등)을 그대로 받고, 인자가 없으면 아무것도 설치하지 않고 이 모듈을 안내한다. 계약 층은 `jarvis/setup_module.py` 다.
+코드는 `jarvis/modules/setup/` 이다. ai-setup 의 `res/`(단계 엔진 `stages.py`, 카탈로그, 플러그인 목록, 번들 스킬, 키바인드·출력 스타일·mod·OMC HUD 워커, npm-release, update-ai, AGENTS.md 틀)와 `scripts/`(워커와 `setup.sh`·`setup.ps1`)를 같은 배치로 옮겼다. 온보딩 TUI 와 `install.sh`·`install.ps1` 부트스트랩은 옮기지 않았다. 옮긴 `setup.sh`·`setup.ps1` 은 개별 옵션(`--keybinds`·`--skills` 등)을 그대로 받고, 인자가 없으면 아무것도 설치하지 않고 이 모듈을 안내한다. 계약 층은 `jarvis/modules/setup/contract.py` 다.
 
 - 계획: 엔진의 `plan_actions` 에 단계 `base·harness·plugins·skills·codegraph·mcp·newline·claude_special·tools`(agentsmd 제외)를 넘긴 쓰기 액션이다. 하네스는 claude·codex 와 영수증 `harness_installs` 의 하네스, 줄바꿈 키는 영수증에 기록된 값이다. Jarvis 역할·herdr 는 고르지 않는다. 단계 id 는 `<순번>-<stage>`, risk 는 sudo 가 들어간 명령(Linux 의 Tailscale 설치기 포함)이면 `sudo`, 설치(base·harness·codegraph·tools·플러그인 설치)는 `install`, 나머지는 `config` 다(uninstall 계획은 모두 `remove`).
 - 다시 적용(refresh): 영수증에 기록된 설정(줄바꿈 키·번들 스킬·출력 스타일·mod·OMC HUD)은 그 워커 배포본(`res/<워커>` 와 워커 스크립트, 점으로 시작하는 경로·`__pycache__` 제외)의 다이제스트가 jarvis 상태 폴더의 `setup-refresh.json` 과 다를 때 `refresh-<id>` 단계(argv 는 워커 스크립트)로 다시 적용한다. 출력 스타일·OMC HUD 워커는 플러그인이 없으면 마켓플레이스에서 설치하므로 `install`, 나머지는 `config` 다. 다시 적용이나 그 설정의 설치 액션이 성공하면 그 다이제스트를 기록한다. 기록이 없는 기기는 처음 한 번 모두 다시 적용한다(2026-11-01 사용자 결정). ai-setup 에서 `--keybinds`·`--skills` 등을 다시 실행하던 갱신 경로이며, 사용자가 고친 파일은 워커가 그대로 둔다. 옮긴 `setup.sh --keybinds` 를 직접 실행해도 이 기록은 바뀌지 않는다(다음 계획에 한 번 더 나온다).
@@ -123,7 +123,7 @@ core 홈의 AI 셋업 화면(디자인 랩 05 의 C 안)은 기기마다 모듈 
 
 ## harness 모듈
 
-ai-setup 의 update-ai(`jarvis/modules/setup/res/update/update_ai.py`)를 감싼다. 계약 층은 `jarvis/harness_module.py` 다. 설치는 하지 않는다(setup 모듈).
+ai-setup 의 update-ai(`jarvis/modules/setup/res/update/update_ai.py`)를 감싼다. 계약 층은 `jarvis/modules/harness/contract.py` 다. 설치는 하지 않는다(setup 모듈).
 
 - status·plan: update-ai `--check` 와 같은 함수로 설치된 카탈로그 항목의 설치 방식·설치본·최신 판을 읽는다. 최신이 아닌 것은 `update` 단계(`update-ai --only <id>`, `target` 은 최신 판), 최신을 확인할 수 없으면 보고만 한다. codex 의 최신 판은 Codex 자신의 갱신 확인과 같은 GitHub 최신 릴리스(`rust-v<판>` 태그)로 읽는다. codex 관리형 데몬이나 실행 중 서버가 설치된 CLI 보다 오래되면(더 새로우면 그대로 둔다) `codex-daemon` 단계(`--allow-interrupt`, 돌고 있는 Codex 작업을 끊을 수 있어 `config`)다.
 - apply: 데몬 단계가 있으면 먼저 `update_ai.py --only codex --allow-interrupt` 를 따로 돌린다(이 플래그는 실행 전체에 걸리므로 다른 대상과 함께 넘기지 않는다). 나머지 대상은 플래그 없이 `--only <id,...>` 로 올린다. 결과는 다시 읽은 판으로 단계마다 판정한다(데몬 단계는 데몬·실행 중 서버 행 모두). 세션이 돌아 update-ai 가 보류한 대상은 `deferred` 다. update-ai 는 3000초 안에 끝내고, 넘으면 프로세스 그룹째 끊는다.

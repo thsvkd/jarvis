@@ -73,6 +73,8 @@ jarvis/          수집기 + HTTP 서버 (python3 -m jarvis)
   model.py       스냅샷 조립: 서비스 분류·경보·토폴로지
   collector.py   2/10/60/300초 주기 스레드, 히스토리(1h@5s, 24h@1m → ~/.local/state/jarvis), 경보 since·연속 실패 카운트
   server.py      /api/*, 정적 파일, 접근 대역 제한
+  module.py      모듈 공통 계약의 CLI 와 모듈 목록(MODULES)
+  modules/       orca·doctor·hooks·setup·harness. 폴더마다 contract.py 가 계약 층(jarvis 안에서만 쓰고 설치본에 복사하지 않는다)이고, 나머지는 ai-setup 에서 옮긴 독립 실행 파일이다
 static/
   index.html     홈(개요, Bento)
   map/           서비스 네트워크 맵(Atlas)
