@@ -74,11 +74,11 @@ jarvis/          수집기 + HTTP 서버 (python3 -m jarvis)
   collector.py   2/10/60/300초 주기 스레드, 히스토리(1h@5s, 24h@1m → ~/.local/state/jarvis), 경보 since·연속 실패 카운트
   server.py      /api/*, 정적 파일, 접근 대역 제한
   module.py      모듈 공통 계약의 CLI 와 모듈 목록(MODULES)
-  modules/       orca·doctor·hooks·setup·harness. 폴더마다 contract.py 가 계약 층(jarvis 안에서만 쓰고 설치본에 복사하지 않는다)이고, 나머지는 ai-setup 에서 옮긴 독립 실행 파일이다
+  modules/       doctor·hooks·setup·harness. 폴더마다 contract.py 가 계약 층(jarvis 안에서만 쓰고 설치본에 복사하지 않는다)이고, 나머지는 ai-setup 에서 옮긴 독립 실행 파일이다
 static/
   index.html     홈(개요, Bento)
   map/           서비스 네트워크 맵(Atlas)
-  setup/         AI 셋업: 기기별 모듈(Orca·doctor) 상태 → 계획 → 실행 → 결과(API 는 docs/SPEC.md 의 "AI 셋업 화면")
+  setup/         AI 셋업: 기기별 모듈(훅·셋업·하네스·doctor) 상태 → 계획 → 실행 → 결과(API 는 docs/SPEC.md 의 "AI 셋업 화면")
   app/           제품 자산: tokens.css(디자인 토큰·라이트/다크 값), shell.*(공통 헤더·공용 유틸리티·테마), theme-init.js, bento.*, focus-layout.js·focus.js·focus.css(운영 Focus), atlas.*
   shared/        jarvis.js(공용 클라이언트, 전역 JARVIS), API.md(스냅샷 스키마), favicon
                  화면 설정은 localStorage `jarvis.*` 에 두고, 이름을 바꾸기 전 `pit5.*` 값도 이어 읽는다
@@ -127,9 +127,9 @@ node tools/check-home.mjs http://100.64.0.2:9300 /tmp/jarvis-home-check
 주요 키: `port`(9300) · `bind` · `allow` · `hosts` · `state` · `ingress_dir` · `caddy` · `tunnel` · `tunnel_name` · `domain` ·
 `docker_sock`(자동: /var/run/docker.sock → ~/.orbstack/run/docker.sock → ~/.docker/run/docker.sock. Docker 가 없는 기기는 `""`) ·
 `hermes_re`(Hermes 카테고리로 묶을 컨테이너·프로세스 이름, 기본 `hermes`) · `hermes_url`(Hermes 게이트웨이 `/api/status`, 빈 값이면 안 봄) · `ss` · `pm2` · `tailscale` ·
-`core`(이 기기 Orca 페어링 코드 `/api/orca` 를 받아 갈 core 기기 tailnet IP 목록. 루프백은 받지 않는다) ·
-`devices`(core 역할: 모을 게이트웨이 `[{id, url}, …]`, SSH 로만 닿는 기기는 `{id, ssh}`(아래 "SSH 기기"), 설정 파일 전용·재시작 필요) · `viewers`(core 홈의 Orca 페어링 버튼을 누를 수 있는 tailnet IP) · `proxies`(viewers 판정에서 X-Forwarded-For 마지막 항목을 믿을 리버스 프록시 tailnet IP. 도메인을 받는 pit5 Caddy) · `cswap_install`·`caam_install`(cswap·caam 자동 설치, 기본 true) · `claude_stale_s`(Claude 사용량 저장소 값이 오래됐다고 볼 기준, 기본 900초) · `claude_keepalive_stale_s`(hswap keepalive 확인이 멈췄다고 볼 기준, 기본 1200초). `core`·`viewers` 는 호스트명이 아니라 tailnet IP 로 적는다(루프백·LAN IP 는 적어도 받지 않는다. core 가 자기 자신도 모으면 그 `url` 도 tailnet IP 로 적는다).
-core 홈(`/`) 위쪽에 기기 목록과 페어링 버튼이 생기고, `/?device=<id>`·`/map/?device=<id>` 로 그 기기 화면을 연다.
+`core`(이 기기의 사용량·계정·모듈 경로를 부를 core 기기 tailnet IP 목록. 루프백은 받지 않는다) ·
+`devices`(core 역할: 모을 게이트웨이 `[{id, url}, …]`, SSH 로만 닿는 기기는 `{id, ssh}`(아래 "SSH 기기"), 설정 파일 전용·재시작 필요) · `viewers`(core 홈의 조작 버튼(jarvis 갱신·로그인·계정 전환·모듈 적용)을 누를 수 있는 tailnet IP) · `proxies`(viewers 판정에서 X-Forwarded-For 마지막 항목을 믿을 리버스 프록시 tailnet IP. 도메인을 받는 pit5 Caddy) · `cswap_install`(hswap 자동 설치, 기본 true) · `claude_stale_s`(Claude 사용량 저장소 값이 오래됐다고 볼 기준, 기본 900초) · `claude_keepalive_stale_s`(hswap keepalive 확인이 멈췄다고 볼 기준, 기본 1200초). `core`·`viewers` 는 호스트명이 아니라 tailnet IP 로 적는다(루프백·LAN IP 는 적어도 받지 않는다. core 가 자기 자신도 모으면 그 `url` 도 tailnet IP 로 적는다).
+core 홈(`/`) 위쪽에 기기 목록이 생기고, `/?device=<id>`·`/map/?device=<id>` 로 그 기기 화면을 연다.
 
 설정 파일은 10초마다 변경 여부를 확인한다. 인그레스 대상·도메인·추가 Host·Hermes·인프라 유닛·기대 서비스는 자동 반영한다.
 잘못된 TOML은 마지막 정상 설정을 유지하고 수집 오류로 표시하며, 파일을 고치면 재시작 없이 회복한다.
@@ -186,7 +186,6 @@ $PY -m jarvis core-trust apply --add <새 core IP> --plan-id <plan_id> --json   
    | 501 | 판단할 수 없다(게이트웨이가 옛 버전) | 갱신한 뒤 다시 확인한다. 그때까지 미반영 |
    | 502 | 닿지 않는다 | 미반영 |
 
-   확인에 페어링 코드 경로(`/api/devices/<id>/orca`)는 쓰지 않는다.
 4. **인그레스·proxy_key 회전(pit5, 수동)**
    - ingress `.env` 의 `JARVIS_PROXY_KEY` 를 1단계의 새 키로 바꾼다. 이때도 화면에 내지 않는다.
    - Caddy upstream 을 새 core 로 바꾸고 Caddy 를 재생성한다.
@@ -217,7 +216,7 @@ ssh = "kgolf-macmini-m1"   # core 사용자 ~/.ssh/config 의 Host 별칭
 ```
 
 - 항목은 `{id, url}` 또는 `{id, ssh}` 중 하나다. 별칭은 영숫자로 시작하는 `[A-Za-z0-9._-]` 64자 이하만 받는다. `/api/devices` 의 `url` 은 `ssh://<별칭>` 이고, 카드에 'SSH 경유' 가 붙는다.
-- 조회(스냅샷·history·changes)는 `ssh -W 127.0.0.1:9300` 으로 그 기기 게이트웨이의 루프백에 GET 한다. 조작은 AI 셋업 모듈(status·plan·apply)과 jarvis 업데이트만 원격 `python -m jarvis …` 로 한다. 페어링·Orca 업데이트·사용량·로그인·계정 전환은 501 이다.
+- 조회(스냅샷·history·changes)는 `ssh -W 127.0.0.1:9300` 으로 그 기기 게이트웨이의 루프백에 GET 한다. 조작은 AI 셋업 모듈(status·plan·apply)과 jarvis 업데이트만 원격 `python -m jarvis …` 로 한다. 사용량·로그인·계정 전환은 501 이다.
 - jarvis 업데이트는 원격 `update` 로 받은 뒤 새 판이면 스냅샷의 게이트웨이 pid 에 `kill -TERM` 을 보낸다(그 pid 의 명령줄이 `-m jarvis` 로 끝날 때만). 다시 띄우는 것은 서비스 관리자다.
 
 전제(사용자가 준비한다. jarvis 는 ssh 설정을 읽거나 쓰지 않는다):
@@ -241,7 +240,7 @@ ssh = "kgolf-macmini-m1"   # core 사용자 ~/.ssh/config 의 Host 별칭
 1. core 기기 대화형 셸에서 `/usr/bin/ssh -T -o BatchMode=yes -- <별칭> true` 가 되는지 본다.
 2. core 설정에 `{id, ssh}` 를 넣고 core 서비스를 재시작한다(`devices` 는 재시작 키다).
 3. `/api/devices` 의 그 행이 `reachable` 이고 `error` 가 비어 있으며 `fails` 가 0 인지 본다. `Permission denied` 면 서비스 세션의 키 문제다.
-4. AI 셋업 화면에서 그 기기의 모듈 상태가 보이는지, 페어링·사용량 버튼이 'SSH 로 닿는 기기는 …' 사유를 보이는지 본다.
+4. AI 셋업 화면에서 그 기기의 모듈 상태가 보이는지, 사용량 버튼이 'SSH 로 닿는 기기는 …' 사유를 보이는지 본다.
 
 위험: 원격과 core 사이에 프로세스 잠금이 없다(그 기기 화면에서 시작한 작업과 겹칠 수 있다). apply 중 연결이 끊기면 core 는 `interrupted` 로 두지만 원격은 계속 돌 수 있다. core 가 재시작하면 SSH 작업 기록은 사라진다. 그 기기 스냅샷(피어 목록·명령줄)과 ssh 오류 마지막 줄이 core 의 tailnet 에 보인다.
 
@@ -311,8 +310,8 @@ curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh 
 ```
 
 `install.sh` 는 uv 로 Python venv(`~/.local/share/jarvis/venv`)를 만들고, 최신 릴리스 묶음을 sha256 으로 확인해 `~/.local/share/jarvis/app` 에 푼다.
-그다음 설정 파일과 LaunchAgent(`dev.jarvis`, Linux 는 systemd 사용자 유닛 `jarvis`)를 만들고, 모듈(Orca·훅·셋업)을 plan 으로 보인 뒤 그 plan_id 로 apply 한다.
-이미 있는 설정·LaunchAgent·유닛·코드는 덮어쓰지 않으므로 다시 실행해도 된다. 옛 배치가 있으면 [실행본 이전](#실행본-이전-180)을 한다. Tailscale·Orca·하네스 로그인과 core 의 `devices` 등록은 직접 한다.
+그다음 설정 파일과 LaunchAgent(`dev.jarvis`, Linux 는 systemd 사용자 유닛 `jarvis`)를 만들고, 모듈(훅·셋업)을 plan 으로 보인 뒤 그 plan_id 로 apply 한다.
+이미 있는 설정·LaunchAgent·유닛·코드는 덮어쓰지 않으므로 다시 실행해도 된다. 옛 배치가 있으면 [실행본 이전](#실행본-이전-180)을 한다. Tailscale·하네스 로그인과 core 의 `devices` 등록은 직접 한다.
 
 수동 설치:
 
@@ -356,16 +355,15 @@ bash deploy/macos-daemon.sh uninstall           # LaunchDaemon → LaunchAgent
 - **로그:** `~/Library/Logs/jarvis.log`(LaunchAgent 와 같은 파일). launchd 는 `StandardOutPath` 를 root 로 열 수 있어 둘 다 `/dev/null` 로 두고, 사용자 권한으로 바뀐 뒤 셸이 이 파일에 덧붙인 다음 `<python> -m jarvis` 로 exec 한다.
 - **SSH(core 로 쓸 때):** ssh-agent·키체인이 없다. passphrase 없는 키 파일만 쓸 수 있다.
 - **키체인에 의존하는 도구는 안 될 수 있다.** 파일 저장소를 쓰는 도구는 그대로 돈다.
-- **Orca 서버 모듈은 LaunchAgent(`gui/<uid>`)를 쓴다.** GUI 세션이 없으면 모듈 적용이 실패할 수 있다.
 - **사용자 작업 목록:** 시스템 도메인에서는 `launchctl list` 대신 `launchctl print gui/<uid>` 로 읽고, GUI 세션이 없으면 사용자 작업이 없는 것으로 보인다.
 - **업데이트 버튼:** `KeepAlive=true` 와 사용자 권한이면 그대로 돈다(서비스 정의 조건은 위 SSH 기기 절의 확인 명령을 daemon 경로로 본다). 게이트웨이 코드 경로는 `~/.local/share/jarvis` 의 런처·`versions` 그대로다.
 
 ## 운영 — Windows (게이트웨이)
 
-Windows 는 게이트웨이로만 돈다: Orca 데스크톱 앱(`%APPDATA%\orca`)의 페어링 코드와 호스트 자원(CPU·메모리·디스크·네트워크·프로세스).
+Windows 는 게이트웨이로만 돈다: 호스트 자원(CPU·메모리·디스크·네트워크·프로세스).
 서비스 관리자·Docker·Caddy 수집은 없다. SSH 세션에서 띄운 프로세스는 세션이 끝나면 죽으므로 예약 작업(로그온 시)으로 돌린다.
 
-새 기기는 관리자 PowerShell 에서 한 줄로 설치한다. Python 이 없으면 winget 으로 깔고, 최신 릴리스를 sha256 으로 확인해 `%LOCALAPPDATA%\jarvis\app` 에 푼 뒤 아래 `deploy\install-windows.ps1` 과 모듈(Orca·훅·셋업) 적용까지 한다. `-DryRun` 은 할 일만 보인다.
+새 기기는 관리자 PowerShell 에서 한 줄로 설치한다. Python 이 없으면 winget 으로 깔고, 최신 릴리스를 sha256 으로 확인해 `%LOCALAPPDATA%\jarvis\app` 에 푼 뒤 아래 `deploy\install-windows.ps1` 과 모듈(훅·셋업) 적용까지 한다. `-DryRun` 은 할 일만 보인다.
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/thsvkd/jarvis/main/install.ps1))) -Core 100.107.29.19
@@ -412,10 +410,7 @@ Windows 는 백업 파일 대신 옛 폴더에서 `deploy\install-windows.ps1` �
 
 ## 검증
 
-Orca 업데이트는 core 홈의 기기 목록에서 **Orca 업데이트 확인 → Orca 업데이트** 순서로 실행한다.
-확인은 설치된 버전과 공식 stable 매니페스트를 비교하며 설치 권한·런타임 지원 여부와 독립적이다.
-최신 기기의 업데이트 버튼은 비활성화된다. 진행 상태는 기기 타일에 표시하며 페어링 QR 은 페어링 버튼으로 연다.
-기기에서 직접 할 때는 `python -m jarvis module orca plan --json` 으로 계획을 보고, 그 `plan_id` 로 `apply --json --plan-id <id>` 를 실행한다.
+모듈을 기기에서 직접 다룰 때는 `python -m jarvis module <이름> plan --json` 으로 계획을 보고, 그 `plan_id` 로 `apply --json --plan-id <id>` 를 실행한다.
 python 은 게이트웨이 서비스가 쓰는 것을 쓴다(Mac 의 PATH 첫 `python3` 는 psutil 이 없는 시스템 3.9 일 수 있다: LaunchAgent 의 `/opt/homebrew/bin/python3` 나 venv).
 하네스·도구 점검은 `python -m jarvis module doctor status --json` 이다. 읽기 전용이며 설치 위치·버전, 중복 설치, 은퇴한 훅, 평문 시크릿의 위치와 키 이름(값은 내지 않는다), lock 밖 스킬을 보고한다.
 
@@ -430,76 +425,45 @@ ai-setup 이 하던 설치·갱신도 같은 모듈 계약으로 한다(core 홈
 
 개별 설정만 다시 적용하려면 옮긴 워커 진입점을 그대로 쓴다: `bash jarvis/modules/setup/scripts/setup.sh --keybinds`(Windows 는 `setup.ps1 -Keybinds`). 프로젝트 폴더의 AGENTS.md·CLAUDE.md 는 그 폴더에서 `python -m jarvis agentsmd [--harness claude,codex] [--force] [--dry-run]` 로 쓴다.
 
-| OS | 설치본 하나 | 업데이트 주체 |
-| --- | --- | --- |
-| Debian/Ubuntu | 공식 `orca-ide` deb, `/opt/Orca`, `orca-serve` 사용자 유닛 | Jarvis: GitHub 매니페스트 크기·SHA-512 검증 → sudo apt → 서비스·실행 버전 확인 |
-| sudo 없는 기존 Linux | 같은 공식 deb, `~/.local/opt/orca/opt/Orca` | Jarvis: 검증한 deb 를 별도 폴더에 풀고 경로 교체 → 서비스·실행 버전 확인. 시스템 deb 로 통일하려면 관리자 설치가 필요 |
-| macOS | `/Applications/Orca.app`, 그 앱의 CLI 를 쓰는 LaunchAgent | Orca 공식 supervised 업데이터의 check/download/install RPC → 새 버전 재연결 확인 |
-| Windows(S4U 서버 없음) | `%LOCALAPPDATA%\Programs\orca` 사용자 설치본(데스크톱 앱이 서버를 겸함) | 갱신하지 않는다(K4). 계획은 package 단계를 blocked 로 보고하고 스킬도 맞추지 않는다 |
-| Windows(S4U 서버) | 같은 설치본, Orca 모듈이 구성한 S4U 서버(설치 폴더 밖 복사본) | Jarvis: 크기·SHA-512 를 검증한 설치기를 `/S --updated` 로 실행 → 러너가 터미널이 없을 때 새 복사본으로 옮겨 간다(데스크톱 앱이 열려 있으면 보류) |
+core 홈의 **AI 구독 사용량** 화면은 각 기기의 사용량을 읽는다. core `GET /api/devices/usage` 는 설정된 게이트웨이의 `GET /api/usage/independent` 를 모은다. 그 경로가 없는 옛 게이트웨이는 미지원으로 표시한다.
 
-앱 갱신 후 설치본의 CLI 로 전역 Orca 스킬을 갱신한다. 앱과 스킬의 결과는 따로 표시한다.
-열린 터미널은 별도 데몬이 소유하고 있으면 유지한 채 갱신한다. 다운로드 전과 설치 직전에 공개 RPC 의 전체 작업·터미널·데몬 조사를 대조한다.
-데몬 밖에서 실행되는 터미널, 실행 중인 네이티브 채팅, 조사 누락은 보류한다. Linux 는 데몬과 그 작업이 서비스 종료 cgroup 밖에 있는지도 확인한다.
-새 패키지의 호환성 계약에 모든 기존 데몬 프로토콜이 포함되어야 하며, 새 버전 재연결 후 같은 데몬 PID·시작 시각과 PTY 실행 식별자가 유지되어야 성공한다.
-지원되는 런타임에서는 최종 조사 때 새 터미널 생성을 잠시 막고 끝나면 해제한다. 구형 1.4.224/232 는 이 fence 를 지원하지 않으므로 관찰한 기존 PTY 의 연속성만 검증하며, 최종 조사 이후 시작한 새 작업 전체를 원자적으로 보호한다고 보장하지 않는다.
-Mac 은 공식 업데이터가 받은 ZIP 의 해시·버전·아키텍처와 계약을 확인한다. 계약이 없으면 보류한다.
-macOS 1.4.224 서버 모드는 Squirrel 설치 준비와 Orca 준비 확인이 서로 기다리는 문제가 있어 자동 갱신을 보류한다.
-이 버전은 공식 ZIP 의 SHA-512·코드 서명·공증·데몬 호환성을 확인한 뒤 백업을 남겨 한 번 이전해야 한다. 1.4.237 은 서버 모드의 설치 준비 순서를 수정했다.
-구형 런타임에서 `checking` 이 멈춘 경우 열린 창의 상태도 확인한다. 세션 조사 없이 데몬을 종료하거나 재시작하지 않는다.
-Ubuntu 사용자 deb 의 이전 폴더는 새 버전 실행 검증에 성공한 뒤에만 정리한다. 검증 실패 시 `.previous` 를 복구용으로 남긴다.
-Mac 의 Homebrew cask 와 앱 업데이터를 함께 설치 주체로 사용하지 않는다. Windows 도 사용자 설치 경로를 유지한다.
-서비스를 관리하는 경로와 CLI 는 모두 같은 공식 설치본을 가리켜야 한다.
+Claude 는 [hswap](https://github.com/thsvkd/harness-swap)의 Claude 엔진(claude-swap, 기존 cswap 과 같은 저장소)을 아래 "Claude 신선도와 로그인 상태" 규칙으로 읽고, Codex·Grok·Cursor 는 [caam](https://github.com/Dicklesworthstone/coding_agent_account_manager)의 저장된 프로필과 사용량을 읽는다. Codex 는 현재 CLI 자격의 사용량도 읽는다. 자격의 `id_token` 이 같은 계정(`chatgpt_account_id`)의 검증된 이메일을 담고 있으면 그 이메일로, 아니면 기본 계정으로 표시한다(토큰 서명은 확인하지 않는 표시용 값이다). 동일 계정인지 확인할 수 없으면 금고 계정과 따로 보인다. 이 경로는 hswap·caam 을 새로 설치하거나 계정을 전환하지 않는다(hswap 설치·올리기는 게이트웨이가 따로 한다, 아래 hswap·caam 절). caam 은 조회 중 상태 메타데이터를 기록하고 `CAAM_HOME` 이 설정되어 있으면 기존 데이터를 복사할 수 있다. 2026-10-30 요금제 개편 뒤 인증된 Ultra 계정은 Claude 사용량 API 가 5시간 창을 주지 않는다([Ultra 개편](https://www.datastudios.org/post/claude-max-20x-renamed-ultra-removes-5-hour-limit-verified-accounts)). 주간 창만 있는 Claude 계정은 "5시간 한도 없음"으로 적어 읽지 못한 경우와 구분한다. caam 결과는 2분 묶는다.
 
-공식 계약: [업데이트 RPC](https://github.com/stablyai/orca/blob/main/src/main/runtime/rpc/methods/updater.ts),
-[로컬 RPC 프레임](https://github.com/stablyai/orca/blob/main/src/cli/runtime/transport.ts),
-[macOS 재시작 감독](https://github.com/stablyai/orca/blob/main/src/cli/runtime/serve-update-supervisor.ts).
-
-core 홈의 **AI 구독 사용량** 화면은 Orca 설정·계정·실행 상태와 독립적으로 각 기기의 사용량을 읽는다. core `GET /api/devices/usage?independent=1` 은 설정된 게이트웨이의 `GET /api/usage/independent` 를 모은다. 이전 `/api/orca/usage` 와 독립 옵션이 없는 기존 API 는 호환성을 위해 남아 있다. 갱신 전 게이트웨이는 독립 조회 미지원으로 표시하며 Orca 값으로 대체하지 않는다.
-
-Claude 는 [hswap](https://github.com/thsvkd/harness-swap)의 Claude 엔진(claude-swap, 기존 cswap 과 같은 저장소)을 아래 "Claude 신선도와 로그인 상태" 규칙으로 읽고, Codex·Grok·Cursor 는 [caam](https://github.com/Dicklesworthstone/coding_agent_account_manager)의 저장된 프로필과 사용량을 읽는다. Codex 는 현재 CLI 자격의 사용량도 읽는다. 자격의 `id_token` 이 같은 계정(`chatgpt_account_id`)의 검증된 이메일을 담고 있으면 그 이메일로, 아니면 기본 계정으로 표시한다(토큰 서명은 확인하지 않는 표시용 값이다). 동일 계정인지 확인할 수 없으면 금고 계정과 따로 보인다. 이 경로는 hswap·caam 을 새로 설치하거나 계정을 전환하지 않는다(hswap 설치·올리기는 게이트웨이가 따로 한다, 아래 호환 API 절). caam 은 조회 중 상태 메타데이터를 기록하고 `CAAM_HOME` 이 설정되어 있으면 기존 데이터를 복사할 수 있다. 2026-10-30 요금제 개편 뒤 인증된 Ultra 계정은 Claude 사용량 API 가 5시간 창을 주지 않는다([Ultra 개편](https://www.datastudios.org/post/claude-max-20x-renamed-ultra-removes-5-hour-limit-verified-accounts)). 주간 창만 있는 Claude 계정은 "5시간 한도 없음"으로 적어 읽지 못한 경우와 구분한다. caam 결과는 2분 묶는다.
-
-**Claude 신선도와 로그인 상태**(`jarvis/claude_accounts.py`). 새로고침이거나, hswap 에 물은 지 `claude_stale_s`(기본 900초)가 지났거나, 보일 실값 중 그보다 오래된 것이 있으면 `hswap claude list --json` 으로 실값을 받는다(30초 안에 다시 묻지 않는다). 이때 hswap 이 만료된 접근 토큰을 갱신할 수 있지만 계정을 전환하지는 않는다. 읽기 한 번은 재시도 2번과 잠금 대기를 합쳐 40초 안에 끝나고, 그 안에 확정하지 못하면 지금 저장소 값과 로그인 상태를 준다. 새로고침은 진행 중인 보통 읽기에 얹히지 않고 그것이 끝난 뒤 다시 묻는다. 저장소에는 로그인 기한이 없어 예약 실행이 저장소를 늘 새로 써도 만료 경고가 사라지지 않게 하기 위함이다. 그 사이에는 마지막 실값을 쓰되, 저장소에 적힌 계정별 인증 실패(`authDeadStrikes`)는 읽을 때마다 슬롯과 신원(이메일·조직 UUID)이 같은 계정에 재로그인 안내로 붙인다. hswap 의 답은 물을 때의 저장소 모습(슬롯 구성, 사용 중 슬롯, 인증 실패인 슬롯, keepalive 의 정상·실패 종류와 `loginExpiresAt`)과 함께 보관하고, 지금 모습과 같을 때만 다시 쓴다. 이 값이 달라지면(`/login` 뒤 다시 저장한 경우 포함) 진행 중인 호출에도 얹히지 않고 바로 다시 묻는다. `checkedAt` 같은 시각만 바뀌면 다시 묻지 않는다. 신원 비교는 한 규칙을 쓴다: 조직 UUID 의 null·누락·빈 문자열은 같은 값이고 이메일의 앞뒤 공백과 대소문자는 보지 않는다. 조직 UUID 는 비교에만 쓰고 내보내지 않는다. hswap 이 없거나 실패하면 저장소 캐시를 대체값으로 쓰고 이유를 note 에 적는다. 저장소를 읽지 못해도 hswap 으로 계정을 찾은 적이 있으면 기준이 지난 뒤 다시 묻고, 찾은 적이 없으면 새로고침 전까지 hswap 을 실행하지 않는다. 값이 기준보다 오래됐으면 "N시간 전 값"을 붙이고 '주의 필요'로 센다. 토큰 갱신과 조회 간격은 hswap 이 정한다. 호환 API 도 같은 읽기와 같은 Orca 병합(이메일과 조직으로 가른다)을 거치므로 계정·신선도·대체값·만료 경고(`loginExpiresAt` 3일 전)·상태 문구가 같고, 두 경로 모두 사용 중 계정을 실제 로그인(`.claude.json`)과 같은 슬롯으로 판정한다(읽지 못하면 hswap 의 값).
+**Claude 신선도와 로그인 상태**(`jarvis/claude_accounts.py`). 새로고침이거나, hswap 에 물은 지 `claude_stale_s`(기본 900초)가 지났거나, 보일 실값 중 그보다 오래된 것이 있으면 `hswap claude list --json` 으로 실값을 받는다(30초 안에 다시 묻지 않는다). 이때 hswap 이 만료된 접근 토큰을 갱신할 수 있지만 계정을 전환하지는 않는다. 읽기 한 번은 재시도 2번과 잠금 대기를 합쳐 40초 안에 끝나고, 그 안에 확정하지 못하면 지금 저장소 값과 로그인 상태를 준다. 새로고침은 진행 중인 보통 읽기에 얹히지 않고 그것이 끝난 뒤 다시 묻는다. 저장소에는 로그인 기한이 없어 예약 실행이 저장소를 늘 새로 써도 만료 경고가 사라지지 않게 하기 위함이다. 그 사이에는 마지막 실값을 쓰되, 저장소에 적힌 계정별 인증 실패(`authDeadStrikes`)는 읽을 때마다 슬롯과 신원(이메일·조직 UUID)이 같은 계정에 재로그인 안내로 붙인다. hswap 의 답은 물을 때의 저장소 모습(슬롯 구성, 사용 중 슬롯, 인증 실패인 슬롯, keepalive 의 정상·실패 종류와 `loginExpiresAt`)과 함께 보관하고, 지금 모습과 같을 때만 다시 쓴다. 이 값이 달라지면(`/login` 뒤 다시 저장한 경우 포함) 진행 중인 호출에도 얹히지 않고 바로 다시 묻는다. `checkedAt` 같은 시각만 바뀌면 다시 묻지 않는다. 신원 비교는 한 규칙을 쓴다: 조직 UUID 의 null·누락·빈 문자열은 같은 값이고 이메일의 앞뒤 공백과 대소문자는 보지 않는다. 조직 UUID 는 비교에만 쓰고 내보내지 않는다. hswap 이 없거나 실패하면 저장소 캐시를 대체값으로 쓰고 이유를 note 에 적는다. 저장소를 읽지 못해도 hswap 으로 계정을 찾은 적이 있으면 기준이 지난 뒤 다시 묻고, 찾은 적이 없으면 새로고침 전까지 hswap 을 실행하지 않는다. 값이 기준보다 오래됐으면 "N시간 전 값"을 붙이고 '주의 필요'로 센다. 토큰 갱신과 조회 간격은 hswap 이 정한다. 만료 경고는 `loginExpiresAt` 3일 전부터 붙인다. 사용 중 계정은 실제 로그인(`.claude.json`)과 같은 슬롯으로 판정한다(읽지 못하면 hswap 의 값).
 
 hswap 은 조직 이름을 슬롯을 등록할 때만 저장하므로 조직 이름이 바뀌면 기기마다 값이 달라진다. core 는 조직 UUID 해시로 같은 조직을 알아보고 가장 늦게 등록된 슬롯의 이름으로 통일하므로, 새 이름은 어느 한 기기에서 로그인 후 슬롯을 다시 등록(`hswap claude add`)하면 반영된다.
 
 Claude 칸에는 기기 단위 로그인 상태를 한 줄로 보인다(`providers[].login`, `static/shared/API.md`). hswap 의 `hswap claude keepalive` 가 저장소의 `cache/keepalive.json`(0600, 토큰 없음)에 남긴 결과와 hswap 이 보고한 `keychainUnavailable`, 사용 중 계정의 재로그인 필요 여부로 정한다. `claude_keepalive_stale_s`(기본 1200초)보다 오래된 파일은 '자동 갱신 멈춤'이다. 파일이 없으면 이 기능을 쓰지 않는 기기로 보고 경고하지 않는다. 파일의 `activeSlot` 이 지금 로그인의 슬롯과 다른 번호이면(전환 직후, 저장되지 않은 로그인) 그 기록의 만료·오류를 붙이지 않고 "자동 갱신 기록이 이전 계정의 것"만 보이며, 다음 keepalive 가 돌면 사라진다. `activeSlot` 이 없으면 다른 계정으로 보지 않고 상태를 그대로 보이되 `--slot` 만 안내하지 않는다. 자격이 없다는 기록(`no_credentials`)은 늘 `/login` 부터 안내한다. 계정이 하나도 없어도 이 상태는 보인다. hswap 이 답한 키체인 상태는 계정 값과 따로 `claude_stale_s` 동안 들고 있다가 다시 묻는다. 정상이 아닌 상태는 '주의 필요'로 세고 **다시 로그인 방법** 버튼으로 절차를 안내한다: Claude 는 device-code 로그인이 없어 jarvis 가 대신 로그인하지 않는다.
 
 값을 신선하게 유지하고 로그인을 잇도록 hswap 을 예약 실행하기를 권한다(`hswap claude keepalive` 는 hswap 0.2.2 이상, `hswap claude auto --once`). macOS 의 자격은 로그인 키체인에 있으므로 LaunchDaemon·SSH 가 아니라 GUI 세션의 LaunchAgent 로 돌린다: 키체인에 닿지 못하는 곳에서 돌면 파일과 키체인으로 로그인이 갈라질 수 있다. SSH 로만 쓰는 Mac 은 hswap 0.2.3 의 파일 저장소 모드(`credentials.store=file`)를 쓸 수 있다: 이때 jarvis 는 키체인 접근 불가를 경고하지 않고 정상 기록(`ok:true`)만 "로그인됨 · 파일 저장소"로 보이며(keychain_unavailable 실패는 "자동 갱신 확인되지 않음"이고 `claude_keepalive_stale_s` 동안 계속되면 주의로 센다), 다시 로그인 안내도 화면 터미널이 아니라 SSH 를 기준으로 한다. 키체인에 로그인 항목이 있거나 hswap 이 그것을 확인하지 못하면(`keychain_item_present`) 복구 명령과 확인할 로그를 안내한다. 자세한 절차는 hswap 문서를 따른다.
-그 기기에서 Orca 가 응답하면 Orca 로컬 RPC 의 계정(`accounts.list`, hswap·caam 실행 없음)으로 독립 수집을 보충한다: 독립 수집이 못 읽은 프로바이더는 Orca 계정으로 채우고, 이메일 모르는 기본 계정만 있으면 Orca 의 이메일 계정으로 바꾸며, 이메일을 아는 계정은 독립 값을 쓰고 Orca 에만 있는 이메일 계정을 더한다. Orca 가 없거나 실패해도 독립 수집 결과는 그대로 나온다. Claude 는 이 보충도 호환 API 와 같은 규칙으로 하여 같은 이메일의 다른 조직 계정을 따로 남기고, 시스템 기본 계정은 사용 중 계정이 있을 때만 뺀다. 같은 Claude 계정은 이메일과 hswap 의 조직 이름으로 묶어 기기가 달라도 한 번 센다.
+같은 Claude 계정은 이메일과 hswap 의 조직 이름으로 묶어 기기가 달라도 한 번 센다.
 Antigravity 는 현재 CLI 로그인에 남은 유효한 접근 토큰으로 Google 사용량과 [UserInfo](https://developers.google.com/identity/openid-connect/reference)를 조회한다. 같은 토큰에 연결된 검증된 이메일만 표시하고 확인할 수 없으면 기본 계정으로 표시한다. 만료된 토큰을 갱신하거나 `agy` 를 실행하지 않는다. 현재 사용 중인 계정만 지원한다.
 OpenCode Go 는 OpenCode 의 현재 자격으로 사용량을 조회한다. v2 는 선택된 Console 계정의 만료되지 않은 자격을 사용하며 Console 계정이 없을 때 Go 키를 사용한다. v1 은 Go API 키를 사용한다. 서비스가 토큰을 갱신하도록 사용량 API 를 호출하지 않는다. Kimi 는 CLI 에 설정된 파일 자격의 유효한 접근 토큰을 읽으며, [0% 오류 사례](https://github.com/MoonshotAI/kimi-code/issues/3908)가 있는 5시간·주간 비율은 상세 카운터가 없을 때 0% 로 단정하지 않는다. ZCode 는 `ZAI_API_KEY` 또는 Z.ai 공식 주소가 지정된 `ANTHROPIC_AUTH_TOKEN` 으로, Gemini 는 유효한 CLI 자격과 `GOOGLE_CLOUD_PROJECT` 가 있으면 조회한다. MiniMax 는 CLI 의 Token Plan 자격을 읽고, 응답에 명시된 잔량 비율을 확인할 수 있을 때만 표시한다. 자격과 계정 ID 는 응답·로그에 넣지 않으며 자격이나 한도를 확인할 수 없는 경우는 화면에 확인 불가로 표시한다.
 
-기존 Orca 기반 호환 API 의 설정과 동작:
+hswap·caam 의 설정과 동작:
 
-기존 Orca 기반 호환 API 는 기기마다 Orca 가 로그인한 구독 계정(Claude·Codex·Grok·Antigravity 등)의 한도를 제공한다.
-게이트웨이 `GET /api/orca/usage`(설정 core 만)는 Orca 로컬 RPC `accounts.list` 의 rateLimits 를 프로바이더 → 계정 → 한도 창(5시간·주간·Fable 주간·월간)으로 정리한다.
-같은 프로바이더의 다른 관리 계정은 `inactiveClaudeAccounts`·`inactiveCodexAccounts` 에서 읽는다. 계정은 이메일만 내보내고 홈 경로·조직 UUID·프로바이더 계정 ID 는 넣지 않는다.
+계정은 이메일만 내보내고 홈 경로·조직 UUID·프로바이더 계정 ID 는 넣지 않는다.
 Claude 는 그 기기에 [hswap](https://github.com/thsvkd/harness-swap)(harness-swap)이 있으면 `hswap claude list --json`(claude-swap 엔진, cswap 과 같은 schemaVersion 1)의 계정 목록을 쓴다.
-hswap 으로 로그인을 바꿔 끼우면 Orca 는 그 로그인을 '시스템 기본 계정' 하나로만 보기 때문이다. 토큰 갱신·조회 간격은 hswap 이 맡고 jarvis 는 자격 증명 파일을 열지 않는다.
+토큰 갱신·조회 간격은 hswap 이 맡고 jarvis 는 자격 증명 파일을 열지 않는다.
 hswap 은 사용량을 읽을 때 만료된 접근 토큰을 갱신 토큰으로 다시 받는다(쉬는 계정 포함). 로그인 자체(갱신 토큰)는 기한이 있어
 새 `/login` 만이 늘린다: `loginExpiresAt` 3일 전부터 그 계정에 남은 기간을 붙이고 '주의 필요'로 센다.
-hswap 은 PATH 다음에 `~/.local/bin/hswap(.exe)` 에서 찾는다. 이 호환 API 는 위 "Claude 신선도와 로그인 상태"와 같은 규칙으로 계정을 읽은 뒤 Orca 에만 있는 계정을 더한다. 계정을 전혀 읽지 못하면 Orca 값을 쓴다. 독립 경로와 다른 점은 hswap 이 없으면 설치를 시작한다는 것뿐이다.
-Claude Code(`claude`)가 있는 기기에서 hswap 이 없거나 `jarvis/claude_accounts.py` 의 `VERSION` 보다 낮으면, 게이트웨이가 시작할 때와 그 뒤 1시간마다 확인해 뒤에서 `uv tool install harness-swap==<VERSION>`(uv 가 없으면 `pipx install --force`)으로 설치한다(이 호환 API 도 hswap 이 없으면 설치를 시작한다).
+hswap 은 PATH 다음에 `~/.local/bin/hswap(.exe)` 에서 찾는다. 계정은 위 "Claude 신선도와 로그인 상태" 규칙으로 읽는다.
+Claude Code(`claude`)가 있는 기기에서 hswap 이 없거나 `jarvis/claude_accounts.py` 의 `VERSION` 보다 낮으면, 게이트웨이가 시작할 때와 그 뒤 1시간마다 확인해 뒤에서 `uv tool install harness-swap==<VERSION>`(uv 가 없으면 `pipx install --force`)으로 설치한다.
 PyPI 배포본을 버전으로 고정한다(서비스가 최신판을 저절로 받아 실행하지 않게). uv 는 이미 깐 도구 환경의 Python 을 그대로 쓴다. 버전이 같거나 높거나(사람이 먼저 올린 것) 읽지 못하면 그대로 둔다.
 올리기는 PyPI 배포본이 그 태그의 소스와 같은지 대조한 뒤 `VERSION` 을 바꿔 릴리스한다. 실패하면 이유를 화면에 보이고 6시간 뒤 다시 시도한다. 사용량 화면의 기기 행에 확인한 버전(고정 버전과 다르면 함께)을 보인다.
 설치 뒤 계정은 그 기기에서 `hswap claude add` 로 직접 넣는다. 이미 깔린 cswap 은 지우지 않는다(같은 저장소를 쓴다). 설정 `cswap_install = false`(또는 `JARVIS_CSWAP_INSTALL=0`, 호환을 위해 이름 유지)로 끈다.
 Codex 는 그 기기에 [caam](https://github.com/Dicklesworthstone/coding_agent_account_manager)(coding_agent_account_manager)이 있고 Codex 프로필을 저장해 두었으면,
 `caam ls codex --json`(프로필 → 이메일)과 `caam limits codex --format json`(한도)으로 계정별 사용량을 더한다. 결과는 2분 묶는다.
 limits 는 caam 금고의 접근 토큰으로 읽기만 한다. jarvis 는 caam refresh·daemon·activate 를 부르지 않는다(Codex 갱신 토큰은 쓸 때마다 바뀐다).
-같은 이메일이 Orca 에도 값과 함께 있으면 Orca 를 쓴다: Orca 는 Codex 가 실제로 쓰는 로그인을 읽고, 금고 사본은 Codex 가 갱신하면 낡는다.
-caam 이 없고 Codex CLI(`codex`)가 있으면 v0.1.24 릴리스를 받아 코드에 고정한 SHA256 을 확인한 뒤 `~/.local/bin/caam(.exe)` 에 둔다.
-계정은 그 기기에서 caam 으로 직접 저장한다. 설정 `caam_install = false`(또는 `JARVIS_CAAM_INSTALL=0`)로 끈다.
+사용량 경로는 caam 을 설치하지 않는다(caam 은 그 기기에 직접 둔다). 계정은 그 기기에서 caam 으로 직접 저장한다.
 caam 의 라이선스는 MIT 에 OpenAI·Anthropic 관련 추가 조항이 붙어 있다(사용자가 확인하고 도입을 정했다).
-Orca 가 없거나 실패한 기기(관리자 권한 Orca 를 쓰는 Windows 등)도 hswap 의 Claude 계정은 보인다. Codex 는 Orca 관리 계정(Orca 설정의 계정)으로 계정별 사용량이 나온다.
-프로바이더 API 를 다시 부르는 `refreshUsage` 는 5분에 한 번(새로고침 버튼은 30초 간격)만 쓰고, 그 사이에는 Orca 가 가진 값을 읽는다.
 core `GET /api/devices/usage`(전체, `?refresh=1` 강제)·`/api/devices/<id>/usage` 는 모아 두지 않고 요청마다 게이트웨이에 묻는다.
 
-Claude 계정 행의 **이 계정 사용**(viewers 만)은 core `POST /api/devices/<id>/account?slot=<n>` → 게이트웨이 `POST /api/orca/account`(설정 core 만) →
+Claude 계정 행의 **이 계정 사용**(viewers 만)은 core `POST /api/devices/<id>/account?slot=<n>` → 게이트웨이 `POST /api/usage/account`(설정 core 만) →
 `hswap claude switch <n> --json` 으로 그 기기의 Claude Code 로그인을 바꾼다. 슬롯 번호는 기기마다 다르다. Codex 는 jarvis 가 caam activate 를 부르지 않으므로 전환하지 않는다.
 화면은 간략히(칸마다 최대 사용률, 누르면 계정 상세)와 자세히(칸 안에 계정별 한도 창 전부) 보기를 전환한다. 선택은 localStorage `jarvis.usage.mode` 에 둔다.
 기기별 표 위에는 프로바이더별 계정 요약을 표시한다. 같은 프로바이더·이메일·조직의 계정은 사용량이 있는 값 중 최근 값을 한 번 보여 주고, 이메일이 없으면 기기별로 구분한다. 한도 창별 사용률과 출처 기기·확인 시각을 표시하며 프로바이더·주의 필터가 함께 적용된다.
-공식 계약: [계정 RPC](https://github.com/stablyai/orca/blob/main/src/main/runtime/rpc/methods/accounts.ts), [사용량 형식](https://github.com/stablyai/orca/blob/main/src/shared/rate-limit-types.ts).
+사용량 화면의 다시 로그인은 core `POST /api/devices/<id>/login?provider=` → 게이트웨이 `POST /api/usage/login`(설정 core 만)으로 간다. 그 두 경로(`/api/usage/login`·`/api/usage/account`)가 없는 옛 게이트웨이는 501 로 답한다(갱신 필요).
 
 ```sh
 JARVIS_CONFIG=/dev/null python3 -m unittest discover -s tests   # 파서·플랫폼 층·스냅샷 조립(이 기기 설정 파일과 무관하게)

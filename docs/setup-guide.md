@@ -26,7 +26,7 @@
 | mcp | Claude Code와 Codex에 CodeGraph MCP 서버를 등록한다 | |
 | newline | 줄바꿈 키를 설정한다(기본 Shift+Enter) | |
 | claude_special | 출력 스타일을 fluent-korean으로 지정하고, Claude Code mod 3개를 설치하며, OMC HUD를 쓰고 있으면 캐시 표시 래퍼를 붙인다 | |
-| tools | 기기들을 사설 네트워크로 묶는 Tailscale을 설치한다. Orca는 jarvis가 관리한다(Orca(`docs/SPEC.md` Orca 모듈 절)) | Linux에서는 **sudo**가 필요하다 |
+| tools | 기기들을 사설 네트워크로 묶는 Tailscale을 설치한다 | Linux에서는 **sudo**가 필요하다 |
 | agentsmd | 현재 폴더에 `AGENTS.md`(와 `CLAUDE.md`)를 만든다. 내용은 위 AGENTS.md 설명을 참고한다 | 이미 있으면 온보딩에서 덮어쓸지 묻고, 기본은 그대로 둔다 |
 
 - Tailscale은 설치만 하며, 로그인(`tailscale up`)은 하지 않는다.

@@ -1,6 +1,6 @@
 # SPEC
 
-> 상태: 확정(2026-10-30 사용자 확인 K1, K4·K10 은 5라운드). setup·harness 모듈 절은 2026-11-01 확정. 범위: ai-setup 흡수의 모듈 계약과 각 모듈. 결정의 배경은 `2026-10-30-ai-setup-absorption.md` 가 소유한다.
+> 상태: 확정(2026-10-30 사용자 확인 K1, K4·K10 은 5라운드). setup·harness 모듈 절은 2026-11-01 확정. 2026-11-07 사용자 결정으로 Orca 모듈을 제거했다. 범위: ai-setup 흡수의 모듈 계약과 각 모듈. 결정의 배경은 `2026-10-30-ai-setup-absorption.md` 가 소유한다.
 
 ## 모듈 계약
 
@@ -23,56 +23,14 @@ jarvis 본체는 모듈을 라이브러리로 부른다. 부트스트랩과 시�
 - `risk` 는 `read`·`update`·`install`·`remove`·`sudo`·`config`·`external` 중 하나다. 기본 정책은 `read`·`update` 자동, 나머지는 승인이다.
 - 영수증은 `~/.claude/.claude-code-setup.json` 이고 키(`tool_installs.*` 등)는 ai-setup 과 같다. 모듈만 쓰고, 임시 파일에 쓴 뒤 `os.replace` 로 바꾸며, 다른 키를 보존한다. 파싱할 수 없으면 쓰기 전에 멈춘다.
 
-## Orca 모듈
-
-코드는 `jarvis/modules/orca/` 다. `orca.py`(설치·스킬·uninstall), `orca_server.py`(서버·페어링·Windows 러너), `orca_windows.py`(Windows 보안 경계)는 Windows 러너가 서비스 디렉터리로 복사해 단독 실행하므로 패키지 import 없이 같은 디렉터리의 형제 모듈만 부른다.
-
-### 플랫폼별 형태
-
-| 플랫폼 | 설치본 | 서버 | 갱신 주체 |
-| --- | --- | --- | --- |
-| Debian/Ubuntu | 공식 deb `/opt/Orca` | 사용자 유닛 `orca-serve.service`: `ExecStart=/opt/Orca/resources/bin/orca-ide serve --supervise --port 6768 --pairing-address <tailnet IP>`(페어링 플래그는 O7), `KillMode=process`, `Restart=on-failure`, Python 러너 없음 | `jarvis/orca_update.py` |
-| macOS | `/Applications/Orca.app` | `<앱 CLI> serve --supervise ...` 를 바로 실행하는 LaunchAgent | Orca 공식 supervised 업데이터 RPC(`jarvis/orca_update.py`) |
-| Windows(S4U) | `%LOCALAPPDATA%\Programs\orca` | S4U 예약 작업과 러너, 서비스 디렉터리의 `app\build-<식별자>` 복사본 | 설치기 `/S --updated`(`modules/orca/orca_update_windows.py`), 러너의 자동 전환. 설치 폴더의 데스크톱 앱이 열려 있으면 보류(deferred). 일반 권한이라 터미널을 셀 수 없으면 최대 300초 동안 러너의 전환을 기다린다(K10) |
-| Windows(데스크톱 전용) | 같음 | 데스크톱 앱이 서버를 겸함 | 갱신하지 않는다(K4: Windows 는 S4U 하나로 통일). 계획은 package 단계를 blocked 로 보고하고 skills 단계를 내지 않는다 |
-
-- 기존 유닛이 같은 형태인지는 실행 파일을 realpath 로 비교해 판정하고, 페어링 플래그(`--no-pairing`·`--mobile-pairing` 등)는 판정에서 뺀다(잠정, O7). 형태가 다른 유닛은 바꾸지 않고 보고한다.
-- 설치본 버전은 PATH 의 `orca` 가 아니라 설치본의 CLI·메타데이터로 읽는다(Linux 의 PATH 첫 `orca` 는 데스크톱 shim 일 수 있다).
-- 설치본이 최신 매니페스트와 같거나 더 새로우면 최신으로 본다.
-- 패키지는 공식 매니페스트의 크기·SHA-512 를 통과한 것만 쓴다. 검증 코드는 한 벌이다.
-- 비대화형 sudo 는 `sudo -n` 으로만 시도한다.
-- Windows S4U 서버는 High 무결성이라 일반 권한의 터미널·RPC 조회가 `runtime_access_denied` 를 받는다. 이때 터미널 수는 0 이 아니라 "셀 수 없음"이고, `status` 의 `health` 는 `down` 이 아니라 `degraded` 다.
-- 페어링 링크·코드·토큰은 출력·로그·영수증에 넣지 않는다.
-
-### 기존 서버의 수용과 소유 (잠정, 사용자 확인 전)
-
-- 같은 형태의 기존 유닛(지금 jarvis 기기 전부)은 파일을 쓰지 않고 `tool_installs.orca_server` 에 `adopted: true` 로 기록한다. 갱신·상태 조회는 똑같이 다루고, uninstall 은 adopted 유닛을 지우지 않고 기록만 지운다.
-- 새로 쓴 유닛은 쓴 파일의 sha256(`service_digest`)을 기록한다. uninstall 은 파일이 그 다이제스트와 같을 때만 지우고, 다르면 남긴 채 종료 코드 2 로 영수증을 보존한다.
-- jarvis 가 설치하지 않은 패키지에는 `tool_installs.orca` 를 기록하지 않는다.
-- adopted 기기에서 데스크톱 클라이언트 페어링은 임시 서버가 필요한데, 그 프로필을 실행 중인 서버가 이미 쓰므로 서버를 멈춰야 한다. 데스크톱 프로필에 그 서버의 환경이 이미 있으면 건너뛰고, 없으면 `blocked`(실행 중인 서버를 멈춰야 함)로 둔다. 실행 중인 서버를 몰래 멈추는 경로는 없다.
-- 새로 쓰는 유닛·LaunchAgent 에는 사용자의 로그인 셸에서 얻은 `PATH`·`SHELL` 을 넣는다(Orca 터미널이 하네스를 찾도록). 쓴 뒤 `daemon-reload` 와 `enable --now` 를 한다. 실행 중인 adopted 유닛에는 아무것도 하지 않는다.
-- systemd 사용자 매니저의 linger 가 꺼져 있으면 plan 에 `config` 단계로 보이고 승인 뒤에만 켠다.
-
-### Orca SSH 호스트 연결 (초안, 사용자 확인 전)
-
-출처: pi5-server2·thsvkd-kgolf 관찰(2026-11-04, Orca 1.4.247). 정식 페어링(위의 서버)과 별개 경로다.
-
-- 클라이언트 Orca 데스크톱이 SSH 호스트를 추가하면 Orca 가 원격 기기에 자기 orcad 를 배포해 띄운다. 실행 파일은 `~/.orca-remote`(`orcad-active.json`, `orcad-<판>/orcad.js`, `runtimes/node-*/bin/node`), 프로필은 `~/.orca`(`orca-runtime.json`: pid·runtimeId·authToken·unix 소켓 `~/.orca/o-<pid>-*.sock`·websocket `ws://127.0.0.1:<port>`, `orcad.lock`, `orca-devices.json`)다. 프로세스는 ssh 세션 범위에서 돌고(ppid 1) `orca-serve` 유닛 밖이라 jarvis 의 Orca 갱신(서버 재시작)과 무관하다.
-- 그래서 한 기기에 정식 서버(`orca.DIRS`)와 SSH 호스트 연결 orcad(`orca.SSH_DIRS` = `~/.orca`)가 따로 돌 수 있다(런타임이 나뉜다). `orcad.terminalCensus` 는 그 orcad 에도 같은 로컬 RPC 로 묻는다(`~/.orca` 의 런타임 파일이 없으면 정식 서버로 넘기지 않고 셀 수 없음으로 본다).
-- Orca 는 orcad 가 죽어도 `~/.orca/orca-runtime.json` 을 남긴다. 그래서 jarvis 는 그 pid 가 살아 있고 명령행에 `~/.orca-remote` 아래 `orcad.js` 가 있을 때만 실행 중으로 본다(pid 재사용을 orcad 로 오인하지 않는다).
-- 클라이언트의 `orca-environments.json`(`environments[]`: id·name·`connectionDependency`·endpoints)과 `orca-environment-sidecar.json`(`entries.<환경 id>`)으로 연결 방식을 가른다: `orcadDeployment` 가 있거나 `connectionDependency` 가 `ssh-tunnel` 이면 SSH 호스트 연결(`ssh`), `sshAccess` 가 있으면 정식 페어링 환경을 SSH 터널로 쓰는 것(`ssh-tunnel`), 그 밖은 정식 페어링(`pairing`). 데스크톱 프로필(`orca.DESKTOP_DIRS`)을 서버 프로필보다 먼저 본다.
-- jarvis 는 이 파일들의 토큰·키(`deviceToken`·`authToken`·`publicKeyB64`)를 내보내지 않고, 이름·pid·연결 방식만 낸다(`/api/orca` 의 `ssh_host`·`environments`, ORCA-14·15).
-
-
 ## doctor 모듈
 
 코드는 `jarvis/modules/doctor/` 다. `doctor.py` 는 ai-setup `res/doctor/doctor.py` 를 옮긴 것으로 단독 실행(사람용 보고, 종료 코드 0·1·2)도 그대로 된다. 하네스·도구 목록은 setup 모듈의 `jarvis/modules/setup/res/catalog.json` 한 벌을 읽는다. 현재 훅 조각은 훅 모듈의 `jarvis/modules/hooks/settings.json` 을 읽는다.
 
-- 홈 아래 어떤 파일도 만들거나 바꾸거나 지우지 않는다. 버전 확인은 홈·설정·캐시 위치를 임시 폴더로 돌린 환경에서 한다. 바꾸는 것은 아래 `orca_split` 의 orcad 프로세스 정지뿐이다.
+- 홈 아래 어떤 파일도 만들거나 바꾸거나 지우지 않는다. 버전 확인은 홈·설정·캐시 위치를 임시 폴더로 돌린 환경에서 한다.
 - `status.details` 는 `{tools: [{id, kind: harness/tool, found: [PATH 순서의 실행 파일], version, hint}], findings: [{kind, message}]}` 다. `found` 의 홈 아래 경로는 `~/` 로 줄인다. `hint` 는 없는 항목의 그 플랫폼 설치 명령이다.
-- `findings.kind` 는 `duplicate`(PATH 의 중복 설치, 첫 번째가 우선), `hook_drift`(은퇴한 훅이 하네스 설정에 남음), `secret`(평문 값이 있는 파일 위치와 키 이름. 값은 내보내지 않는다), `skill`(`~/.agents/skills` 의 lock 밖 스킬. 지우지 않는다), `orca_split`(정식 Orca 서버와 Orca SSH 호스트 연결 orcad 가 함께 살아 있음. 두 프로필·pid·SSH 클라이언트 이름과 안내: 클라이언트는 정식 페어링 환경에 SSH 터널로 붙거나 클라이언트에서 `orca environment stop`. 클라이언트가 다시 SSH 호스트로 붙으면 Orca 가 orcad 를 다시 배포할 수 있다)이다. 발견 항목이 있으면 `health` 는 `degraded`, 없으면 `ok` 다.
-- `orca_split` 이 아니면 `plan` 은 단계가 없고, `apply` 는 그 plan_id 면 `current`, 아니면 `stale` 이다. `uninstall` 은 지울 것이 없다.
-- 예외(DOCTOR-9, 초안): `orca_split` 이면 `plan` 은 그 orcad 의 `orcad.terminalCensus`(`liveSessions`+`inProcessSessions`)가 0 일 때만 `{id: stop_ssh_orcad, risk: config, argv: null, pid, started}` 단계를 낸다(`started` 는 프로세스 시작 시각을 소수 둘째 자리로 반올림한 값이라 plan_id 가 그 프로세스 하나에 묶인다). 터미널이 있거나 셀 수 없으면 `blocked: [{step: stop_ssh_orcad, reason}]` 다. `apply` 는 그 plan_id 일 때만 신원(pid·시작 시각·명령행의 `~/.orca-remote` 아래 `orcad.js`)과 터미널 0 을 다시 확인하고 정상 종료 신호만 보낸다. 10초 안에 멈추지 않으면 강제 종료하지 않고 `failed`, 신원이 다르면 `failed`, 그사이 터미널이 생기면 `deferred` 다. 막힌 단계가 있으면 모듈 계약의 일반 규칙(`failed`)과 달리 아무것도 하지 않고 `deferred`(종료 코드 2)다(열린 터미널이 닫히면 풀리는 보류. 터미널 수를 셀 수 없을 때도 같은 `deferred` 이고, orcad 가 다시 응답하면 풀린다). 정식 서버와 파일은 건드리지 않는다. 클라이언트 기기 쪽은 바꾸지 않고 위 안내만 한다.
+- `findings.kind` 는 `duplicate`(PATH 의 중복 설치, 첫 번째가 우선), `hook_drift`(은퇴한 훅이 하네스 설정에 남음), `secret`(평문 값이 있는 파일 위치와 키 이름. 값은 내보내지 않는다), `skill`(`~/.agents/skills` 의 lock 밖 스킬. 지우지 않는다)이다. 발견 항목이 있으면 `health` 는 `degraded`, 없으면 `ok` 다.
+- `plan` 은 단계가 없고, `apply` 는 그 plan_id 면 `current`, 아니면 `stale` 이다. `uninstall` 은 지울 것이 없다.
 
 
 ## AI 셋업 화면
@@ -81,16 +39,15 @@ core 홈의 AI 셋업 화면(디자인 랩 05 의 C 안)은 기기마다 모듈 
 
 | 경로 | 누가 | 동작 |
 | --- | --- | --- |
-| 게이트웨이 `GET /api/modules[?refresh=1]` | 설정 core 만 | 모듈마다 `status` 와 `checked_at`·`ok`, 마지막 apply 작업(`job`). status 는 모듈별로 캐시하고(orca 60초, hooks·setup 300초, doctor 600초, harness 1800초), 오래된 것만 모듈마다 병렬로 다시 읽는다. 캐시가 없을 때(재시작·apply 뒤)와 `refresh=1` 만 점검을 기다리고, 기간만 지난 것은 지난 결과를 바로 주고 뒤에서 다시 읽는다. `refresh=1` 은 `X-Jarvis-Action: modules-refresh` 가 있어야 한다 |
+| 게이트웨이 `GET /api/modules[?refresh=1]` | 설정 core 만 | 모듈마다 `status` 와 `checked_at`·`ok`, 마지막 apply 작업(`job`). status 는 모듈별로 캐시하고(hooks·setup 300초, doctor 600초, harness 1800초), 오래된 것만 모듈마다 병렬로 다시 읽는다. 캐시가 없을 때(재시작·apply 뒤)와 `refresh=1` 만 점검을 기다리고, 기간만 지난 것은 지난 결과를 바로 주고 뒤에서 다시 읽는다. `refresh=1` 은 `X-Jarvis-Action: modules-refresh` 가 있어야 한다 |
 | 게이트웨이 `GET /api/modules/<이름>/plan` | 설정 core 만 | 그 모듈의 `plan`. 10초 동안 캐시해 몰린 요청도 하위 프로세스 하나로 처리한다 |
-| 게이트웨이 `POST /api/modules/<이름>/apply?plan_id=<sha256>` | 설정 core 만, `X-Jarvis-Action: module-apply` | 뒤에서 `apply --plan-id` 를 돌리고 바로 202 와 작업을 준다. 한 번에 하나만 돌리고, 다른 적용·jarvis 갱신·Orca 업데이트·페어링 발급이 진행 중이면 409 다(그 작업들도 적용 중에는 409). 시작할 때 `module-apply.json` 표시를 남겨, 적용 중 재시작하면 다음 조회의 작업이 `interrupted` 다. 끝나면 그 모듈의 status·plan 캐시를 버린다 |
+| 게이트웨이 `POST /api/modules/<이름>/apply?plan_id=<sha256>` | 설정 core 만, `X-Jarvis-Action: module-apply` | 뒤에서 `apply --plan-id` 를 돌리고 바로 202 와 작업을 준다. 한 번에 하나만 돌리고, 다른 적용이나 jarvis 갱신이 진행 중이면 409 다(jarvis 갱신도 적용 중에는 409). 시작할 때 `module-apply.json` 표시를 남겨, 적용 중 재시작하면 다음 조회의 작업이 `interrupted` 다. 끝나면 그 모듈의 status·plan 캐시를 버린다 |
 | core `GET /api/devices/modules[?refresh=1]` | tailnet | 기기마다 위의 응답에 `id`·`host`·`status`(HTTP)를 붙여 모은다. 폴링이 실패 중인 기기는 묻지 않는다. viewers 가 아니면(`full: false`) 모듈은 `module·installed·owned·version·latest·health·checked_at·ok·error` 만, 작업은 상태와 결과 종류만 준다(doctor 의 시크릿 위치·경로, 결과 문구는 viewers 만) |
 | core `GET /api/devices/<id>/modules/<이름>/plan` | viewers 만 | 그 기기의 plan 을 전달한다 |
 | core `POST /api/devices/<id>/modules/<이름>/apply?plan_id=…` | viewers 만, `X-Jarvis-Action: module-apply` | 그 기기에 전달한다. 화면에 보인 계획의 plan_id 만 보내므로, 그사이 계획이 바뀌었으면 apply 는 stale 이 된다 |
 
 - 게이트웨이는 모듈 명령을 하위 프로세스(`python -m jarvis module <이름> <동작> --json`)로 돌리고 출력은 임시 파일로 받는다. 모듈 CLI 는 fd 1 을 바꾸므로 서버 스레드에서 부르지 않는다. 출력이 JSON 이 아니면 종료 코드만 `error` 로 내고 표준 오류의 마지막 줄은 게이트웨이 로그에만 남긴다.
-- HEAD 요청은 점검·계획을 돌리지 않는다. 적용 요청(core: viewer IP·기기·모듈·plan_id 앞 12자, 게이트웨이: 시작·끝)은 로그에 한 줄씩 남긴다. 결과 본문과 페어링 값은 남기지 않는다.
-- 모듈 apply 의 단계 오류 문구는 페어링 링크를 가리고(`redact_reason`), 시간 초과는 명령 이름과 시간만 적는다(argv 에 페어링 링크가 들어갈 수 있다).
+- HEAD 요청은 점검·계획을 돌리지 않는다. 적용 요청(core: viewer IP·기기·모듈·plan_id 앞 12자, 게이트웨이: 시작·끝)은 로그에 한 줄씩 남긴다. 결과 본문은 남기지 않는다.
 - 승인 대기 목록과 휴대폰 알림(D7, O2)은 아직 없다. 지금은 viewer 가 화면에서 계획을 보고 실행을 누르는 것이 승인이다.
 
 ## 훅 모듈
@@ -150,7 +107,7 @@ ai-setup 의 update-ai(`jarvis/modules/setup/res/update/update_ai.py`)를 감싼
 
 > 상태: 2026-11-04 사용자 승인으로 추가했다(설계 비평 반영). CLI 구현됨, 단위 GREEN(Windows·실제 기기 미검증). 모듈이 아니라 머리말 범위(모듈 계약) 밖의 로컬 CLI 다.
 
-코드는 `jarvis/core_trust.py` 다. 게이트웨이 설정(`$JARVIS_CONFIG` 또는 `~/.config/jarvis/config.toml`)의 최상위 `core` 목록 한 키만 고친다. `core` 는 셸 권한급 신뢰(`/api/orca`·모듈 apply·업데이트를 부를 수 있는 tailnet IP)라서 바꾸는 권한은 그 기기의 셸 사용자에게만 둔다. 그래서 각 기기에서 로컬로 도는 CLI 로만 있고, HTTP 경로·화면 버튼·`module.MODULES` 등록은 없다.
+코드는 `jarvis/core_trust.py` 다. 게이트웨이 설정(`$JARVIS_CONFIG` 또는 `~/.config/jarvis/config.toml`)의 최상위 `core` 목록 한 키만 고친다. `core` 는 셸 권한급 신뢰(사용량·로그인·계정 전환·모듈 apply·업데이트를 부를 수 있는 tailnet IP)라서 바꾸는 권한은 그 기기의 셸 사용자에게만 둔다. 그래서 각 기기에서 로컬로 도는 CLI 로만 있고, HTTP 경로·화면 버튼·`module.MODULES` 등록은 없다.
 
     python -m jarvis core-trust plan  [--add <IP> | --remove <IP>] --json
     python -m jarvis core-trust apply (--add <IP> | --remove <IP>) --plan-id <sha256> --json
@@ -207,7 +164,7 @@ ai-setup 의 update-ai(`jarvis/modules/setup/res/update/update_ai.py`)를 감싼
     | 502 | 미도달(연결 실패·연속 실패·첫 점검 시간 초과) |
 
   - 옛 IP 를 빼는 좁히기(`--remove`)는 새 core 에서 200 을 받은 기기에서만 한다. 501·502 를 받은 기기는 미반영으로 남긴다.
-  - 서비스가 읽는 설정 경로는 `/api/snapshot` 의 `config_path` 로 대조한다. 확인에 페어링 코드 경로는 쓰지 않는다.
+  - 서비스가 읽는 설정 경로는 `/api/snapshot` 의 `config_path` 로 대조한다.
 - 전환 순서(넓히기 → 확인 → 인그레스 → 좁히기)와 수동 단계(새 core 설정·proxy_key 회전·재시작, pit5 Caddy, 옛 core 정리), 기기별 실행 위치와 python, 최소 버전 확인은 `README.md` 가 소유한다.
 
 ## SSH 기기
@@ -259,7 +216,7 @@ tailnet 으로는 닿지 않고 SSH 로만 닿는 기기(예: 다른 tailnet 의
 - 스크립트 머리(`PRE`)는 저장소로 이동하고 venv python 을 확인한다. 둘 중 하나라도 없으면 종료 코드 90 이다.
 - `PRE` 는 `PATH` 를 `deploy/jarvis.plist` 와 같게 두고 `PYTHONIOENCODING=utf-8` 을 export 한다(원격 로케일과 무관하게 출력을 읽는다).
 - 보내는 하위 명령은 `module`·`update`·`--version` 과 재시작 스크립트뿐이다. `core-trust` 와 `module … uninstall` 은 원격으로 실행하지 않는다.
-- orca 모듈 apply 도 다른 모듈과 같이 허용한다. GUI 없는 SSH 세션에서 실패하는 단계는 모듈 결과(`failed`·`deferred`)로 보인다.
+- 모듈 apply 는 모듈을 가리지 않고 허용한다. GUI 없는 SSH 세션에서 실패하는 단계는 모듈 결과(`failed`·`deferred`)로 보인다.
 - ssh 를 실행하기 전에 스냅샷의 `meta.version` 을 본다(게이트). 근거는 시험한 최저 판 이상만 허용한다는 것이다.
   - 스냅샷이 없으면 502 다.
   - `launch.key` 로 읽지 못하거나 1.7.8 보다 낮으면 501 `"이 기기의 jarvis <v> 는 SSH 조작을 지원하지 않습니다(그 기기에서 직접 갱신)"` 다.
@@ -308,22 +265,19 @@ tailnet 으로는 닿지 않고 SSH 로만 닿는 기기(예: 다른 tailnet 의
 
 ### 지원하지 않는 조작
 
-다음 요청은 ssh 도 HTTP 도 보내지 않고 501 `{error: "SSH 로 닿는 기기는 이 조작을 지원하지 않습니다(그 기기에서 직접)"}` 를 준다. 페어링은 `{supported: false, error}` 를 준다.
+다음 요청은 ssh 도 HTTP 도 보내지 않고 501 `{error: "SSH 로 닿는 기기는 이 조작을 지원하지 않습니다(그 기기에서 직접)"}` 를 준다.
 
-- 페어링 `/orca`, `orca/issue`
-- Orca 업데이트 확인·실행
-- 사용량(독립 포함)
+- 사용량
 - 로그인 상태·시작
 - 계정 전환
 
-이유는 둘이다. 이 조작들은 CLI 가 없다. 그리고 페어링 코드·로그인 코드·계정 이메일이 SSH 경로를 지나지 않게 하기 위해서다.
+이유는 둘이다. 이 조작들은 CLI 가 없다. 그리고 로그인 코드·계정 이메일이 SSH 경로를 지나지 않게 하기 위해서다.
 
 ### 일괄 동작의 순서
 
 일괄 동작은 지금 코드 순서를 그대로 둔다.
 
 - `usage_all`·`jarvis_update_all`·`/api/devices/modules` 는 폴링 실패(502)를 SSH 가드(501)보다 먼저 본다. 폴링이 실패 중인 기기는 묻지 않고 502 다. 그래서 SSH 기기의 501 은 폴링이 성공 중일 때만 나온다.
-- `orca_update_all` 은 폴링 상태를 보지 않으므로 SSH 기기는 늘 501 이다.
 - `jarvis_update_all` 에서 SSH 기기는 core 자신보다 먼저 처리한다.
 
 ### 전제 (사용자 쪽, jarvis 는 설정하지 않는다)
@@ -343,7 +297,7 @@ tailnet 으로는 닿지 않고 SSH 로만 닿는 기기(예: 다른 tailnet 의
 
 ### 위험
 
-- 프로세스 사이 잠금이 없다. core 의 잠금은 core 가 시작한 조작만 막고, 대상 게이트웨이가 스스로 하는 작업(기동 때 recover, 그 기기 화면에서 시작한 작업)과는 겹칠 수 있다.
+- 프로세스 사이 잠금이 없다. core 의 잠금은 core 가 시작한 조작만 막고, 대상 게이트웨이가 스스로 하는 작업(그 기기 화면에서 시작한 작업)과는 겹칠 수 있다.
 - apply 중 연결이 끊기면 core 는 `interrupted` 로 두지만 원격은 계속 돌 수 있다. 원격 잠금이 없으므로 다시 apply 하면 원격에서 겹칠 수 있다. core 가 재시작하면 SSH 작업 목록은 사라진다.
 - 연결 공유 마스터는 setsid 로 살아남지만, ProxyJump 의 점프 프로세스는 마스터를 만든 조회 호출의 프로세스 그룹에 남는다. 그 조회가 시간 초과로 끝나면 마스터 연결이 끊기고 다음 조회가 다시 만든다. 조작은 연결을 공유하지 않으므로 영향이 없다.
 - 판 차이: 게이트는 서비스의 판(스냅샷)을 보지만 원격 CLI 는 `current.json` 이 가리키는 판으로 돈다. 받아만 두고 재시작하지 않은 기기는 둘이 다를 수 있다.
