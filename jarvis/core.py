@@ -519,19 +519,19 @@ class Core:
         return self._ask(i, req, USAGE_TIMEOUT_S, "사용량 조회를")
 
     def usage_login(self, i, provider):
-        """다시 로그인 버튼: 그 게이트웨이 POST /api/orca/login 을 그대로 전달한다(로그인 URL·일회용 코드)."""
-        req = urllib.request.Request(self.devices[i]["url"] + "/api/orca/login?provider=" + urllib.parse.quote(provider),
+        """다시 로그인 버튼: 그 게이트웨이 POST /api/usage/login 을 그대로 전달한다(로그인 URL·일회용 코드)."""
+        req = urllib.request.Request(self.devices[i]["url"] + "/api/usage/login?provider=" + urllib.parse.quote(provider),
                                      data=b"", method="POST", headers={"X-Jarvis-Action": "usage-login"})
         return self._ask(i, req, LOGIN_TIMEOUT_S, "다시 로그인을")
 
     def usage_login_status(self, i, provider):
-        """다시 로그인 창이 완료를 알아채도록 그 게이트웨이 GET /api/orca/login 을 전달한다."""
-        req = urllib.request.Request(self.devices[i]["url"] + "/api/orca/login?provider=" + urllib.parse.quote(provider))
+        """다시 로그인 창이 완료를 알아채도록 그 게이트웨이 GET /api/usage/login 을 전달한다."""
+        req = urllib.request.Request(self.devices[i]["url"] + "/api/usage/login?provider=" + urllib.parse.quote(provider))
         return self._ask(i, req, TIMEOUT_S, "다시 로그인을")
 
     def usage_switch(self, i, slot):
-        """이 계정 사용 버튼: 그 게이트웨이 POST /api/orca/account 를 그대로 전달한다(Claude 의 hswap 슬롯)."""
-        req = urllib.request.Request(self.devices[i]["url"] + "/api/orca/account?slot=" + urllib.parse.quote(slot),
+        """이 계정 사용 버튼: 그 게이트웨이 POST /api/usage/account 를 그대로 전달한다(Claude 의 hswap 슬롯)."""
+        req = urllib.request.Request(self.devices[i]["url"] + "/api/usage/account?slot=" + urllib.parse.quote(slot),
                                      data=b"", method="POST", headers={"X-Jarvis-Action": "usage-account"})
         return self._ask(i, req, SWITCH_TIMEOUT_S, "계정 전환을")
 

@@ -306,7 +306,7 @@ def make_handler(collector, core=None):
                             return self._json({"error": "페어링 코드는 허용된 기기(viewers)에서만 발급할 수 있습니다"}, head, 403)
                         code, body = core.orca_issue(dev, scope)
                         return self._json(body, head, code)
-                    if path == "/api/orca/login":
+                    if path == "/api/usage/login":
                         if not self._trusted(config.CORE):
                             return self._json({"error": "core 로 지정한 기기만 부를 수 있습니다"}, head, 403)
                         code, body = cli_login.start((parse_qs(u.query).get("provider") or [""])[0])
@@ -319,7 +319,7 @@ def make_handler(collector, core=None):
                             return self._json({"error": "로그인은 허용된 기기(viewers)에서만 할 수 있습니다"}, head, 403)
                         code, body = core.usage_login(dev, (parse_qs(u.query).get("provider") or [""])[0])
                         return self._json(body, head, code)
-                    if path == "/api/orca/account":
+                    if path == "/api/usage/account":
                         if not self._trusted(config.CORE):
                             return self._json({"error": "core 로 지정한 기기만 부를 수 있습니다"}, head, 403)
                         code, body = claude_accounts.switch((parse_qs(u.query).get("slot") or [""])[0])
@@ -390,7 +390,7 @@ def make_handler(collector, core=None):
                     if not self._trusted(config.CORE):
                         return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
                     return self._json(orca_update.check(), head)
-                if path == "/api/orca/login":
+                if path == "/api/usage/login":
                     if not self._trusted(config.CORE):
                         return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
                     return self._json(cli_login.status((parse_qs(u.query).get("provider") or [""])[0]), head)
