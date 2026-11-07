@@ -20,7 +20,7 @@ import threading
 import time
 import urllib.request
 
-from . import __version__, launch, orca_issue, orca_update, release_download, tray
+from . import __version__, launch, occupancy, release_download, tray
 
 REPO = "thsvkd/jarvis"
 MANIFEST = f"https://github.com/{REPO}/releases/latest/download/manifest.json"
@@ -29,6 +29,7 @@ MAX_UNPACKED = 256 << 20
 KEEP = 2  # 지금 버전과 되돌아갈 버전
 VER_RE = re.compile(r"^\d{1,4}\.\d{1,4}\.\d{1,4}$")
 _lock = threading.Lock()
+occupancy.register(occupancy.SELF_UPDATE, lambda: _lock.locked())
 
 
 def latest():
@@ -107,12 +108,11 @@ def _prune(keep):
 
 def start(running=__version__):
     """(http 상태, 응답). 응답의 restart 가 참이면 호출자가 restart() 를 부른다."""
-    if orca_update.job and orca_update.job.get("state") == "running":
+    if occupancy.held(occupancy.ORCA_UPDATE):
         return 409, {"error": "Orca 업데이트가 끝난 뒤에 갱신하세요"}
-    if orca_issue.job and orca_issue.job.get("state") == "running":
+    if occupancy.held(occupancy.ORCA_ISSUE):
         return 409, {"error": "페어링 코드 발급이 끝난 뒤에 갱신하세요"}
-    from . import modules_api  # 적용 중에 재시작·갱신하면 설치가 반쯤 남는다
-    if modules_api.running():
+    if occupancy.held(occupancy.MODULE_APPLY):  # 적용 중에 재시작·갱신하면 설치가 반쯤 남는다
         return 409, {"error": "모듈 적용이 끝난 뒤에 갱신하세요"}
     if not _lock.acquire(blocking=False):
         return 409, {"error": "이미 갱신하고 있습니다"}

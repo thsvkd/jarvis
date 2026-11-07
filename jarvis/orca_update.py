@@ -28,7 +28,7 @@ import uuid
 
 import psutil
 
-from . import config, orca, orca_issue, orca_install, orca_rpc, orca_sessions
+from . import config, occupancy, orca, orca_issue, orca_install, orca_rpc, orca_sessions
 from .release_download import open_url
 from .util import run
 
@@ -40,6 +40,9 @@ LOCK = os.path.join(config.STATE_DIR, "orca-update.lock")  # 프로세스 사이
 VER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 _lock = orca_issue._lock  # 발급과 갱신은 같은 재진입 잠금으로 배타적으로 시작한다.
 job = None  # {state, phase, error, from_version, to_version, app, skills, started_at, finished_at}
+# snapshot 을 쓰지 않는다: modules_api._busy 가 _job_lock 을 쥔 채 묻고, start 는 _lock 을 쥔 채 _job_lock 을 잡는다
+occupancy.register(occupancy.ORCA_UPDATE, lambda: job if (job or {}).get("state") == "running" else None)
+occupancy.register(occupancy.ORCA_UPDATE_MARK, lambda: os.path.exists(MARK))
 
 
 def version_key(v):
@@ -636,11 +639,9 @@ def start(expect=None):
             return 409, {"error": "이미 업데이트하고 있습니다", "update": dict(job)}
         if orca_issue.job and orca_issue.job.get("state") == "running":
             return 409, {"error": "페어링 코드 발급이 끝난 뒤에 업데이트하세요", "issue": orca_issue.job}
-        from . import self_update  # 받은 뒤 재시작하면 이 작업이 끊긴다
-        from . import modules_api  # 적용 중에 재시작·갱신하면 설치가 반쯤 남는다
-        if modules_api.running():
+        if occupancy.held(occupancy.MODULE_APPLY):  # 적용 중에 재시작·갱신하면 설치가 반쯤 남는다
             return 409, {"error": "모듈 적용이 끝난 뒤에 업데이트하세요"}
-        if self_update._lock.locked():
+        if occupancy.held(occupancy.SELF_UPDATE):  # 받은 뒤 재시작하면 이 작업이 끊긴다
             return 409, {"error": "jarvis 갱신이 끝난 뒤에 업데이트하세요"}
         if not _lock_file():
             return 409, {"error": "다른 프로세스가 Orca 를 업데이트하고 있습니다"}

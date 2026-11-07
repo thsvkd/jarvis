@@ -22,7 +22,7 @@ import time
 
 import psutil
 
-from . import config, orca
+from . import config, occupancy, orca
 from .util import run
 
 SCOPE = {"desktop": "runtime", "mobile": "mobile"}
@@ -31,6 +31,7 @@ COOLDOWN_S = 900  # 실패한 뒤 다시 누를 수 있기까지(누를 때마�
 MARK = os.path.join(config.STATE_DIR, "orca-issue.json")  # 발급 중 표시: jarvis 가 도중에 죽으면 다음 기동 때 Orca 를 되살린다
 _lock = threading.RLock()
 job = None  # {"scope", "state": running|done|failed, "error", "started_at", "finished_at"}
+occupancy.register(occupancy.ORCA_ISSUE, lambda: job if (job or {}).get("state") == "running" else None)
 
 
 def flags(argv, scope):
@@ -97,16 +98,14 @@ def start(scope, address, port):
     with _lock:
         if job and job["state"] == "running":
             return 409, {"error": "이미 발급하고 있습니다", "issue": job}
-        from . import orca_update
-        if os.path.exists(orca_update.MARK):
+        if occupancy.held(occupancy.ORCA_UPDATE_MARK):
             return 409, {"error": "이전 Orca 업데이트의 복구·세션 검증이 끝난 뒤에 발급하세요"}
-        if orca_update.job and orca_update.job.get("state") == "running":
-            return 409, {"error": "Orca 업데이트가 끝난 뒤에 발급하세요", "update": orca_update.snapshot()}
-        from . import self_update  # 받은 뒤 재시작하면 발급이 끊긴다
-        from . import modules_api  # 적용 중에 재시작·갱신하면 설치가 반쯤 남는다
-        if modules_api.running():
+        update = occupancy.held(occupancy.ORCA_UPDATE)
+        if update:
+            return 409, {"error": "Orca 업데이트가 끝난 뒤에 발급하세요", "update": dict(update)}
+        if occupancy.held(occupancy.MODULE_APPLY):  # 적용 중에 재시작·갱신하면 설치가 반쯤 남는다
             return 409, {"error": "모듈 적용이 끝난 뒤에 발급하세요"}
-        if self_update._lock.locked():
+        if occupancy.held(occupancy.SELF_UPDATE):  # 받은 뒤 재시작하면 발급이 끊긴다
             return 409, {"error": "jarvis 갱신이 끝난 뒤에 발급하세요"}
         if job and job["state"] == "failed" and time.time() - job["finished_at"] < COOLDOWN_S:
             return 429, {"error": f"직전 발급이 실패했습니다. {COOLDOWN_S // 60}분 뒤에 다시 시도하세요", "issue": job}

@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
-from . import config, module
+from . import config, module, occupancy
 from .core import PRE, jarvis_line
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -71,14 +71,16 @@ def running():
         return job.get("state") == "running" or any(j.get("state") == "running" for j in ssh_jobs.values())
 
 
+occupancy.register(occupancy.MODULE_APPLY, lambda: running())
+
+
 def _busy():
     """이 서버에서 기기를 바꾸는 다른 작업. 모듈 적용과 동시에 돌면 서로를 끊거나(재시작) 같은 파일을 쓴다."""
-    from . import orca_issue, orca_update, self_update
-    if self_update._lock.locked():
+    if occupancy.held(occupancy.SELF_UPDATE):
         return "jarvis 갱신이 끝난 뒤에 적용하세요"
-    if (orca_update.job or {}).get("state") == "running" or os.path.exists(orca_update.MARK):
+    if occupancy.held(occupancy.ORCA_UPDATE) or occupancy.held(occupancy.ORCA_UPDATE_MARK):
         return "Orca 업데이트(복구·세션 검증 포함)가 끝난 뒤에 적용하세요"
-    if (orca_issue.job or {}).get("state") == "running":
+    if occupancy.held(occupancy.ORCA_ISSUE):
         return "페어링 코드 발급이 끝난 뒤에 적용하세요"
     return None
 
