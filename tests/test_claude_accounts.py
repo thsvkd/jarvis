@@ -10,7 +10,7 @@ import unittest
 import urllib.request
 from unittest import mock
 
-from jarvis import caam_usage, claude_accounts, independent_usage, util
+from jarvis import claude_accounts, independent_usage, util
 
 _GUARDS = []
 LIVE_IDENTITY = claude_accounts._live_identity  # StoreCase 가 가짜로 바꾸기 전의 실제 함수

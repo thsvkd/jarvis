@@ -1,13 +1,21 @@
 """서버 접근 통제: 본문 거부, 맞춤 헤더, core·viewers 의 tailnet 판정, 프록시 경유. 이전 Orca 경로는 남지 않는다."""
 import email.message
 import json
+import os
+import site
+import subprocess
+import sys
+import tempfile
 import threading
 import unittest
 import urllib.error
 import urllib.request
+from pathlib import Path
 from unittest import mock
 
 from jarvis import config, server
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class FakeCollector:
@@ -170,6 +178,25 @@ class CheckTest(unittest.TestCase):
         self.assertTrue(self.handler("172.18.0.2", X_Forwarded_For="8.8.8.8, 192.168.0.5")._peer_ok())
         self.assertFalse(self.handler("172.18.0.2", X_Forwarded_For="192.168.0.5, 8.8.8.8")._peer_ok())
         self.assertFalse(self.handler("172.18.0.3", X_Forwarded_For="192.168.0.5")._peer_ok())  # Caddy 가 아닌 컨테이너
+
+
+class EntryPointTest(unittest.TestCase):
+    """실제 진입점을 임시 홈과 빈 설정으로 돌린다(임시 홈이면 런처가 받아 둔 릴리스로 넘어가지 않고 이 코드가 돈다)."""
+
+    def run_cli(self, *args):
+        with tempfile.TemporaryDirectory() as home:
+            env = {**os.environ, "HOME": home, "JARVIS_CONFIG": os.devnull, "PYTHONUSERBASE": site.getuserbase()}
+            return subprocess.run([sys.executable, "-m", "jarvis", *args], cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
+
+    def test_version_and_doctor_run_and_the_orca_module_is_unknown(self):
+        r = self.run_cli("--version")
+        self.assertEqual((r.returncode, r.stdout.startswith("jarvis ")), (0, True), r.stderr)
+        r = self.run_cli("module", "doctor", "status", "--json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["module"], "doctor")
+        r = self.run_cli("module", "orca", "status", "--json")
+        self.assertEqual((r.returncode, r.stdout), (1, ""), r.stderr)
+        self.assertIn("사용법", r.stderr)
 
 
 if __name__ == "__main__":
