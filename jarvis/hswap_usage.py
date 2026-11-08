@@ -37,8 +37,9 @@ STATES = {
     "rate_limited": ("프로바이더가 요청을 제한하고 있습니다.", True),
     "error": ("사용량을 읽지 못했습니다.", False),
 }
-# 알려진 detail(hswap 0.2.1 adapters/grok.py)만 한국어로 바꿔 쓴다
-DETAILS = {"Grok reported no included-credit usage": "포함 크레딧 사용량이 없습니다(요금제·잔액만 확인)."}
+# Grok 은 포함 크레딧 사용률이 0 이면 creditUsagePercent 를 생략한다(protobuf 기본값). 요금제·측정 시각이 있는 이 답은 0% 다.
+# 2026-11-09 s2 실측: 같은 답에서 Grok 의 /usage 가 "Weekly limit (SuperGrok) 0%" 를 보였다
+NO_CREDIT_USAGE = "Grok reported no included-credit usage"
 # 쉬는 OpenCode Console 계정은 활성일 때만 재진다(hswap adapters/opencode.py). 값 없이 이 답이면 오류가 아니라 보일 것이 없는 행이다
 INACTIVE_CONSOLE = "measured only while it is the active OpenCode Console account"
 WINDOW_NAMES = {"weekly": "weekly", "monthly": "monthly"}  # 길이를 모르는 창(OpenCode 월간 등)은 이름으로 정한다
@@ -85,8 +86,10 @@ def account(row):
     extra, at = _extra(u.get("balance")), claude_accounts._sec(u.get("measuredAt"))
     state = _str(u.get("state"))
     note, attention = STATES.get(state, (None, False))
-    note = DETAILS.get(_str(u.get("detail")), note)
     plan = (_str(u.get("plan")) or "")[:40]  # 별칭(alias)은 사람이 붙인 이름이라 내보내지 않는다
+    if not windows and state == "unknown" and _str(u.get("detail")) == NO_CREDIT_USAGE and plan and at:
+        # shortcut: hswap 이 기간 종류와 리셋 시각을 넘기지 않아 주간·리셋 미상으로 둔다. hswap 이 period 를 내보내면 그 값을 쓴다
+        windows, note = [{"key": "weekly", "used": 0, "resets_at": None}], None
     has = bool(windows or extra or (plan and at))
     if not has and state == "stale":  # 이전 값을 줄 측정이 아직 한 번도 없었다(토큰 갱신 대기 등)
         note = "아직 잰 값이 없습니다(hswap 이 지금은 재지 않았습니다)."

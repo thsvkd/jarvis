@@ -121,16 +121,24 @@ class ReadTest(FakeHswapCase):
         empty = hswap_usage.account(acct("grok", state="stale", measuredAt=None, detail="the active login's token is due for refresh"))
         self.assertEqual((empty["status"], empty["error"]), ("error", "아직 잰 값이 없습니다(hswap 이 지금은 재지 않았습니다)."))
 
-    def test_grok_without_windows_shows_plan_and_balance(self):
+    def test_grok_without_credit_percent_is_zero_percent(self):
         """covers: USAGE-3, USAGE-8"""
-        # s2 실측(2026-11-08): 창 없이 요금제·잔액·측정 시각만 있다
+        # s2 실측(2026-11-08): 창 없이 요금제·잔액·측정 시각만 있다. Grok 의 /usage 는 같은 때 주간 0% 를 보였다(2026-11-09)
         grok = acct("grok", state="unknown", source="grok-acp", plan="SuperGrok", detail="Grok reported no included-credit usage",
                     balance={"currency": "USD", "prepaidBalance": 0.0, "onDemandCap": 0.0, "onDemandUsed": 0.0})
         self.fake({"schemaVersion": 1, "harnesses": [{"harness": "grok", "accounts": [grok]}], "errors": {}})
         row, = read("grok")
-        self.assertEqual((row["status"], row["plan"], row["windows"]), ("ok", "SuperGrok", []))
-        self.assertEqual(row["note"], hswap_usage.DETAILS["Grok reported no included-credit usage"])
+        self.assertEqual((row["status"], row["plan"], row["note"]), ("ok", "SuperGrok", None))
+        self.assertEqual(row["windows"], [{"key": "weekly", "used": 0, "resets_at": None}])
         self.assertEqual(row["extra"], {"unit": "currency", "spent": 0.0, "limit": 0.0, "currency": "USD", "enabled": False})
+
+    def test_grok_without_plan_or_measure_time_stays_unknown(self):
+        """covers: USAGE-3, USAGE-8"""
+        # 요금제나 측정 시각이 없으면 0% 라고 말할 근거가 없다
+        for extra in ({"plan": None}, {"measuredAt": None}):
+            grok = acct("grok", **{"state": "unknown", "source": "grok-acp", "plan": "SuperGrok", "detail": "Grok reported no included-credit usage", **extra})
+            row = hswap_usage.account(grok)
+            self.assertEqual((row["windows"], row["status"]), ([], "error"), extra)
 
     def test_opencode_keeps_console_logins_and_names_unsized_windows(self):
         """covers: USAGE-3, USAGE-8"""
