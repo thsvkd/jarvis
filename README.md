@@ -309,6 +309,8 @@ s2(Linux)에서 `sys.platform` 을 darwin 으로 바꿔 크래시 없이 스냅�
 curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh -s -- --core 100.107.29.19
 ```
 
+릴리스에도 설치기가 자산으로 올라가 있어 `https://github.com/thsvkd/jarvis/releases/latest/download/install.sh` 로 받아도 같다(릴리스 본문에 한 줄 안내가 있다. `tools/release.py`).
+
 `install.sh` 는 uv 로 Python venv(`~/.local/share/jarvis/venv`)를 만들고, 최신 릴리스 묶음을 sha256 으로 확인해 `~/.local/share/jarvis/app` 에 푼다.
 그다음 설정 파일과 LaunchAgent(`dev.jarvis`, Linux 는 systemd 사용자 유닛 `jarvis`)를 만들고, 모듈(훅·셋업)을 plan 으로 보인 뒤 그 plan_id 로 apply 한다.
 이미 있는 설정·LaunchAgent·유닛·코드는 덮어쓰지 않으므로 다시 실행해도 된다. 옛 배치가 있으면 [실행본 이전](#실행본-이전-180)을 한다. Tailscale·하네스 로그인과 core 의 `devices` 등록은 직접 한다.
@@ -368,6 +370,8 @@ Windows 는 게이트웨이로만 돈다: 호스트 자원(CPU·메모리·디�
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/thsvkd/jarvis/main/install.ps1))) -Core 100.107.29.19
 ```
+
+인자가 없으면 `irm https://github.com/thsvkd/jarvis/releases/latest/download/install.ps1 | iex` 로도 된다.
 
 ```powershell
 # 저장소: git clone https://github.com/thsvkd/jarvis.git (갱신은 core 의 jarvis 업데이트 버튼이 GitHub 릴리스를 받는다)
