@@ -164,6 +164,13 @@ const guideDialog = element("ulDlg");
 guideDialog.showModal = () => { guideDialog.open = true; };
 click({}, "ulHot");
 assert.match(rendered(), /data-guide="first"/);
+// covers: USAGE-10. 게이트웨이가 logins 에 claude 를 알리면 로그인 이상 기기 줄에 Claude 로그인 버튼이 안내 버튼과 함께 나온다
+assert.doesNotMatch(rendered(), /data-lp="claude"/);
+devices[0].logins = ["claude"];
+click({ prov: "all" });
+assert.match(rendered(), /data-login="first" data-lp="claude">Claude 다시 로그인/);
+delete devices[0].logins;
+click({ prov: "all" });
 click({}, "ulHot");
 click({ prov: "codex" });
 assert.doesNotMatch(rendered(), /data-guide/);

@@ -38,6 +38,7 @@ class Gateway(BaseHTTPRequestHandler):
 
     def do_POST(self):
         Gateway.posted = (self.path, self.headers.get("X-Jarvis-Action"))
+        Gateway.posted_code = self.headers.get("X-Jarvis-Login-Code")
         self.do_GET()
 
 
@@ -267,6 +268,32 @@ class RouteTest(unittest.TestCase):
                 self.assertIn("갱신 필요", json.loads(e.exception.read())["error"])
         finally:
             server.client_kind, config.VIEWERS = kind, vw
+
+    def test_claude_login_code_travels_in_a_header_and_is_checked_first(self):
+        """covers: USAGE-10. 인증 코드는 URL·본문이 아니라 헤더로 전달하고, 모양이 틀리면 게이트웨이로 보내지 않는다"""
+        Gateway.routes["/api/usage/login?provider=claude"] = (200, b'{"submitted":true}', False)
+        Gateway.posted = Gateway.posted_code = None
+        self.assertEqual(self.core.usage_login("gw", "claude", "bad code\r\nX: y")[0], 400)
+        self.assertIsNone(Gateway.posted)
+        self.assertEqual(self.core.usage_login("gw", "claude", "abcd1234#efgh5678"), (200, {"submitted": True}))
+        self.assertEqual((Gateway.posted, Gateway.posted_code),
+                         (("/api/usage/login?provider=claude", "usage-login"), "abcd1234#efgh5678"))
+        self.core.usage_login("gw", "claude")  # 코드가 없으면 로그인 시작이고 헤더도 없다
+        self.assertIsNone(Gateway.posted_code)
+
+    def test_gateway_claude_login_code_goes_to_submit_not_start(self):
+        """covers: USAGE-10. 게이트웨이는 코드 헤더가 있으면 그 CLI 로 제출하고, 없으면 로그인을 시작한다"""
+        post = lambda headers: urllib.request.Request(self.base + "/api/usage/login?provider=claude", data=b"", method="POST",
+                                                      headers={"X-Jarvis-Action": "usage-login", **headers})
+        with mock.patch.object(server.cli_login, "start", return_value=(200, {"url": "u"})) as start, \
+                mock.patch.object(server.cli_login, "submit", return_value=(200, {"submitted": True})) as submit, \
+                mock.patch.object(server, "client_kind", return_value="tailnet"), mock.patch.object(config, "CORE", ["127.0.0.1"]):
+            with urllib.request.urlopen(post({})) as r:
+                self.assertEqual(json.loads(r.read()), {"url": "u"})
+            with urllib.request.urlopen(post({"X-Jarvis-Login-Code": "abcd1234#efgh5678"})) as r:
+                self.assertEqual(json.loads(r.read()), {"submitted": True})
+        start.assert_called_once_with("claude")
+        submit.assert_called_once_with("claude", "abcd1234#efgh5678")
 
     def test_gateway_usage_login_and_account_answer_only_the_configured_core(self):
         """게이트웨이의 /api/usage/login·account 는 설정 core 만 부르고, 맞춤 헤더 값은 그대로다"""

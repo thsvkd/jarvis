@@ -2,6 +2,7 @@ import os
 import shutil
 import stat
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -49,6 +50,96 @@ class CliLoginTest(unittest.TestCase):
         self.assertIn("not logged in", o["error"])
         cli_login._jobs["codex"]["proc"].wait()
         self.assertEqual(cli_login.status("codex"), {"state": "done"})  # 코드 없이 끝났어도 종료 코드 0 이면 저장된 것으로 본다
+
+
+FAKE_CLAUDE = """#!/bin/sh
+echo 'Opening browser to sign in…'
+echo 'If the browser did not open, visit: https://claude.example.com/oauth/authorize?code=true&state=s'
+printf 'Paste code here if prompted > '
+read line
+[ "$line" = "good1234#state5678" ]
+"""
+
+
+class ClaudeLoginTest(unittest.TestCase):
+    """covers: USAGE-10. Claude 는 URL 로 로그인한 사람이 받은 코드를 CLI 표준 입력으로 넘기고, 끝나면 hswap 이 저장한다."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.exe, self.hswap, self.marker = (os.path.join(self.dir, n) for n in ("claude", "hswap", "added"))
+        for path, body in ((self.exe, FAKE_CLAUDE), (self.hswap, f"#!/bin/sh\necho \"$@\" > {self.marker}\n")):
+            with open(path, "w") as f:
+                f.write(body)
+            os.chmod(path, stat.S_IRWXU)
+        self.patches = [mock.patch.dict(cli_login.CLIS, {"claude": lambda: self.exe}),
+                        mock.patch.object(cli_login.claude_accounts, "binary", return_value=self.hswap)]
+        for p in self.patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+        job = cli_login._jobs.pop("claude", None)
+        if job:
+            job["proc"].kill()
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def wait_state(self, want):
+        for _ in range(100):
+            if cli_login.status("claude")["state"] == want:
+                return want
+            time.sleep(0.05)
+        return cli_login.status("claude")["state"]
+
+    def test_start_gives_the_url_and_asks_for_a_pasted_code(self):
+        st, o = cli_login.start("claude")
+        self.assertEqual((st, o["url"], o["code"], o["paste"]), (200, "https://claude.example.com/oauth/authorize?code=true&state=s", None, True))
+        self.assertEqual(cli_login.status("claude"), {"state": "waiting"})
+        self.assertEqual(cli_login.start("claude")[1]["url"], o["url"])  # 기다리는 로그인은 다시 띄우지 않는다
+
+    def test_good_code_finishes_the_cli_then_hswap_saves_it(self):
+        cli_login.start("claude")
+        self.assertEqual(cli_login.submit("claude", "good1234#state5678"), (200, {"submitted": True}))
+        self.assertEqual(self.wait_state("done"), "done")
+        with open(self.marker) as f:
+            self.assertEqual(f.read().strip(), "claude add")
+
+    def test_bad_code_fails_and_nothing_is_saved(self):
+        cli_login.start("claude")
+        self.assertEqual(cli_login.submit("claude", "wrong123#state5678")[0], 200)
+        self.assertEqual(self.wait_state("failed"), "failed")
+        self.assertEqual(cli_login.status("claude"), {"state": "failed"})  # CLI 가 실패하면 저장 실패가 아니다
+        self.assertFalse(os.path.exists(self.marker))
+
+    def test_submit_checks_provider_shape_and_a_waiting_login(self):
+        self.assertEqual(cli_login.submit("codex", "good1234#state5678")[0], 400)  # device-code 프로바이더는 코드를 받지 않는다
+        self.assertEqual(cli_login.submit("claude", "good1234#state5678")[0], 409)  # 기다리는 로그인이 없다
+        cli_login.start("claude")
+        for bad in ("", "short", "a b c d e f g h", "good1234\nstate", "x" * 300, None, 12345678):
+            self.assertEqual(cli_login.submit("claude", bad)[0], 400, bad)
+
+    def test_start_refuses_claude_where_the_button_is_not_offered(self):
+        """버튼을 내지 않는 기기(키체인 macOS)는 직접 호출해도 CLI 를 띄우지 않는다"""
+        with mock.patch.object(cli_login, "sys", mock.Mock(platform="darwin")), \
+                mock.patch.object(cli_login.claude_accounts, "_keepalive", return_value=None):
+            self.assertEqual(cli_login.start("claude")[0], 404)
+        self.assertNotIn("claude", cli_login._jobs)
+
+    def test_cli_done_but_hswap_add_failed_is_reported_as_unsaved(self):
+        with open(self.hswap, "w") as f:
+            f.write("#!/bin/sh\nexit 3\n")
+        cli_login.start("claude")
+        cli_login.submit("claude", "good1234#state5678")
+        self.assertEqual(self.wait_state("failed"), "failed")
+        self.assertEqual(cli_login.status("claude"), {"state": "failed", "unsaved": True})  # 로그인은 이미 바뀌었다
+
+    def test_macos_offers_claude_login_only_with_file_store(self):
+        """키체인 기기는 로그인이 키체인과 파일로 갈라질 수 있어 버튼을 내지 않는다"""
+        for platform, keepalive, want in (("linux", None, True), ("win32", None, True), ("darwin", None, False),
+                                          ("darwin", {"store": "keychain"}, False), ("darwin", {"store": "file"}, True)):
+            with mock.patch.object(cli_login, "sys", mock.Mock(platform=platform)), \
+                    mock.patch.object(cli_login.claude_accounts, "_keepalive", return_value=keepalive):
+                self.assertEqual("claude" in cli_login.available(), want, (platform, keepalive))
 
 
 class FreshLoginTest(unittest.TestCase):

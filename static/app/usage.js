@@ -19,7 +19,7 @@
  const REFRESH=P.raw('<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 11.5A8 8 0 0 0 6.3 6.3L4 8.5"/><path d="M4 4v4.5h4.5"/><path d="M4 12.5a8 8 0 0 0 13.7 5.2l2.3-2.2"/><path d="M20 20v-4.5h-4.5"/></svg>');
  // 읽는 동안 disabled 대신 aria-disabled 를 쓴다: disabled 는 키보드 포커스를 버튼에서 떨어뜨린다(중복 클릭은 코드가 막는다)
  const refBtn=(id,label,busy)=>html`<button type="button" class="icon-btn sm" data-refresh="${id}" aria-label="${label}" title="${label}" aria-busy="${String(busy)}" aria-disabled="${String(busy)}">${REFRESH}</button>`;
- const LOGIN={codex:"Codex",grok:"Grok"}; // 게이트웨이가 device-code 로그인을 띄울 수 있는 CLI
+ const LOGIN={codex:"Codex",grok:"Grok",claude:"Claude"}; // 게이트웨이가 로그인을 띄울 수 있는 CLI(Claude 는 device-code 가 아니라 인증 코드를 화면에 붙여 넣는다)
 
  // ---------------------------------------------------------------- 값
  const pct=n=>n==null?"–":Math.round(n)+"%";
@@ -116,8 +116,8 @@
  const useBtn=(a,d)=>a.slot&&!a.active?html`<button type="button" class="seg-action" data-use="${d.id}" data-slot="${a.slot}" data-label="${a.label}" aria-disabled="${String(S.busy.has(d.id))}">이 계정 사용</button>`:"";
  // 인증 실패·조치 필요 계정에는 그 기기에서 다시 로그인할 버튼을 함께 낸다(요약 카드도 상세와 같다)
  const relogIf=(a,d,p)=>(isErr(a)&&kind(a)[0]==="auth"||a.attention)&&(d.logins||[]).includes(p.id)?relog(d,p.id):"";
- // 기기 단위 로그인 상태 한 줄. 정상이면 작게, 이상이면 주의 색과 안내 버튼(Claude 는 device-code 로그인이 없어 jarvis 가 대신 로그인하지 않는다)
- const loginLine=(d,p)=>p.login?html`<p class="${p.login.attention?"ul-err":"ul-age"}">${p.login.text}${p.login.note?" · "+p.login.note:""}</p>${p.login.attention?html`<button type="button" class="seg-action" data-guide="${d.id}">다시 로그인 방법</button>`:""}`:"";
+ // 기기 단위 로그인 상태 한 줄. 정상이면 작게, 이상이면 주의 색과 로그인(게이트웨이가 낼 수 있는 기기만)·안내 버튼
+ const loginLine=(d,p)=>p.login?html`<p class="${p.login.attention?"ul-err":"ul-age"}">${p.login.text}${p.login.note?" · "+p.login.note:""}</p>${p.login.attention?html`${(d.logins||[]).includes("claude")?relog(d,"claude"):""}<button type="button" class="seg-action" data-guide="${d.id}">다시 로그인 방법</button>`:""}`:"";
  const acct=(a,d,p)=>html`<div class="ul-acct">${head(a)}${body(a)}${useBtn(a,d)}${relogIf(a,d,p)}${a.updated_at?html`<p class="ul-age">${P.fmt.ago(a.updated_at)} 확인</p>`:""}</div>`;
  const badge=d=>{const [t,l]=state(d);return html`<span class="badge" data-tone="${t}">${l}</span>`;};
  function devMeta(d){
@@ -158,6 +158,7 @@
    const L=S.login,d=S.devs.find(x=>x.id===L.dev);
    $("#ulDlgT").textContent=(d?d.host||d.id:L.dev)+" · "+LOGIN[L.prov]+" 로그인";
    P.render($("#ulDlgB"),L.err?html`<p class="ul-err">${L.err}</p>`:!L.url?html`<p class="ul-muted">로그인 URL 을 받는 중입니다…</p>`
+    :L.paste?html`<div class="ul-login"><p>1. 아래 주소를 열어 저장할 계정으로 로그인하고, 표시되는 인증 코드를 복사하세요.</p><p><a href="${L.url}" target="_blank" rel="noopener noreferrer">${L.url}</a></p><form class="ul-paste" data-paste="1"><p>2. 인증 코드를 붙여 넣으세요.</p><input name="code" type="text" required autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="인증 코드" ${L.sent?"disabled":""}><button type="submit" class="seg-action" ${L.sent?"disabled":""}>코드 보내기</button></form>${L.msg?html`<p class="ul-err">${L.msg}</p>`:""}<p class="ul-muted">${L.sent?"코드를 보냈습니다. 저장을 마치면 이 창이 저절로 닫힙니다.":"이 기기의 Claude Code 로그인이 그 계정으로 바뀌고 슬롯에 저장됩니다."}</p></div>`
     :html`<div class="ul-login"><p>아래 주소를 열어 로그인하고 일회용 코드를 넣으세요. 코드는 ${new Date(L.expires_at*1000).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",hour12:false})}까지 유효합니다.</p><p><a href="${L.url}" target="_blank" rel="noopener noreferrer">${L.url}</a></p><p class="ul-code">${L.code}</p><p class="ul-muted">로그인을 마치면 이 창이 저절로 닫히고 사용량을 다시 읽습니다.</p></div>`);
    return;
   }
@@ -173,7 +174,7 @@
    const repair=html`<p class="ul-err"><code>hswap claude migrate-store --to file --keep keychain</code>은 항목이 있을 때 씁니다. 항목이 없는데도 이 표시가 계속되면 <code>~/Library/Logs/hswap-keepalive.log</code>를 확인합니다.</p><p>이 명령은 키체인이 열린 맥락에서만 동작합니다. 그 기기의 화면 세션에서 실행하거나, 같은 셸에서 <code>security unlock-keychain</code> 을 먼저 실행합니다. 그 셸에서는 <code>claude</code> 를 실행하지 않습니다.</p><p class="ul-muted">복구한 뒤에도 로그인이 풀려 있으면 아래 순서로 다시 로그인합니다.</p>`;
    const conflict=html`<p class="ul-err">hswap 설정에서 파일 저장소(<code>credentials.store</code>)와 키체인 필수 모드(<code>credentials.requireKeychain</code>) 중 하나만 켭니다. 다시 로그인하지 않아도 됩니다.</p>`;
    const steps=L&&L.state==="config_conflict"?conflict:L&&L.state==="keychain_item_present"?html`${repair}${ssh}`:L&&L.store==="file"?ssh:gui;
-   P.render($("#ulDlgB"),html`<div class="ul-login">${steps}<p class="ul-muted">Claude 는 device-code 로그인이 없어 jarvis 가 대신 로그인하지 않습니다.</p></div>`);
+   P.render($("#ulDlgB"),html`<div class="ul-login">${steps}<p class="ul-muted">이 기기가 화면 로그인을 낼 수 있으면 'Claude 다시 로그인' 버튼으로도 할 수 있습니다.</p></div>`);
    return;
   }
   if(!S.dlg)return;
@@ -239,7 +240,7 @@
   const L=S.login={dev,prov};dlgDraw();if(!dlg.open)dlg.showModal();
   try{
    const r=await fetch("/api/devices/"+encodeURIComponent(dev)+"/login?provider="+prov,{method:"POST",cache:"no-store",headers:{"X-Jarvis-Action":"usage-login"}}),o=await r.json();
-   if(r.ok)Object.assign(L,{url:o.url,code:o.code,expires_at:o.expires_at});else L.err=o.error||"HTTP "+r.status;
+   if(r.ok)Object.assign(L,{url:o.url,code:o.code,paste:o.paste===true,expires_at:o.expires_at});else L.err=o.error||"HTTP "+r.status;
   }catch(e){L.err=e.message||String(e);}
   if(S.login!==L)return;
   dlgDraw();
@@ -250,9 +251,19 @@
    try{
     const r=await fetch("/api/devices/"+encodeURIComponent(dev)+"/login?provider="+prov,{cache:"no-store"}),o=await r.json();
     if(o.state==="done"){dlg.close();note(LOGIN[prov]+" 로그인을 확인했습니다");refreshOne(dev);return;}
-    if(o.state==="failed"||o.state==="none"){L.err="로그인이 끝나지 않았습니다(코드가 만료되었거나 취소되었습니다). 다시 시도하세요.";dlgDraw();}
+    if(o.state==="failed"&&o.unsaved){L.err="로그인은 바뀌었지만 슬롯 저장에 실패했습니다. 그 기기에서 hswap claude add 를 직접 실행하세요.";dlgDraw();}
+    else if(o.state==="failed"||o.state==="none"){L.err="로그인이 끝나지 않았습니다(코드가 틀렸거나 만료되었거나 취소되었습니다). 다시 시도하세요.";dlgDraw();}
    }catch(e){} // 일시적인 실패는 다음 차례에 다시 묻는다
   }
+ }
+ // Claude: 붙여 넣은 인증 코드를 헤더로 보낸다(주소·본문에 넣지 않는다). 저장이 끝나면 위 login() 의 확인 반복이 창을 닫는다
+ async function sendCode(L,code){
+  Object.assign(L,{sent:true,msg:null});dlgDraw();
+  try{
+   const r=await fetch("/api/devices/"+encodeURIComponent(L.dev)+"/login?provider="+L.prov,{method:"POST",cache:"no-store",headers:{"X-Jarvis-Action":"usage-login","X-Jarvis-Login-Code":code}}),o=await r.json();
+   if(!r.ok)Object.assign(L,{sent:false,msg:o.error||"HTTP "+r.status});
+  }catch(e){Object.assign(L,{sent:false,msg:e.message||String(e)});}
+  if(S.login===L)dlgDraw();
  }
  async function use(dev,slot,label){
   const d=S.devs.find(x=>x.id===dev),name=d&&d.host||dev;
@@ -271,13 +282,23 @@
   (cur&&cur.providers||[]).filter(p=>p.id==="claude").forEach(p=>p.accounts.forEach(a=>{a.active=a.slot===slot;}));
   refreshOne(dev,true);
  }
+ dlg.addEventListener("submit",e=>{
+  if(!e.target.dataset||!e.target.dataset.paste)return;
+  e.preventDefault();
+  const code=String(e.target.elements.code.value).trim();
+  if(S.login&&code)sendCode(S.login,code);
+ });
  sec.addEventListener("click",e=>{
   const t=e.target.closest("button");if(!t||t.getAttribute("aria-disabled")==="true")return;
   if(t.dataset.prov){S.prov=t.dataset.prov;draw();return;}
   if(t.id==="ulHot"){S.hot=!S.hot;draw();return;}
   if(t.dataset.mode){S.mode=t.dataset.mode;try{localStorage.setItem(MODE_KEY,S.mode);}catch(err){}draw();return;}
   if(t.id==="ulAll"){load(true);return;}
-  if(t.dataset.login){login(t.dataset.login,t.dataset.lp);return;}
+  if(t.dataset.login){
+   // Claude 는 로그인한 계정이 그 기기의 Claude Code 로그인이 된다(실행 중인 세션 포함)
+   if(t.dataset.lp==="claude"&&!confirm("이 기기의 Claude Code 로그인이 지금 로그인하는 계정으로 바뀝니다. 실행 중인 세션도 그 계정을 쓰게 됩니다. 계속할까요?"))return;
+   login(t.dataset.login,t.dataset.lp);return;
+  }
   if(t.dataset.guide){S.guide=t.dataset.guide;dlgDraw();if(!dlg.open)dlg.showModal();return;}
   if(t.dataset.use){use(t.dataset.use,t.dataset.slot,t.dataset.label);return;}
   if(t.dataset.refresh){if(S.login)dlg.close();refreshOne(t.dataset.refresh);return;}

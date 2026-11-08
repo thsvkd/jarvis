@@ -1195,6 +1195,9 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
 .ul-login > * + * { margin-top: var(--sp-2_5); }
 .ul-login a { overflow-wrap: anywhere; }
 .ul-code { font: var(--fw-semibold) var(--fs-xl)/1.2 var(--mono); letter-spacing: var(--ls-wide); user-select: all; }
+.ul-paste { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.ul-paste p { flex-basis: 100%; }
+.ul-paste input { flex: 1 1 14rem; min-width: 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--tile-2); color: var(--text); font: var(--fs-sm) var(--mono); }
 .ul-acct > .seg-action, .ul-summary-account > .seg-action { margin-top: var(--sp-2); }
 .ul-raw { margin-top: var(--sp-1_5); font-size: var(--fs-xs); color: var(--text-3); }
 .ul-raw summary { cursor: pointer; }

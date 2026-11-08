@@ -29,6 +29,7 @@ import zlib
 from concurrent.futures import ThreadPoolExecutor
 
 from . import launch
+from .cli_login import PASTE_RE
 
 EVERY_S = 10
 TIMEOUT_S = 5  # 연결·읽기 한 번
@@ -489,10 +490,16 @@ class Core:
         req = urllib.request.Request(self.devices[i]["url"] + "/api/usage/independent" + ("?refresh=1" if force else ""))
         return self._ask(i, req, USAGE_TIMEOUT_S, "사용량 조회를")
 
-    def usage_login(self, i, provider):
-        """다시 로그인 버튼: 그 게이트웨이 POST /api/usage/login 을 그대로 전달한다(로그인 URL·일회용 코드)."""
+    def usage_login(self, i, provider, code=None):
+        """다시 로그인 버튼: 그 게이트웨이 POST /api/usage/login 을 그대로 전달한다(로그인 URL·일회용 코드).
+        code 가 있으면 붙여 넣는 로그인(Claude)의 인증 코드를 헤더로 넘긴다(본문은 받지 않는다)."""
+        headers = {"X-Jarvis-Action": "usage-login"}
+        if code is not None:
+            if not PASTE_RE.fullmatch(code):
+                return 400, {"error": "인증 코드의 모양이 맞지 않습니다"}
+            headers["X-Jarvis-Login-Code"] = code
         req = urllib.request.Request(self.devices[i]["url"] + "/api/usage/login?provider=" + urllib.parse.quote(provider),
-                                     data=b"", method="POST", headers={"X-Jarvis-Action": "usage-login"})
+                                     data=b"", method="POST", headers=headers)
         return self._ask(i, req, LOGIN_TIMEOUT_S, "다시 로그인을")
 
     def usage_login_status(self, i, provider):
