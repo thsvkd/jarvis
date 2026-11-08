@@ -39,6 +39,8 @@ STATES = {
 }
 # 알려진 detail(hswap 0.2.1 adapters/grok.py)만 한국어로 바꿔 쓴다
 DETAILS = {"Grok reported no included-credit usage": "포함 크레딧 사용량이 없습니다(요금제·잔액만 확인)."}
+# 쉬는 OpenCode Console 계정은 활성일 때만 재진다(hswap adapters/opencode.py). 값 없이 이 답이면 오류가 아니라 보일 것이 없는 행이다
+INACTIVE_CONSOLE = "measured only while it is the active OpenCode Console account"
 WINDOW_NAMES = {"weekly": "weekly", "monthly": "monthly"}  # 길이를 모르는 창(OpenCode 월간 등)은 이름으로 정한다
 _pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="jarvis-hswap")
 _lock = threading.Lock()
@@ -125,6 +127,13 @@ def _json(out):
     return body if isinstance(body, dict) and body.get("schemaVersion") == 1 else None
 
 
+def _unmeasured_inactive(row):
+    """쉬는 계정이라 hswap 이 아직 한 번도 재지 못한 행(창·잔액 없음). 보이면 '알 수 없는 오류'로 센다."""
+    u = row.get("usage") if isinstance(row.get("usage"), dict) else {}
+    return (row.get("active") is not True and u.get("state") == "stale" and u.get("detail") == INACTIVE_CONSOLE
+            and not u.get("windows") and not u.get("balance"))
+
+
 def _fetch(exe, harness):
     """hswap list <하네스> --json → 계정 행. 하네스가 없거나 계정이 없거나 읽지 못하면 None."""
     _, out = _run(exe, "list", harness, "--json")
@@ -134,7 +143,8 @@ def _fetch(exe, harness):
     rows = [a for h in body["harnesses"] if isinstance(h, dict) and h.get("harness") == harness
             for a in (h.get("accounts") if isinstance(h.get("accounts"), list) else []) if isinstance(a, dict)
             # OpenCode 는 여러 프로바이더를 앞에 둔다. Go 한도는 OpenCode Console 로그인만 잰다(adapters/opencode.py CONSOLE)
-            and (harness != "opencode" or a.get("provider") == "opencode")]
+            and (harness != "opencode" or a.get("provider") == "opencode")
+            and not _unmeasured_inactive(a)]
     return [account(a) for a in rows] or None
 
 

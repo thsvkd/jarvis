@@ -145,6 +145,22 @@ class ReadTest(FakeHswapCase):
         self.assertEqual(row["label"], "이름 없는 계정")  # 이메일이 아닌 라벨(자격 ID 일 수 있다)은 내보내지 않는다
         self.assertEqual([w["key"] for w in row["windows"]], ["session", "monthly"])
 
+    def test_inactive_console_login_without_a_measurement_is_not_listed(self):
+        """covers: USAGE-8. 쉬는 Console 계정은 활성일 때만 재진다: 값 없는 그 행은 오류로 보이지 않게 뺀다(값이 있으면 둔다)"""
+        def go(**kw):
+            row = acct("opencode", "x", source="opencode", state="stale", measuredAt=None,
+                       detail=hswap_usage.INACTIVE_CONSOLE, **kw)
+            row["provider"], row["active"] = "opencode", False
+            return row
+        live = acct("opencode", "y", source="opencode", windows=[
+            {"name": "5h", "usedPercent": 2.0, "resetsAt": None, "windowSeconds": 18000, "remaining": None}])
+        live["provider"] = "opencode"
+        kept = go(windows=[{"name": "5h", "usedPercent": 9.0, "resetsAt": None, "windowSeconds": 18000, "remaining": None}])
+        self.fake({"schemaVersion": 1, "harnesses": [{"harness": "opencode", "accounts": [live, go(), kept]}], "errors": {}})
+        rows = read("opencode")
+        self.assertEqual([r["status"] for r in rows], ["ok", "ok"])
+        self.assertEqual([r["windows"][0]["used"] for r in rows], [2, 9])
+
     def test_measured_time_alone_is_not_a_value(self):
         """covers: USAGE-3, USAGE-8"""
         self.fake({"schemaVersion": 1, "harnesses": [{"harness": "grok", "accounts": [acct("grok", state="unknown")]}], "errors": {}})
