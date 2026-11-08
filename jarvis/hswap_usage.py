@@ -15,12 +15,13 @@ import signal
 import subprocess
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout, wait
 
 from . import caam_usage, claude_accounts, provider_usage
 from .util import _NO_WINDOW, scrub_home, tool_path, which_tool
 
 WAIT_S = 8  # 읽기를 시작한 뒤 hswap 을 기다리는 시간. 기존 수집기가 그보다 오래 걸리면 그동안 함께 기다린다(수집 대기 55초 안)
+FORCE_WAIT_S = 40  # 새로고침(refresh + 측정)을 기다리는 시간. 수집 대기(55초)와 core 의 사용량 시한(70초) 안이어야 한다
 LAST_MAX_S = 1800  # 이보다 오래된 마지막 답은 버리고 기존 수집기 값을 쓴다
 TIMEOUT_S = 240  # hswap 프로세스 한도. Grok 은 RPC 120초, OpenCode 는 목록 120초 + 사용량 60초까지 쓴다
 KEEP_S = 3600  # 로그인 유지 주기. refresh 는 기한이 된 토큰만 갱신하고 하네스가 실행 중이면 건너뛴다
@@ -46,6 +47,7 @@ WINDOW_NAMES = {"weekly": "weekly", "monthly": "monthly"}  # 길이를 모르는
 _pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="jarvis-hswap")
 _lock = threading.Lock()
 _jobs = {}  # 하네스 → 마지막으로 띄운 Future
+_forced = {}  # 하네스 → refresh 를 앞세워 띄운 Future(그 하네스의 _jobs 와 같으면 새로고침이 이미 들어 있다)
 _last = {}  # 하네스 → (monotonic, 마지막으로 끝난 읽기의 행 또는 None)
 
 
@@ -173,7 +175,13 @@ def _kill(proc):
     proc.stdout.close()
 
 
-def _job(exe, harness):
+def _job(exe, harness, refresh=False, prev=None):
+    """refresh: 측정 전에 `hswap <하네스> refresh` 로 기한이 된 토큰을 먼저 갱신한다(하네스가 실행 중이면 hswap 이 건너뛴다).
+    prev: 아직 도는 이전 읽기. 같은 하네스의 hswap 을 겹쳐 띄우지 않으려고 끝나기를 기다린다."""
+    if prev is not None:
+        wait([prev], timeout=TIMEOUT_S)
+    if refresh and harness in KEEP and which_tool(harness):  # CLI 가 없으면 hswap 도 갱신하지 못한다
+        _run(exe, harness, "refresh", "--json")
     try:
         out = _fetch(exe, harness)
     except Exception:  # 형식이 어긋난 답 하나가 기존 수집기 값을 막지 않게 한다
@@ -182,15 +190,18 @@ def _job(exe, harness):
     return out
 
 
-def _start(harness):
-    """hswap 읽기를 뒤에서 시작한다(진행 중이면 그것). hswap 이 없으면 None."""
+def _start(harness, refresh=False):
+    """hswap 읽기를 뒤에서 시작한다(진행 중이면 그것). hswap 이 없으면 None.
+    refresh 인데 진행 중인 읽기에 새로고침이 없으면 그것이 끝난 뒤 refresh 를 앞세운 읽기를 새로 띄운다."""
     exe = claude_accounts.binary()
     if not exe:
         return None
     with _lock:
         job = _jobs.get(harness)
-        if job is None or job.done():
-            job = _jobs[harness] = _pool.submit(_job, exe, harness)
+        if job is None or job.done() or (refresh and _forced.get(harness) is not job):
+            job = _jobs[harness] = _pool.submit(_job, exe, harness, refresh, job)
+            if refresh:
+                _forced[harness] = job
     return job
 
 
@@ -245,12 +256,12 @@ def _keep_once():
         print(f"[jarvis] hswap 로그인 유지: {done}", flush=True)
 
 
-def read(harness, fallback):
+def read(harness, fallback, force=False):
     """hswap 과 기존 수집기(fallback)를 함께 돌려 계정마다 한 행으로 합친다(merge).
     hswap 은 시작한 뒤 WAIT_S 까지(기존 수집기가 더 오래 걸리면 그것이 끝날 때까지) 기다리고, 그때까지 답이 없으면
-    LAST_MAX_S 안의 마지막 답을 쓰며 뒤에서 계속 읽는다."""
+    LAST_MAX_S 안의 마지막 답을 쓰며 뒤에서 계속 읽는다. force(화면의 새로고침)는 측정 전에 refresh 를 하고 FORCE_WAIT_S 까지 기다린다."""
     started = time.monotonic()
-    job = _start(harness)
+    job = _start(harness, force)
     try:
         old = fallback()
     except Exception:  # 기존 수집기가 없어도(caam 없음 등) hswap 행은 보인다
@@ -258,7 +269,7 @@ def read(harness, fallback):
     rows = None
     if job:
         try:
-            rows = job.result(timeout=max(0, started + WAIT_S - time.monotonic()))
+            rows = job.result(timeout=max(0, started + (FORCE_WAIT_S if force else WAIT_S) - time.monotonic()))
         except FutureTimeout:
             at, rows = _last.get(harness, (0, None))
             rows = rows if time.monotonic() - at <= LAST_MAX_S else None

@@ -196,6 +196,34 @@ class ReadTest(FakeHswapCase):
         self.assertEqual(hswap_usage._jobs["codex"].result(timeout=10)[0]["windows"][0]["used"], 50)
         self.assertEqual(len(self.calls()), 2)
 
+    def test_forced_read_refreshes_tokens_before_measuring(self):
+        """covers: USAGE-3, USAGE-8"""
+        # 화면의 새로고침은 측정 전에 hswap refresh 로 기한이 된 토큰을 먼저 갱신한다(Codex·Grok 만, CLI 가 있을 때만)
+        body = {"schemaVersion": 1, "harnesses": [{"harness": "grok", "accounts": [acct("grok", windows=[CODEX_7D])]}], "errors": {}}
+        self.fake(body)
+        with mock.patch.object(hswap_usage, "which_tool", side_effect=lambda n: f"/x/{n}" if n != "codex" else None):
+            read("grok")
+            self.assertEqual(self.calls(), ["list grok --json"])  # 보통 읽기는 refresh 하지 않는다
+            hswap_usage._jobs.clear()
+            hswap_usage.read("grok", list, True)
+            self.assertEqual(self.calls()[1:], ["grok refresh --json", "list grok --json"])
+            hswap_usage.read("codex", list, True)  # CLI 가 없으면 refresh 하지 않는다
+            hswap_usage.read("opencode", list, True)  # OpenCode 는 스스로 로그인을 갱신한다
+        self.assertEqual(self.calls()[3:], ["list codex --json", "list opencode --json"])
+
+    def test_forced_read_waits_for_running_read_then_refreshes(self):
+        """covers: USAGE-3, USAGE-8"""
+        body = {"schemaVersion": 1, "harnesses": [{"harness": "grok", "accounts": [acct("grok", windows=[CODEX_7D])]}], "errors": {}}
+        self.fake(body, sleep=0.4)
+        with mock.patch.object(hswap_usage, "which_tool", return_value="/x/grok"), mock.patch.object(hswap_usage, "_forced", {}):
+            hswap_usage._start("grok")  # 새로고침이 없는 읽기가 도는 중
+            started = time.monotonic()
+            self.assertEqual(hswap_usage.read("grok", list, True)[0]["windows"][0]["used"], 27)
+            self.assertGreater(time.monotonic() - started, 0.8)  # 도는 읽기 뒤에 refresh 와 측정이 이어진다
+            self.assertEqual(self.calls(), ["list grok --json", "grok refresh --json", "list grok --json"])
+            hswap_usage.read("grok", list, True)  # 이미 새로고침을 담아 끝난 읽기는 새 읽기로 이어진다
+            hswap_usage._jobs["grok"].result(timeout=10)
+
     def test_fallback_runs_while_hswap_is_measuring(self):
         """covers: USAGE-3, USAGE-8"""
         # 첫 읽기: 마지막 답이 없다. 기존 수집기를 hswap 과 동시에 돌려 대기가 더해지지 않는다

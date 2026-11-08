@@ -44,9 +44,9 @@ def _codex():
     return rows + codex_native_usage.read()
 
 
-def _hswap(harness, fallback):
-    """hswap 과 기존 수집기(fallback)를 함께 읽어 계정마다 합친다(hswap_usage.read)."""
-    return lambda: hswap_usage.read(harness, fallback)
+def _hswap(harness, fallback, force=False):
+    """hswap 과 기존 수집기(fallback)를 함께 읽어 계정마다 합친다(hswap_usage.read). force 면 측정 전에 hswap refresh 를 한다."""
+    return lambda: hswap_usage.read(harness, fallback, force)
 
 
 def _claude(force):
@@ -61,8 +61,8 @@ def _claude_after(running):
 
 def read(force=False):
     """독립 수집 결과만 반환한다. 실패 원문이나 자격 증명은 내보내지 않는다."""
-    jobs = {"claude": lambda: _claude(force), "codex": _hswap("codex", lambda: _codex()), "grok": _hswap("grok", lambda: _caam("grok")),
-            "cursor": lambda: _caam("cursor"), "opencodeGo": _hswap("opencode", lambda: _opencode().get("accounts", [])),
+    jobs = {"claude": lambda: _claude(force), "codex": _hswap("codex", lambda: _codex(), force), "grok": _hswap("grok", lambda: _caam("grok"), force),
+            "cursor": lambda: _caam("cursor"), "opencodeGo": _hswap("opencode", lambda: _opencode().get("accounts", []), force),
             "antigravity": antigravity_usage.read, "kimi": kimi_usage.read, "zcode": zcode_usage.read,
             "gemini": gemini_usage.read, "minimax": minimax_usage.read}
     now = time.monotonic()
