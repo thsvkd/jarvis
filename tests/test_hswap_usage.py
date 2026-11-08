@@ -26,6 +26,10 @@ def acct(harness, label="a@example.com", **usage):
                       "state": "available", "windows": [], **usage}}
 
 
+def read(harness, fallback=list):
+    return hswap_usage.read(harness, fallback)
+
+
 CODEX_7D = {"name": "7d", "usedPercent": 27.0, "resetsAt": iso(NOW + 3 * 86400), "windowSeconds": 604800, "remaining": None}
 
 
@@ -65,7 +69,7 @@ class ReadTest(FakeHswapCase):
         balance = {"balance": "0", "hasCredits": False, "unlimited": False}
         self.fake({"schemaVersion": 1, "harnesses": [{"harness": "codex", "accounts": [acct("codex", plan="prolite", windows=[CODEX_7D], balance=balance)]}],
                    "errors": {"opencode": "account_list is not supported: OpenCode is not installed"}}, code=1)
-        rows = hswap_usage.read("codex")
+        rows = read("codex")
         self.assertEqual(self.calls(), ["list codex --json"])  # 하네스 하나만 묻는다(claude·agy 를 재지 않는다)
         self.assertEqual(len(rows), 1)
         row = rows[0]
@@ -78,19 +82,29 @@ class ReadTest(FakeHswapCase):
                                     "windows", "buckets", "extra", "credits", "source"})
         self.assertNotIn("SECRETID", json.dumps(rows))
 
-    def test_harness_not_installed_gives_none(self):
+    def test_harness_not_installed_gives_no_rows(self):
         """covers: USAGE-3"""
         self.fake({"schemaVersion": 1, "harnesses": [], "errors": {"opencode": "account_list is not supported: OpenCode is not installed"}}, code=1)
-        self.assertIsNone(hswap_usage.read("opencode"))
+        self.assertEqual(read("opencode"), [])
 
-    def test_top_level_error_and_garbage_give_none(self):
+    def test_top_level_error_garbage_and_odd_fields_do_not_block_fallback(self):
         """covers: USAGE-3"""
+        old = [{"label": "기본 계정", "status": "ok"}]
         self.fake({"schemaVersion": 1, "error": {"type": "HarnessNotFound", "message": "/Users/someone/secret"}}, code=1)
-        self.assertIsNone(hswap_usage.read("grok"))
+        self.assertEqual(read("grok", lambda: old), old)
         with open(self.exe, "w", encoding="utf-8") as f:
             f.write("#!/bin/sh\necho not json\n")
         hswap_usage._jobs.clear()
-        self.assertIsNone(hswap_usage.read("grok"))
+        self.assertEqual(read("grok", lambda: old), old)
+        # 문자열이어야 할 필드가 dict·list 여도 예외 없이 무시한다
+        odd = acct("grok", state={"x": 1}, detail=["y"], plan=7, windows=[{**CODEX_7D, "name": {}, "windowSeconds": None}])
+        self.fake({"schemaVersion": 1, "harnesses": [{"harness": "grok", "accounts": [odd]}], "errors": {}})
+        hswap_usage._jobs.clear()
+        row, base = read("grok", lambda: old)
+        self.assertEqual((row["note"], row["plan"], row["windows"][0]["key"], base), (None, None, "기간 미확인", old[0]))
+        with mock.patch.object(hswap_usage, "account", side_effect=TypeError("형식 오류")):
+            hswap_usage._jobs.clear()
+            self.assertEqual(read("grok", lambda: old), old)
 
     def test_states_become_fixed_korean_notes(self):
         """covers: USAGE-3"""
@@ -98,7 +112,7 @@ class ReadTest(FakeHswapCase):
         auth = acct("grok", "b@example.com", state="authentication_required", measuredAt=None, detail="rejected")
         unsupported = acct("grok", "c@example.com", state="unsupported", measuredAt=None, detail="enable with `hswap config set usage.remote`")
         self.fake({"schemaVersion": 1, "harnesses": [{"harness": "grok", "accounts": [stale, auth, unsupported]}], "errors": {}})
-        s, a, u = hswap_usage.read("grok")
+        s, a, u = read("grok")
         self.assertEqual((s["status"], s["note"], s["attention"]), ("ok", hswap_usage.STATES["stale"][0], False))  # 이전 값이지 오류가 아니다
         self.assertEqual((a["status"], a["error"], a["attention"]), ("error", hswap_usage.STATES["authentication_required"][0], True))
         self.assertEqual((u["status"], u["error"], u["attention"]), ("error", hswap_usage.STATES["unsupported"][0], False))
@@ -110,7 +124,7 @@ class ReadTest(FakeHswapCase):
         grok = acct("grok", state="unknown", source="grok-acp", plan="SuperGrok", detail="Grok reported no included-credit usage",
                     balance={"currency": "USD", "prepaidBalance": 0.0, "onDemandCap": 0.0, "onDemandUsed": 0.0})
         self.fake({"schemaVersion": 1, "harnesses": [{"harness": "grok", "accounts": [grok]}], "errors": {}})
-        row, = hswap_usage.read("grok")
+        row, = read("grok")
         self.assertEqual((row["status"], row["plan"], row["windows"]), ("ok", "SuperGrok", []))
         self.assertEqual(row["note"], hswap_usage.DETAILS["Grok reported no included-credit usage"])
         self.assertEqual(row["extra"], {"unit": "currency", "spent": 0.0, "limit": 0.0, "currency": "USD", "enabled": False})
@@ -124,28 +138,79 @@ class ReadTest(FakeHswapCase):
         other = acct("opencode", "x@example.com", state="unsupported", measuredAt=None)
         other["provider"] = "anthropic"
         self.fake({"schemaVersion": 1, "harnesses": [{"harness": "opencode", "accounts": [go, other]}], "errors": {}})
-        row, = hswap_usage.read("opencode")
+        row, = read("opencode")
         self.assertEqual(row["label"], "이름 없는 계정")  # 이메일이 아닌 라벨(자격 ID 일 수 있다)은 내보내지 않는다
         self.assertEqual([w["key"] for w in row["windows"]], ["session", "monthly"])
+
+    def test_measured_time_alone_is_not_a_value(self):
+        """covers: USAGE-3"""
+        self.fake({"schemaVersion": 1, "harnesses": [{"harness": "grok", "accounts": [acct("grok", state="unknown")]}], "errors": {}})
+        row, = read("grok")
+        self.assertEqual(row["status"], "error")
+
+    def test_alias_is_not_exported(self):
+        """covers: USAGE-3"""
+        row = hswap_usage.account({**acct("codex", plan="prolite", windows=[CODEX_7D]), "alias": "private-name"})
+        self.assertEqual(row["plan"], "prolite")
+        self.assertNotIn("private-name", json.dumps(row))
 
     def test_slow_hswap_answers_last_value_and_keeps_reading(self):
         """covers: USAGE-3"""
         self.fake({"schemaVersion": 1, "harnesses": [{"harness": "codex", "accounts": [acct("codex", windows=[CODEX_7D])]}], "errors": {}})
-        first = hswap_usage.read("codex")
+        first = read("codex")
         self.fake({"schemaVersion": 1, "harnesses": [{"harness": "codex", "accounts": [acct("codex", windows=[{**CODEX_7D, "usedPercent": 50.0}])]}], "errors": {}}, sleep=1.5)
         with mock.patch.object(hswap_usage, "WAIT_S", 0.2):
             started = time.monotonic()
-            self.assertEqual(hswap_usage.read("codex"), first)  # 기다리지 않고 마지막 답
+            self.assertEqual(read("codex"), first)  # 기다리지 않고 마지막 답
             self.assertLess(time.monotonic() - started, 1)
-            self.assertEqual(hswap_usage.read("codex"), first)  # 진행 중인 읽기에 얹힌다
+            self.assertEqual(read("codex"), first)  # 진행 중인 읽기에 얹힌다
+            with mock.patch.object(hswap_usage, "LAST_MAX_S", 0):
+                self.assertEqual(read("codex", lambda: [{"label": "기본 계정"}]), [{"label": "기본 계정"}])  # 너무 오래된 마지막 답은 버린다
         self.assertEqual(hswap_usage._jobs["codex"].result(timeout=10)[0]["windows"][0]["used"], 50)
         self.assertEqual(len(self.calls()), 2)
 
-    def test_process_timeout_gives_none(self):
+    def test_fallback_runs_while_hswap_is_measuring(self):
         """covers: USAGE-3"""
-        self.fake({"schemaVersion": 1, "harnesses": []}, sleep=5)
-        with mock.patch.object(hswap_usage, "TIMEOUT_S", 0.3):
-            self.assertIsNone(hswap_usage.read("codex"))
+        # 첫 읽기: 마지막 답이 없다. 기존 수집기를 hswap 과 동시에 돌려 대기가 더해지지 않는다
+        self.fake({"schemaVersion": 1, "harnesses": [{"harness": "codex", "accounts": [acct("codex", windows=[CODEX_7D])]}], "errors": {}}, sleep=1)
+        def slow():
+            time.sleep(.5)
+            return [{"label": "기본 계정", "status": "ok"}]
+        with mock.patch.object(hswap_usage, "WAIT_S", 0.2):
+            started = time.monotonic()
+            self.assertEqual(read("codex", slow), [{"label": "기본 계정", "status": "ok"}])
+            self.assertLess(time.monotonic() - started, 0.9)
+            hswap_usage._jobs["codex"].result(timeout=10)
+            # 기존 수집기가 hswap 보다 오래 걸리면 그동안 끝난 hswap 답을 쓴다
+            def slower():
+                time.sleep(1.5)
+                return []
+            hswap_usage._jobs.clear()
+            self.assertEqual(read("codex", slower)[0]["label"], "a@example.com")
+
+    def test_process_timeout_kills_the_tree_without_waiting_for_pipes(self):
+        """covers: USAGE-3"""
+        # 가짜 hswap 이 stdout 을 물려받은 손자(하네스 CLI 역할)를 띄운 채 멈춘다
+        pid = os.path.join(self.dir, "child.pid")
+        with open(self.exe, "w", encoding="utf-8") as f:
+            f.write(f"#!{sys.executable}\nimport subprocess,sys,time\n"
+                    f"c = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+                    f"open({pid!r}, 'w').write(str(c.pid))\ntime.sleep(30)\n")
+        os.chmod(self.exe, stat.S_IRWXU)
+        with mock.patch.object(hswap_usage, "TIMEOUT_S", 1):
+            started = time.monotonic()
+            self.assertEqual(read("codex"), [])
+            self.assertLess(time.monotonic() - started, 5)
+        with open(pid, encoding="utf-8") as f:
+            child = int(f.read())
+        for _ in range(50):  # 고아가 된 손자는 init 이 거둔다
+            try:
+                os.kill(child, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(.1)
+        else:
+            self.fail("손자 프로세스가 남았다")
 
     def test_child_path_starts_with_user_tool_folder(self):
         """covers: USAGE-3"""
@@ -158,7 +223,7 @@ class ReadTest(FakeHswapCase):
             with mock.patch.dict(os.environ, {"PATH": "/usr/local/bin:/usr/bin:/bin", "GROK_HOME": grok}), \
                     mock.patch.object(hswap_usage.sys, "platform", platform):
                 hswap_usage._jobs.clear()
-                hswap_usage.read("codex")
+                read("codex")
             want = [os.path.join(self.dir, ".local", "bin"), os.path.join(grok, "bin"), os.path.join(self.dir, ".opencode", "bin"),
                     *mac, "/usr/local/bin", "/usr/bin", "/bin"]
             self.assertEqual(self.calls(), [os.pathsep.join(want)])
@@ -167,34 +232,48 @@ class ReadTest(FakeHswapCase):
         """covers: USAGE-3"""
         with mock.patch.object(hswap_usage.claude_accounts, "binary", return_value=None), \
                 mock.patch.object(hswap_usage.subprocess, "run", side_effect=AssertionError("실행 금지")):
-            self.assertIsNone(hswap_usage.read("codex"))
+            self.assertEqual(read("codex"), [])
 
 
 class MergeTest(unittest.TestCase):
-    def row(self, label, status="ok"):
-        return {"label": label, "status": status}
+    def row(self, label, status="ok", **kw):
+        return {"label": label, "status": status, **kw}
 
-    def test_hswap_values_win_and_fallback_is_not_run(self):
+    def test_same_email_uses_hswap_value_and_keeps_other_accounts(self):
         """covers: USAGE-3"""
-        fallback = mock.Mock(side_effect=AssertionError("기존 수집기를 부르지 않는다"))
-        rows = [self.row("a@example.com")]
-        self.assertEqual(hswap_usage.merge(rows, fallback), rows)
+        h = self.row("A@example.com", updated_at=10)
+        old = [self.row("a@example.com", updated_at=20), self.row("vault@example.com"), self.row("기본 계정")]
+        self.assertEqual(hswap_usage.merge([h], old), [h, old[1], old[2]])
 
-    def test_without_hswap_rows_fallback_is_used_as_is(self):
+    def test_stale_hswap_value_gives_way_to_newer_fallback_value(self):
         """covers: USAGE-3"""
-        old = [self.row("기본 계정")]
-        self.assertEqual(hswap_usage.merge(None, lambda: old), old)
+        stale = self.row("a@example.com", note=hswap_usage.STATES["stale"][0], updated_at=10)
+        newer, older = self.row("a@example.com", updated_at=20), self.row("a@example.com", updated_at=5)
+        self.assertEqual(hswap_usage.merge([stale], [newer]), [newer])
+        self.assertEqual(hswap_usage.merge([stale], [older]), [stale])
 
-    def test_valueless_hswap_rows_join_fallback_without_duplicates(self):
+    def test_valueless_side_gives_way(self):
         """covers: USAGE-3"""
-        rows = [self.row("A@example.com", "error"), self.row("b@example.com", "error")]
-        old = [self.row("a@example.com")]
-        self.assertEqual(hswap_usage.merge(rows, lambda: old), old + [rows[1]])
+        h, o = self.row("a@example.com", "error"), self.row("a@example.com")
+        self.assertEqual(hswap_usage.merge([h], [o]), [o])
+        self.assertEqual(hswap_usage.merge([o], [self.row("a@example.com", "error")]), [o])
+        self.assertEqual(hswap_usage.merge([h, self.row("b@example.com", "error")], []), [h, self.row("b@example.com", "error")])
 
-    def test_failing_fallback_keeps_hswap_rows(self):
+    def test_non_email_labels_are_never_merged(self):
         """covers: USAGE-3"""
-        rows = [self.row("b@example.com", "error")]
-        self.assertEqual(hswap_usage.merge(rows, mock.Mock(side_effect=RuntimeError("caam 없음"))), rows)
+        h, o = self.row("이름 없는 계정"), self.row("이름 없는 계정")
+        self.assertEqual(hswap_usage.merge([h], [o]), [h, o])
+
+    def test_active_default_account_is_the_active_hswap_login(self):
+        """covers: USAGE-3"""
+        # 네이티브 수집기는 이메일을 모르면 "기본 계정"으로 적는다. hswap 에 활성 계정이 있으면 같은 로그인이다
+        h = self.row("a@example.com", active=True, updated_at=10)
+        native = self.row("기본 계정", active=True, updated_at=20)
+        self.assertEqual(hswap_usage.merge([h, self.row("b@example.com", active=False)], [native]), [h, self.row("b@example.com", active=False)])
+        self.assertEqual(hswap_usage.merge([self.row("b@example.com", active=False)], [native]), [self.row("b@example.com", active=False), native])
+
+
+NATIVE = {"label": "기본 계정", "status": "ok", "active": True, "source": "codex"}  # 네이티브 Codex 수집기: 지금 로그인, 이메일 모름
 
 
 class IndependentTest(FakeHswapCase):
@@ -203,7 +282,7 @@ class IndependentTest(FakeHswapCase):
         empty = {"status": "unavailable", "accounts": []}
         for p in (mock.patch.object(independent_usage, "_claude", return_value={"accounts": []}),
                   mock.patch.object(independent_usage, "_caam", side_effect=RuntimeError("caam 없음")),
-                  mock.patch.object(independent_usage.codex_native_usage, "read", return_value=[{"label": "기본 계정", "status": "ok"}]),
+                  mock.patch.object(independent_usage.codex_native_usage, "read", return_value=[NATIVE]),
                   mock.patch.object(independent_usage, "_opencode", return_value=empty),
                   *[mock.patch.object(m, "read", return_value=empty) for m in (independent_usage.antigravity_usage, independent_usage.kimi_usage,
                                                                               independent_usage.zcode_usage, independent_usage.gemini_usage, independent_usage.minimax_usage)],
@@ -228,7 +307,7 @@ class IndependentTest(FakeHswapCase):
         with mock.patch.object(hswap_usage, "_fetch", side_effect=fetch):
             data = independent_usage.read(force=True)
         codex = next(p for p in data["providers"] if p["id"] == "codex")
-        self.assertEqual([(a["label"], a["source"]) for a in codex["accounts"]], [("a@example.com", "hswap")])  # 기존 Codex 수집기 행과 겹치지 않는다
+        self.assertEqual([(a["label"], a["source"]) for a in codex["accounts"]], [("a@example.com", "hswap")])  # 같은 로그인의 네이티브 기본 계정 행과 겹치지 않는다
         self.assertEqual(sorted(self.calls()), ["list codex --json", "list grok --json", "list opencode --json"])
         self.assertIn("grok", data["unavailable"])  # hswap 도 caam 도 없다
         self.assertIn("opencodeGo", data["unavailable"])
@@ -238,7 +317,7 @@ class IndependentTest(FakeHswapCase):
         with mock.patch.object(hswap_usage.claude_accounts, "binary", return_value=None):
             data = independent_usage.read(force=True)
         codex = next(p for p in data["providers"] if p["id"] == "codex")
-        self.assertEqual(codex["accounts"], [{"label": "기본 계정", "status": "ok"}])
+        self.assertEqual(codex["accounts"], [NATIVE])
         self.assertEqual(self.calls(), [])
 
 

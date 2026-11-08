@@ -80,7 +80,7 @@ class StoreCase(unittest.TestCase):
     def independent_mocks(self):
         """사용량 경로의 Claude 밖 수집기를 비운다."""
         empty = {"status": "unavailable", "accounts": []}
-        patches = [mock.patch.object(independent_usage.hswap_usage, "read", return_value=None),  # 가짜 hswap 은 Claude 응답만 준다
+        patches = [mock.patch.object(independent_usage.hswap_usage, "_start", return_value=None),  # 가짜 hswap 은 Claude 응답만 준다
                    mock.patch.object(independent_usage, "_caam", side_effect=RuntimeError("없음")),
                    mock.patch.object(independent_usage, "_opencode", return_value=empty),
                    mock.patch.object(independent_usage.codex_native_usage, "read", return_value=[]),

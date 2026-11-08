@@ -2,7 +2,7 @@
 
 하네스마다 `hswap list <하네스> --json` 을 한 번 부른다(Claude 는 claude_accounts 가 `hswap claude list` 로 따로 읽어 같은 하네스를 두 번 재지 않는다).
 설정(usage.remote)·계정 등록·전환·자동 회전은 하지 않는다. 측정 간격과 실패 백오프는 hswap 이 정한다.
-원격 측정은 하네스 CLI 를 띄워 수십 초가 걸릴 수 있어 뒤에서 읽고, 기다리는 시간 안에 끝나지 않으면 마지막 답을 준다.
+원격 측정은 하네스 CLI 를 띄워 수십 초가 걸릴 수 있어 뒤에서 읽고, 기존 수집기와 동시에 돌려 기다리는 시간 안에 끝나지 않으면 마지막 답을 준다.
 계정은 이메일만 내보낸다. identity·details(계정 ID)·hswap 의 detail 원문은 내보내지 않는다.
 
 공식 계약: https://github.com/thsvkd/harness-swap/tree/v0.2.1 (src/harness_swap/cli.py cmd_list, core/models.py UsageSnapshot·QuotaWindow·UsageState)
@@ -10,15 +10,18 @@
 import json
 import math
 import os
+import signal
 import subprocess
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 
 from . import caam_usage, claude_accounts, cli_login, provider_usage
-from .util import local_bin
+from .util import _NO_WINDOW, local_bin
 
-WAIT_S = 20  # 한 번의 읽기가 hswap 을 기다리는 시간. 넘기면 마지막 답이나 기존 수집기로 답한다(수집 대기 55초 안)
+WAIT_S = 8  # 읽기를 시작한 뒤 hswap 을 기다리는 시간. 기존 수집기가 그보다 오래 걸리면 그동안 함께 기다린다(수집 대기 55초 안)
+LAST_MAX_S = 1800  # 이보다 오래된 마지막 답은 버리고 기존 수집기 값을 쓴다
 TIMEOUT_S = 240  # hswap 프로세스 한도. Grok 은 RPC 120초, OpenCode 는 목록 120초 + 사용량 60초까지 쓴다
 # UsageState → (화면 문구, 사람이 손봐야 하는가). detail 원문은 오류 경로가 섞일 수 있어 쓰지 않는다
 STATES = {
@@ -35,7 +38,7 @@ WINDOW_NAMES = {"weekly": "weekly", "monthly": "monthly"}  # 길이를 모르는
 _pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="jarvis-hswap")
 _lock = threading.Lock()
 _jobs = {}  # 하네스 → 마지막으로 띄운 Future
-_last = {}  # 하네스 → 마지막으로 끝난 읽기의 행(없으면 None)
+_last = {}  # 하네스 → (monotonic, 마지막으로 끝난 읽기의 행 또는 None)
 
 
 def _num(v):
@@ -56,8 +59,13 @@ def _extra(balance):
     return None
 
 
+def _str(v):
+    """hswap 의 문자열 필드. 다른 형식이면 없는 것으로 본다."""
+    return v if isinstance(v, str) else None
+
+
 def account(row):
-    """hswap 계정 한 줄 → 화면 계정. 값(창·잔액·측정 시각)이 있으면 그것을 보이고 상태는 note 로 붙인다."""
+    """hswap 계정 한 줄 → 화면 계정. 값(창·잔액, 또는 요금제와 측정 시각)이 있으면 그것을 보이고 상태는 note 로 붙인다."""
     u = row.get("usage") if isinstance(row.get("usage"), dict) else {}
     windows = []
     for w in u.get("windows") if isinstance(u.get("windows"), list) else []:
@@ -65,14 +73,14 @@ def account(row):
         if used is None:
             continue
         seconds = _num(w.get("windowSeconds"))
-        key = caam_usage._key(seconds) if seconds and seconds > 0 else WINDOW_NAMES.get(w.get("name"), "기간 미확인")
+        key = caam_usage._key(seconds) if seconds and seconds > 0 else WINDOW_NAMES.get(_str(w.get("name")), "기간 미확인")
         windows.append({"key": key, "used": used, "resets_at": claude_accounts._sec(w.get("resetsAt"))})
     extra, at = _extra(u.get("balance")), claude_accounts._sec(u.get("measuredAt"))
-    note, attention = STATES.get(u.get("state"), (None, False)) if u.get("state") != "available" else (None, False)
-    note = DETAILS.get(u.get("detail"), note)
-    has = bool(windows or extra or at)
+    note, attention = STATES.get(_str(u.get("state")), (None, False))
+    note = DETAILS.get(_str(u.get("detail")), note)
+    plan = (_str(u.get("plan")) or "")[:40]  # 별칭(alias)은 사람이 붙인 이름이라 내보내지 않는다
+    has = bool(windows or extra or (plan and at))
     label = row.get("label")
-    plan = " · ".join(str(x)[:40] for x in (row.get("alias"), u.get("plan")) if isinstance(x, str) and x)
     return {"label": label if isinstance(label, str) and len(label) <= 200 and provider_usage.EMAIL.fullmatch(label)
             else "API 키 계정" if row.get("authMode") in ("api_key", "key") else "이름 없는 계정",
             "org": None, "active": row.get("active") is True,
@@ -89,10 +97,19 @@ def _fetch(exe, harness):
         tools = [local_bin(), os.path.join(cli_login._grok_home(), "bin"), os.path.join(os.path.expanduser("~"), ".opencode", "bin"),
                  *(("/opt/homebrew/bin", "/usr/local/bin") if sys.platform == "darwin" else ())]
         env = {**os.environ, "PATH": os.pathsep.join([d for d in tools if d not in path] + path)}
-        p = subprocess.run([exe, "list", harness, "--json"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT_S,
-                           env=env, stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        body = json.loads(p.stdout)  # 하네스 하나라도 실패하면 종료 코드 1 이지만 JSON 은 정상이다
-    except (OSError, ValueError, subprocess.TimeoutExpired):
+        # 새 세션으로 띄워 시간 초과 때 hswap 이 띄운 하네스 CLI 까지 함께 끝낸다
+        proc = subprocess.Popen([exe, "list", harness, "--json"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+                                text=True, encoding="utf-8", errors="replace", env=env, creationflags=_NO_WINDOW, start_new_session=os.name != "nt")
+    except OSError:
+        return None
+    try:
+        out, _ = proc.communicate(timeout=TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        _kill(proc)
+        return None
+    try:
+        body = json.loads(out)  # 하네스 하나라도 실패하면 종료 코드 1 이지만 JSON 은 정상이다
+    except ValueError:
         return None
     if not isinstance(body, dict) or body.get("schemaVersion") != 1 or not isinstance(body.get("harnesses"), list):
         return None
@@ -103,14 +120,39 @@ def _fetch(exe, harness):
     return [account(a) for a in rows] or None
 
 
+def _kill(proc):
+    """시간 초과한 hswap 과 그 자식(하네스 CLI)을 끝낸다. 파이프를 쥔 손자가 남아도 기다리지 않는다(cli_login._codex_keyring_allowed 와 같은 정리)."""
+    if os.name != "nt":
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    elif proc.poll() is None:
+        try:
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=5, creationflags=_NO_WINDOW)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    if proc.poll() is None:
+        proc.kill()
+    try:
+        proc.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        pass
+    proc.stdout.close()
+
+
 def _job(exe, harness):
-    out = _fetch(exe, harness)
-    _last[harness] = out
+    try:
+        out = _fetch(exe, harness)
+    except Exception:  # 형식이 어긋난 답 하나가 기존 수집기 값을 막지 않게 한다
+        out = None
+    _last[harness] = (time.monotonic(), out)
     return out
 
 
-def read(harness):
-    """계정 행 목록 또는 None(hswap 없음·하네스 없음·계정 없음·아직 답 없음). 읽기가 WAIT_S 안에 끝나지 않으면 뒤에서 계속 읽고 마지막 답을 준다."""
+def _start(harness):
+    """hswap 읽기를 뒤에서 시작한다(진행 중이면 그것). hswap 이 없으면 None."""
     exe = claude_accounts.binary()
     if not exe:
         return None
@@ -118,20 +160,56 @@ def read(harness):
         job = _jobs.get(harness)
         if job is None or job.done():
             job = _jobs[harness] = _pool.submit(_job, exe, harness)
-    try:
-        return job.result(timeout=WAIT_S)
-    except FutureTimeout:
-        return _last.get(harness)
+    return job
 
 
-def merge(rows, fallback):
-    """hswap 행에 값이 있으면 그것만 쓴다(기존 수집기가 같은 계정을 다시 재지 않게). 없으면 기존 수집기 행에
-    그것이 모르는 이메일의 hswap 행(재로그인 안내 등)을 더한다."""
-    if any(r["status"] == "ok" for r in rows or []):
-        return rows
+def read(harness, fallback):
+    """hswap 과 기존 수집기(fallback)를 함께 돌려 계정마다 한 행으로 합친다(merge).
+    hswap 은 시작한 뒤 WAIT_S 까지(기존 수집기가 더 오래 걸리면 그것이 끝날 때까지) 기다리고, 그때까지 답이 없으면
+    LAST_MAX_S 안의 마지막 답을 쓰며 뒤에서 계속 읽는다."""
+    started = time.monotonic()
+    job = _start(harness)
     try:
         old = fallback()
     except Exception:  # 기존 수집기가 없어도(caam 없음 등) hswap 행은 보인다
         old = []
-    seen = {str(r.get("label")).lower() for r in old if isinstance(r, dict)}
-    return old + [r for r in rows or [] if r["label"].lower() not in seen]
+    rows = None
+    if job:
+        try:
+            rows = job.result(timeout=max(0, started + WAIT_S - time.monotonic()))
+        except FutureTimeout:
+            at, rows = _last.get(harness, (0, None))
+            rows = rows if time.monotonic() - at <= LAST_MAX_S else None
+    return merge(rows, old if isinstance(old, list) else [])
+
+
+def _email(r):
+    """같은 계정을 가르는 열쇠: 이메일(대소문자 무시). 이메일이 아닌 라벨(기본 계정 등)은 서로 다른 계정으로 본다."""
+    label = r.get("label")
+    return label.lower() if isinstance(label, str) and provider_usage.EMAIL.fullmatch(label) else id(r)
+
+
+def merge(rows, old):
+    """계정마다 한 행. 같은 이메일이 양쪽에 있으면 값이 있는 hswap 행을 쓰되, hswap 값이 이전 값(stale)이고
+    기존 수집기 값이 더 새로우면 그것을 쓴다. hswap 에 값이 없으면 값이 있는 기존 수집기 행을 쓴다.
+    한쪽에만 있는 계정은 그대로 남는다(caam 의 다른 계정, 네이티브 기본 계정, hswap 의 재로그인 안내 등)."""
+    def pick(h, o):
+        if o.get("status") != "ok":
+            return h
+        if h["status"] != "ok":
+            return o
+        stale = h.get("note") == STATES["stale"][0]
+        return o if stale and (o.get("updated_at") or 0) > (h.get("updated_at") or 0) else h
+
+    hswap = {_email(h): h for h in rows or []}
+    chosen, rest = dict(hswap), []  # hswap 순서를 지키고, 짝이 없는 기존 수집기 행은 뒤에 둔다
+    active = next((h for h in rows or [] if h.get("active")), None)
+    for o in (o for o in old if isinstance(o, dict)):
+        # 이메일을 모르는 활성 기본 계정(네이티브 수집기)은 hswap 의 활성 계정과 같은 로그인이다
+        same = active is not None and o.get("active") is True and o.get("label") == "기본 계정"
+        k = _email(active) if same else _email(o)
+        if k in hswap:
+            chosen[k] = pick(hswap.pop(k), o)
+        else:
+            rest.append(o)
+    return list(chosen.values()) + rest

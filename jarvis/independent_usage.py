@@ -45,8 +45,8 @@ def _codex():
 
 
 def _hswap(harness, fallback):
-    """hswap 행이 있으면 그것을, 없으면 기존 수집기(fallback)를 쓴다(hswap_usage.merge)."""
-    return lambda: hswap_usage.merge(hswap_usage.read(harness), fallback)
+    """hswap 과 기존 수집기(fallback)를 함께 읽어 계정마다 합친다(hswap_usage.read)."""
+    return lambda: hswap_usage.read(harness, fallback)
 
 
 def _claude(force):
