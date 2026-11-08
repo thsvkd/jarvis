@@ -5,7 +5,7 @@ import sys
 import threading
 import time
 
-from . import antigravity_usage, caam_usage, claude_accounts, cli_login, codex_native_usage, gemini_usage, kimi_usage, minimax_usage, opencode_usage, provider_usage, zcode_usage
+from . import antigravity_usage, caam_usage, claude_accounts, cli_login, codex_native_usage, gemini_usage, hswap_usage, kimi_usage, minimax_usage, opencode_usage, provider_usage, zcode_usage
 from .util import which_local
 
 _pool = ThreadPoolExecutor(max_workers=5, thread_name_prefix="jarvis-usage")
@@ -44,6 +44,11 @@ def _codex():
     return rows + codex_native_usage.read()
 
 
+def _hswap(harness, fallback):
+    """hswap 행이 있으면 그것을, 없으면 기존 수집기(fallback)를 쓴다(hswap_usage.merge)."""
+    return lambda: hswap_usage.merge(hswap_usage.read(harness), fallback)
+
+
 def _claude(force):
     return claude_accounts.read(force)
 
@@ -56,8 +61,8 @@ def _claude_after(running):
 
 def read(force=False):
     """독립 수집 결과만 반환한다. 실패 원문이나 자격 증명은 내보내지 않는다."""
-    jobs = {"claude": lambda: _claude(force), "codex": _codex,
-            "grok": lambda: _caam("grok"), "cursor": lambda: _caam("cursor"), "opencodeGo": _opencode,
+    jobs = {"claude": lambda: _claude(force), "codex": _hswap("codex", lambda: _codex()), "grok": _hswap("grok", lambda: _caam("grok")),
+            "cursor": lambda: _caam("cursor"), "opencodeGo": _hswap("opencode", lambda: _opencode().get("accounts", [])),
             "antigravity": antigravity_usage.read, "kimi": kimi_usage.read, "zcode": zcode_usage.read,
             "gemini": gemini_usage.read, "minimax": minimax_usage.read}
     now = time.monotonic()
@@ -82,7 +87,7 @@ def read(force=False):
                 accounts = value.get("accounts", []) if isinstance(value, dict) else []
                 failed = not isinstance(value, dict) or bool(value.get("error"))
                 login = value.get("login") if isinstance(value, dict) else None
-            elif name in ("opencodeGo", "antigravity", "kimi", "zcode", "gemini", "minimax"):
+            elif name in ("antigravity", "kimi", "zcode", "gemini", "minimax"):
                 accounts = value.get("accounts", []) if isinstance(value, dict) else []
                 failed = not isinstance(value, dict) or value.get("status") != "ok"
             else:
