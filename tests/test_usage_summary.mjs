@@ -172,6 +172,18 @@ assert.match(rendered(), /data-login="first" data-lp="claude">Claude 다시 로�
 delete devices[0].logins;
 click({ prov: "all" });
 click({}, "ulHot");
+// 이름 없는 OpenCode Go 구독은 월간 창의 리셋 시각이 같으면 기기가 달라도 한 계정으로 센다
+const go = (reset, name = "이름 없는 계정") => provider("opencodeGo", "OpenCode Go", [{ label: name, org: null, status: "ok", active: true, attention: false,
+  windows: [{ key: "session", used: 1, resets_at: reset - 9e5 }, { key: "monthly", used: 6, resets_at: reset }], buckets: [], updated_at: now - 5 }]);
+const goCount = () => summary().match(/OpenCode Go <span class="ul-muted">(\d+)개 계정/)?.[1];
+devices[0].providers.push(go(now + 9e5)); devices[1].providers.push(go(now + 9e5));
+click({ prov: "all" });
+assert.equal(goCount(), "1");
+devices[1].providers.pop(); devices[1].providers.push(go(now + 8e5)); // 다른 구독이면 따로 센다
+click({ prov: "all" });
+assert.equal(goCount(), "2");
+devices[0].providers.pop(); devices[1].providers.pop();
+click({ prov: "all" });
 click({ prov: "codex" });
 assert.doesNotMatch(rendered(), /data-guide/);
 click({ prov: "all" });
