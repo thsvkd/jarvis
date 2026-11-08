@@ -149,13 +149,19 @@ class ReadTest(FakeHswapCase):
 
     def test_child_path_starts_with_user_tool_folder(self):
         """covers: USAGE-3"""
-        # 서비스의 짧은 PATH 에서도 hswap 이 ~/.local/bin 의 codex·grok 을 찾게 한다
+        # 서비스의 짧은 PATH 에서도 hswap 이 사용자 설치 위치의 codex·grok·opencode 를 찾게 한다
         with open(self.exe, "w", encoding="utf-8") as f:
             f.write(f"#!{sys.executable}\nimport os\nopen({os.path.join(self.dir, 'argv')!r},'w').write(os.environ['PATH'])\n")
         os.chmod(self.exe, stat.S_IRWXU)
-        with mock.patch.dict(os.environ, {"PATH": "/usr/bin:/bin"}):
-            hswap_usage.read("codex")
-        self.assertEqual(self.calls(), [os.pathsep.join((os.path.join(self.dir, ".local", "bin"), "/usr/bin:/bin"))])
+        grok = os.path.join(self.dir, "grok-home")
+        for platform, mac in (("linux", []), ("darwin", ["/opt/homebrew/bin"])):  # 이미 PATH 에 있는 /usr/local/bin 은 다시 넣지 않는다
+            with mock.patch.dict(os.environ, {"PATH": "/usr/local/bin:/usr/bin:/bin", "GROK_HOME": grok}), \
+                    mock.patch.object(hswap_usage.sys, "platform", platform):
+                hswap_usage._jobs.clear()
+                hswap_usage.read("codex")
+            want = [os.path.join(self.dir, ".local", "bin"), os.path.join(grok, "bin"), os.path.join(self.dir, ".opencode", "bin"),
+                    *mac, "/usr/local/bin", "/usr/bin", "/bin"]
+            self.assertEqual(self.calls(), [os.pathsep.join(want)])
 
     def test_without_hswap_nothing_runs(self):
         """covers: USAGE-3"""
