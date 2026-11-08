@@ -1,7 +1,7 @@
-"""hswap 이 재는 Claude 밖 하네스(Codex·Grok·OpenCode)의 계정별 사용량을 읽기만 한다.
+"""hswap 이 재는 Claude 밖 하네스(Codex·Grok·OpenCode)의 계정별 사용량을 읽고(USAGE-8), 게이트웨이가 도는 동안 로그인을 유지한다(USAGE-9).
 
 하네스마다 `hswap list <하네스> --json` 을 한 번 부른다(Claude 는 claude_accounts 가 `hswap claude list` 로 따로 읽어 같은 하네스를 두 번 재지 않는다).
-설정(usage.remote)·계정 등록·전환·자동 회전은 하지 않는다. 측정 간격과 실패 백오프는 hswap 이 정한다.
+읽기는 설정·등록·전환을 하지 않는다. 측정 간격과 실패 백오프는 hswap 이 정한다. 등록·usage.remote·refresh 는 maintain() 만 한다(전환·자동 회전은 하지 않는다).
 원격 측정은 하네스 CLI 를 띄워 수십 초가 걸릴 수 있어 뒤에서 읽고, 기존 수집기와 동시에 돌려 기다리는 시간 안에 끝나지 않으면 마지막 답을 준다.
 계정은 이메일만 내보낸다. identity·details(계정 ID)·hswap 의 detail 원문은 내보내지 않는다.
 
@@ -10,19 +10,24 @@
 import json
 import math
 import os
+import re
 import signal
 import subprocess
-import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 
-from . import caam_usage, claude_accounts, cli_login, provider_usage
-from .util import _NO_WINDOW, local_bin
+from . import caam_usage, claude_accounts, provider_usage
+from .util import _NO_WINDOW, scrub_home, tool_path, which_tool
 
 WAIT_S = 8  # 읽기를 시작한 뒤 hswap 을 기다리는 시간. 기존 수집기가 그보다 오래 걸리면 그동안 함께 기다린다(수집 대기 55초 안)
 LAST_MAX_S = 1800  # 이보다 오래된 마지막 답은 버리고 기존 수집기 값을 쓴다
 TIMEOUT_S = 240  # hswap 프로세스 한도. Grok 은 RPC 120초, OpenCode 는 목록 120초 + 사용량 60초까지 쓴다
+KEEP_S = 3600  # 로그인 유지 주기. refresh 는 기한이 된 토큰만 갱신하고 하네스가 실행 중이면 건너뛴다
+# 로그인 유지(add·refresh) 대상. OpenCode 는 스스로 로그인을 갱신하고(0.2.1 CREDENTIAL_REFRESH unsupported), 네이티브 모드의 add 는
+# 지금 로그인을 등록하지 않고 대화형 `opencode auth login` 을 띄워 뺀다(hswap 이 OpenCode 의 저장 로그인을 목록에서 스스로 등록한다)
+KEEP = ("codex", "grok")
+REMOTE = "codex,grok,opencode"  # usage.remote 가 비어 있을 때 정하는 값. Antigravity 는 약관 위험이 커서 넣지 않는다(2026-11-08 사용자 결정)
 # UsageState → (화면 문구, 사람이 손봐야 하는가). detail 원문은 오류 경로가 섞일 수 있어 쓰지 않는다
 STATES = {
     "stale": ("이전 값입니다(hswap 이 지금은 다시 재지 않았습니다).", False),
@@ -81,6 +86,8 @@ def account(row):
     note = DETAILS.get(_str(u.get("detail")), note)
     plan = (_str(u.get("plan")) or "")[:40]  # 별칭(alias)은 사람이 붙인 이름이라 내보내지 않는다
     has = bool(windows or extra or (plan and at))
+    if not has and state == "stale":  # 이전 값을 줄 측정이 아직 한 번도 없었다(토큰 갱신 대기 등)
+        note = "아직 잰 값이 없습니다(hswap 이 지금은 재지 않았습니다)."
     label = row.get("label")
     return {"label": label if isinstance(label, str) and len(label) <= 200 and provider_usage.EMAIL.fullmatch(label)
             else "API 키 계정" if row.get("authMode") in ("api_key", "key") else "이름 없는 계정",
@@ -92,29 +99,37 @@ def account(row):
             "_prior": state in ("stale", "error")}
 
 
-def _fetch(exe, harness):
-    """hswap list <하네스> --json → 계정 행. 하네스가 없거나 계정이 없거나 읽지 못하면 None."""
+def _run(exe, *args):
+    """hswap 을 한 번 실행해 (종료 코드, stdout). 실행하지 못했거나 TIMEOUT_S 를 넘기면 (None, "")."""
     try:
         # hswap 은 하네스 CLI(codex·grok·opencode)를 PATH 로 찾는다. 서비스의 PATH 에는 사용자 설치 위치가 없어 "not installed" 로 답한다
-        path = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d]
-        tools = [local_bin(), os.path.join(cli_login._grok_home(), "bin"), os.path.join(os.path.expanduser("~"), ".opencode", "bin"),
-                 *(("/opt/homebrew/bin", "/usr/local/bin") if sys.platform == "darwin" else ())]
-        env = {**os.environ, "PATH": os.pathsep.join([d for d in tools if d not in path] + path)}
+        env = {**os.environ, "PATH": tool_path()}
         # 새 세션으로 띄워 시간 초과 때 hswap 이 띄운 하네스 CLI 까지 함께 끝낸다
-        proc = subprocess.Popen([exe, "list", harness, "--json"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+        proc = subprocess.Popen([exe, *args], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
                                 text=True, encoding="utf-8", errors="replace", env=env, creationflags=_NO_WINDOW, start_new_session=os.name != "nt")
     except OSError:
-        return None
+        return None, ""
     try:
         out, _ = proc.communicate(timeout=TIMEOUT_S)
     except subprocess.TimeoutExpired:
         _kill(proc)
-        return None
+        return None, ""
+    return proc.returncode, out
+
+
+def _json(out):
     try:
-        body = json.loads(out)  # 하네스 하나라도 실패하면 종료 코드 1 이지만 JSON 은 정상이다
+        body = json.loads(out)
     except ValueError:
         return None
-    if not isinstance(body, dict) or body.get("schemaVersion") != 1 or not isinstance(body.get("harnesses"), list):
+    return body if isinstance(body, dict) and body.get("schemaVersion") == 1 else None
+
+
+def _fetch(exe, harness):
+    """hswap list <하네스> --json → 계정 행. 하네스가 없거나 계정이 없거나 읽지 못하면 None."""
+    _, out = _run(exe, "list", harness, "--json")
+    body = _json(out)  # 하네스 하나라도 실패하면 종료 코드 1 이지만 JSON 은 정상이다
+    if body is None or not isinstance(body.get("harnesses"), list):
         return None
     rows = [a for h in body["harnesses"] if isinstance(h, dict) and h.get("harness") == harness
             for a in (h.get("accounts") if isinstance(h.get("accounts"), list) else []) if isinstance(a, dict)
@@ -164,6 +179,57 @@ def _start(harness):
         if job is None or job.done():
             job = _jobs[harness] = _pool.submit(_job, exe, harness)
     return job
+
+
+def keep(exe):
+    """로그인 유지 한 번(USAGE-9). usage.remote 가 비어 있으면 REMOTE 로 정하고, CLI 가 있는 하네스마다 지금 로그인이 hswap 에
+    없으면 add(전환은 하지 않는다) 한 뒤 refresh 로 하네스가 기한이 된 토큰을 스스로 갱신하게 한다. 하네스 → refresh 의 답 요약."""
+    code, out = _run(exe, "config", "get", "usage.remote")
+    if code == 0 and not out.strip():  # 사람이 정한 값(빈 값이 아니면)은 덮어쓰지 않는다
+        _run(exe, "config", "set", "usage.remote", REMOTE)
+    done = {}
+    for h in KEEP:
+        if not which_tool(h):  # CLI 가 없으면 hswap 도 add·refresh 를 하지 못한다
+            continue
+        status = _json(_run(exe, h, "status", "--json")[1]) or {}
+        if status.get("activeKnown") is True and status.get("active") == []:  # 로그인이 없으면 hswap 이 실패로 답할 뿐이다
+            _run(exe, h, "add")
+        body = _json(_run(exe, h, "refresh", "--json")[1]) or {}
+        err = body.get("error") if isinstance(body.get("error"), dict) else None
+        # 계정별 실패는 accounts[].ok=false 로 온다(result 는 오류 문장이라 쓰지 않는다)
+        bad = sum(1 for r in body.get("accounts") or [] if isinstance(r, dict) and r.get("ok") is False)
+        done[h] = (f"오류({re.sub(r'[^A-Za-z_]', '', str(err.get('type')))[:40]})" if err else f"실패 {bad}개" if bad
+                   else "확인함" if body else "답 없음")
+    return done
+
+
+def maintain():
+    """게이트웨이가 도는 동안 KEEP_S 마다: hswap 버전을 맞추고(USAGE-5) 로그인을 유지한다(USAGE-9).
+    Claude 는 0.2.1 에 refresh 가 없어, 같은 주기로 hswap claude list 를 묻는 읽기로 hswap 이 토큰을 갱신하게 한다."""
+    while True:
+        for step in (_check, _keep_once, lambda: which_tool("claude") and claude_accounts.read()):
+            try:
+                step()
+            except Exception as e:
+                print(f"[jarvis] hswap 유지 실패: {scrub_home(str(e))[:200]}", flush=True)
+        time.sleep(KEEP_S)
+
+
+def _check():
+    """버전을 맞추고, 지금 설치를 시작했으면 끝날 때까지(최대 설치 한도) 기다려 새 기기에서도 첫 유지를 한 시간 미루지 않는다."""
+    claude_accounts.check()
+    end = time.monotonic() + claude_accounts.INSTALL_TIMEOUT_S
+    while claude_accounts.installer.state == "running" and time.monotonic() < end:
+        time.sleep(5)
+
+
+def _keep_once():
+    exe = claude_accounts.binary()
+    if not exe or claude_accounts.installer.state == "running":  # 설치하는 동안에는 hswap 을 띄우지 않는다
+        return
+    done = keep(exe)
+    if any(v != "확인함" for v in done.values()):
+        print(f"[jarvis] hswap 로그인 유지: {done}", flush=True)
 
 
 def read(harness, fallback):

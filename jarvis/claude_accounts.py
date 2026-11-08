@@ -27,7 +27,7 @@ import threading
 import time
 
 from . import config, opencode_usage, provider_usage
-from .util import Installer, org, parse_iso, scrub_home, which_local
+from .util import Installer, org, parse_iso, scrub_home, which_local, which_tool
 
 CONFIG_MAX = 32 << 20  # Claude Code 전역 설정은 프로젝트 기록이 쌓여 수 MB 까지 큰다
 KNOWN_BUCKETS = {"opus", "sonnet", "haiku"}  # 첫 단어가 이것인 이름만 그대로 내보낸다. 나머지는 번호로 적는다
@@ -72,12 +72,12 @@ class _State:
 
 _state = _State()
 # 자동 설치·올리기: 검증한 버전으로 고정한다(서비스가 최신판을 저절로 받아 실행하지 않게). PyPI 배포본이 그 태그의 소스와 같은지
-# 대조한 뒤 여기 버전을 올려 릴리스하면, 게이트웨이(maintain)가 이보다 낮은 hswap 을 이 버전으로 올린다
+# 대조한 뒤 여기 버전을 올려 릴리스하면, 게이트웨이(hswap_usage.maintain)가 이보다 낮은 hswap 을 이 버전으로 올린다
 # ponytail: 버전만 고정한다. 같은 버전에 나중에 더해진 배포 파일은 대조 없이 받을 수 있다. 막으려면 파일 해시로 고정한다
 VERSION = "0.2.1"  # 태그 v0.2.1 = 38be330
 PACKAGE = f"harness-swap=={VERSION}"
 INSTALL_TIMEOUT_S = 600  # 처음이면 uv 가 Python 3.12+ 까지 받는다
-CHECK_S = 3600  # 버전 확인 주기. 설치에 실패하면 Installer 가 6시간 뒤에 다시 시도한다
+CLIS = ("claude", "codex", "grok", "opencode")  # hswap 이 다루는 하네스. 하나라도 있으면 hswap 을 설치한다
 _version = None  # 마지막으로 확인한 설치 버전("0.2.1"). 화면의 기기 행에 보인다
 
 
@@ -130,13 +130,14 @@ installer = Installer("hswap", _install)
 
 
 def ensure():
-    """hswap 이 없거나 고정 버전보다 낮으면 뒤에서 고정 버전을 설치한다. Claude Code 가 없는 기기는 hswap 이 쓸모없어 설치하지 않는다.
+    """hswap 이 없거나 고정 버전보다 낮으면 뒤에서 고정 버전을 설치한다. hswap 이 다루는 하네스 CLI(Claude Code·Codex·Grok·OpenCode)가
+    하나도 없는 기기는 hswap 이 쓸모없어 설치하지 않는다. 설치 실패는 Installer 가 6시간 뒤에 다시 시도한다.
     버전을 아직 모르거나 읽지 못했거나 더 높으면(사람이 먼저 올린 것) 그대로 둔다. None(할 일 없음) 또는 화면에 붙일 문구."""
-    if not config.CSWAP_INSTALL or not which_local("claude"):
+    if not config.CSWAP_INSTALL or not any(which_tool(n) for n in CLIS):
         return None
     if binary() and (_version is None or _key(_version) >= _key(VERSION)):
         return None
-    return installer.ensure("Claude 계정별 사용량")
+    return installer.ensure("AI 계정별 사용량·로그인 유지")
 
 
 def check():
@@ -144,16 +145,6 @@ def check():
     global _version
     _version = installed_version()
     return ensure()
-
-
-def maintain():
-    """게이트웨이가 도는 동안 hswap 버전을 CHECK_S 마다 맞춘다. 독립 조회 경로는 설치하지 않으므로(USAGE-3) 여기서 한다."""
-    while True:
-        try:
-            check()
-        except Exception as e:
-            print(f"[jarvis] hswap 버전 확인 실패: {scrub_home(str(e))[:200]}", flush=True)
-        time.sleep(CHECK_S)
 
 
 def status():
@@ -588,7 +579,7 @@ def read(force=False):
     force 이거나, hswap 에 물은 지 신선도 기준이 지났거나, 보일 실값 중 기준보다 오래된 것이 있으면 hswap list 를 실행한다
     (저장소에는 로그인 기한·상태가 없어 만료 경고는 실값에서만 나온다. 예약 실행이 저장소를 늘 새로 써도 경고가 사라지지 않게 한다).
     그 사이에는 마지막 실값을 그대로 준다. 오래된 저장소 값은 실값이 없을 때만 보이므로 따로 보지 않는다. hswap 이 없거나 실패하면 저장소 값을 대체값으로 쓰고 이유를 붙인다.
-    읽기는 설치하지 않는다(USAGE-3). hswap 설치는 maintain() 이 맡는다.
+    읽기는 설치하지 않는다(USAGE-3). hswap 설치는 hswap_usage.maintain() 이 맡는다.
     읽는 사이 switch() 가 끝나거나 저장소 모습이 바뀌면 옛 값을 내지 않고 다시 읽는다(진행 중인 이 읽기를 함께 기다리는 쪽도 옛 값을 받지 않는다).
     재시도는 2번까지이고 전체 시한은 READ_BUDGET_S 다. 그 안에 확정하지 못하면 CLI 값 대신 지금 저장소 값과 로그인 상태를 준다."""
     deadline = time.monotonic() + READ_BUDGET_S

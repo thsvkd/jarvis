@@ -123,10 +123,12 @@ class RunTest(unittest.TestCase):
 class InstallTest(unittest.TestCase):
     def setUp(self):
         claude_accounts.installer.state, claude_accounts.installer.error, claude_accounts.installer.at = None, None, 0.0
-        self.which = {"claude": "/home/alice/.local/bin/claude", "uv": "/home/alice/.local/bin/uv", "pipx": None, "hswap": None}
-        p = mock.patch.object(claude_accounts, "which_local", side_effect=lambda n: self.which[n])
-        p.start()
-        self.addCleanup(p.stop)
+        self.which = {"claude": "/home/alice/.local/bin/claude", "codex": None, "grok": None, "opencode": None,
+                      "uv": "/home/alice/.local/bin/uv", "pipx": None, "hswap": None}
+        for name in ("which_local", "which_tool"):
+            p = mock.patch.object(claude_accounts, name, side_effect=lambda n: self.which[n])
+            p.start()
+            self.addCleanup(p.stop)
 
         class Now:  # 설치 스레드를 그 자리에서 실행한다
             def __init__(self, target, **k):
@@ -225,12 +227,12 @@ class InstallTest(unittest.TestCase):
             def start(self):
                 pass
         with mock.patch("jarvis.util.threading.Thread", Later):
-            self.assertEqual(claude_accounts.ensure(), "hswap 을 설치하는 중입니다(Claude 계정별 사용량)")
-            self.assertEqual(claude_accounts.ensure(), "hswap 을 설치하는 중입니다(Claude 계정별 사용량)")
+            self.assertEqual(claude_accounts.ensure(), "hswap 을 설치하는 중입니다(AI 계정별 사용량·로그인 유지)")
+            self.assertEqual(claude_accounts.ensure(), "hswap 을 설치하는 중입니다(AI 계정별 사용량·로그인 유지)")
 
     def test_skipped(self):
         with mock.patch.object(claude_accounts.subprocess, "run") as r:
-            self.which["claude"] = None  # Claude Code 가 없으면 cswap 이 쓸모없다
+            self.which["claude"] = None  # hswap 이 다루는 하네스 CLI 가 하나도 없으면 hswap 이 쓸모없다
             self.assertIsNone(claude_accounts.ensure())
             self.which["claude"] = "/x/claude"
             with mock.patch.object(claude_accounts.config, "CSWAP_INSTALL", False):
@@ -238,6 +240,17 @@ class InstallTest(unittest.TestCase):
         r.assert_not_called()
         self.which.update(uv=None, pipx=None)
         self.assertIn("uv·pipx", claude_accounts.ensure())
+
+    def test_any_harness_cli_brings_hswap(self):
+        """covers: USAGE-5. Claude Code 가 없어도 Codex·Grok·OpenCode CLI 중 하나가 있으면 고정 버전을 설치한다"""
+        for cli in ("codex", "grok", "opencode"):
+            claude_accounts.installer.state, claude_accounts.installer.error, claude_accounts.installer.at = None, None, 0.0
+            self.which.update(claude=None, codex=None, grok=None, opencode=None, hswap=None)
+            self.which[cli] = f"/home/alice/.local/bin/{cli}"
+            bad = mock.Mock(returncode=1, stderr="no network\n", stdout="")
+            with mock.patch.object(claude_accounts.subprocess, "run", return_value=bad) as r, mock.patch.object(claude_accounts, "_version", None):
+                claude_accounts.ensure()
+            self.assertEqual(r.call_args[0][0], ["/home/alice/.local/bin/uv", "tool", "install", claude_accounts.PACKAGE], cli)
 
 
 if __name__ == "__main__":

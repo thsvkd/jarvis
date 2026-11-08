@@ -132,6 +132,20 @@ def local_bin():
     return os.path.join(os.path.expanduser("~"), ".local", "bin")
 
 
+def tool_path():
+    """하네스 CLI(codex·grok·opencode)의 사용자 설치 위치를 앞에 붙인 PATH. 서비스의 짧은 PATH 에는 이 위치가 없다."""
+    path = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d]
+    home = os.path.expanduser("~")
+    tools = [local_bin(), os.path.join(os.environ.get("GROK_HOME") or os.path.join(home, ".grok"), "bin"),
+             os.path.join(home, ".opencode", "bin"), *(("/opt/homebrew/bin", "/usr/local/bin") if sys.platform == "darwin" else ())]
+    return os.pathsep.join([d for d in tools if d not in path] + path)
+
+
+def which_tool(name):
+    """tool_path() 에서 찾은 실행 파일. 없으면 None."""
+    return shutil.which(name, path=tool_path())
+
+
 def which_local(name):
     """PATH(서비스는 짧다) 다음에 local_bin()."""
     p = os.path.join(local_bin(), name + (".exe" if sys.platform == "win32" else ""))

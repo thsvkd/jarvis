@@ -117,6 +117,9 @@ class ReadTest(FakeHswapCase):
         self.assertEqual((a["status"], a["error"], a["attention"]), ("error", hswap_usage.STATES["authentication_required"][0], True))
         self.assertEqual((u["status"], u["error"], u["attention"]), ("error", hswap_usage.STATES["unsupported"][0], False))
         self.assertNotIn("/Users/someone", json.dumps([s, a, u]))  # detail 원문은 내보내지 않는다
+        # 잰 적이 없는 stale(토큰 갱신 대기)은 "이전 값"이 아니다
+        empty = hswap_usage.account(acct("grok", state="stale", measuredAt=None, detail="the active login's token is due for refresh"))
+        self.assertEqual((empty["status"], empty["error"]), ("error", "아직 잰 값이 없습니다(hswap 이 지금은 재지 않았습니다)."))
 
     def test_grok_without_windows_shows_plan_and_balance(self):
         """covers: USAGE-3, USAGE-8"""
@@ -221,7 +224,7 @@ class ReadTest(FakeHswapCase):
         grok = os.path.join(self.dir, "grok-home")
         for platform, mac in (("linux", []), ("darwin", ["/opt/homebrew/bin"])):  # 이미 PATH 에 있는 /usr/local/bin 은 다시 넣지 않는다
             with mock.patch.dict(os.environ, {"PATH": "/usr/local/bin:/usr/bin:/bin", "GROK_HOME": grok}), \
-                    mock.patch.object(hswap_usage.sys, "platform", platform):
+                    mock.patch.object(sys, "platform", platform):
                 hswap_usage._jobs.clear()
                 read("codex")
             want = [os.path.join(self.dir, ".local", "bin"), os.path.join(grok, "bin"), os.path.join(self.dir, ".opencode", "bin"),
@@ -327,6 +330,87 @@ class IndependentTest(FakeHswapCase):
         self.assertEqual(codex["accounts"], [NATIVE])
         self.assertEqual(self.calls(), [])
 
+class KeepTest(FakeHswapCase):
+    def script(self, answers):
+        """인자 문자열 → (출력, 종료 코드). 없는 인자는 빈 출력과 0. 받은 인자를 남긴다."""
+        with open(os.path.join(self.dir, "answers.json"), "w", encoding="utf-8") as f:
+            json.dump(answers, f)
+        with open(self.exe, "w", encoding="utf-8") as f:
+            f.write(f"#!{sys.executable}\nimport json,sys\na=' '.join(sys.argv[1:])\n"
+                    f"open({os.path.join(self.dir, 'argv')!r},'a').write(a+'\\n')\n"
+                    f"out,code=json.load(open({os.path.join(self.dir, 'answers.json')!r})).get(a,['',0])\nprint(out)\nsys.exit(code)\n")
+        os.chmod(self.exe, stat.S_IRWXU)
+
+    def keep(self, clis):
+        with mock.patch.object(hswap_usage, "which_tool", side_effect=lambda n: f"/x/{n}" if n in clis else None):
+            return hswap_usage.keep(self.exe)
+
+    @staticmethod
+    def status(active, known=True):
+        return [json.dumps({"schemaVersion": 1, "activeKnown": known, "active": active}), 0]
+
+    def test_sets_empty_remote_registers_current_login_and_refreshes(self):
+        """covers: USAGE-9"""
+        ok = [json.dumps({"schemaVersion": 1, "accounts": []}), 0]
+        self.script({"codex status --json": self.status([]), "grok status --json": self.status([{"slot": 1}]),
+                     "codex refresh --json": ok, "grok refresh --json": ok})
+        self.assertEqual(self.keep({"codex", "grok", "opencode"}), {"codex": "확인함", "grok": "확인함"})
+        self.assertEqual(self.calls(), ["config get usage.remote", "config set usage.remote codex,grok,opencode",
+                                        "codex status --json", "codex add", "codex refresh --json",  # 로그인이 hswap 에 없으면 등록한다
+                                        "grok status --json", "grok refresh --json"])
+        # OpenCode 는 스스로 갱신하고, 네이티브 모드의 add 는 대화형 로그인을 띄워 건드리지 않는다
+        self.assertFalse([c for c in self.calls() if c.startswith("opencode")])
+        self.assertNotIn("switch", " ".join(self.calls()))
+
+    def test_keeps_the_users_remote_and_does_not_guess_unknown_logins(self):
+        """covers: USAGE-9"""
+        err = [json.dumps({"schemaVersion": 1, "error": {"type": "Unsupported Operation!", "message": "/Users/someone/x"}}), 1]
+        dead = [json.dumps({"schemaVersion": 1, "accounts": [{"ok": True, "result": "token still valid"},
+                                                             {"ok": False, "result": "sign in again: /Users/someone"}]}), 1]
+        self.script({"config get usage.remote": ["codex", 0], "codex status --json": self.status([], known=False),
+                     "codex refresh --json": err, "grok status --json": self.status([{"slot": 1}]), "grok refresh --json": dead})
+        done = self.keep({"codex", "grok"})
+        self.assertEqual(done, {"codex": "오류(UnsupportedOperation)", "grok": "실패 1개"})  # 원문(message·result)은 쓰지 않는다
+        self.assertEqual(self.calls(), ["config get usage.remote", "codex status --json", "codex refresh --json",
+                                        "grok status --json", "grok refresh --json"])
+
+    def test_once_waits_for_install_and_missing_hswap(self):
+        """covers: USAGE-9"""
+        self.script({})
+        with mock.patch.object(hswap_usage.claude_accounts.installer, "state", "running"):
+            hswap_usage._keep_once()
+        with mock.patch.object(hswap_usage.claude_accounts, "binary", return_value=None):
+            hswap_usage._keep_once()
+        self.assertEqual(self.calls(), [])
+        with mock.patch.object(hswap_usage.claude_accounts.installer, "state", None), \
+                mock.patch.object(hswap_usage, "which_tool", return_value=None):
+            hswap_usage._keep_once()
+        self.assertEqual(self.calls(), ["config get usage.remote", "config set usage.remote codex,grok,opencode"])
+
+    def test_maintain_checks_then_keeps_then_reads_claude_each_round(self):
+        """covers: USAGE-5, USAGE-9"""
+        order = []
+
+        class Stop(Exception):
+            pass
+
+        def sleep(s):
+            order.append(("sleep", s))
+            raise Stop
+
+        for claude, want in (("/x/claude", ["check", "keep", "claude", ("sleep", hswap_usage.KEEP_S)]),
+                             (None, ["check", "keep", ("sleep", hswap_usage.KEEP_S)])):
+            order.clear()
+            with mock.patch.object(hswap_usage.claude_accounts, "check", side_effect=lambda: order.append("check") or 1 / 0), \
+                    mock.patch.object(hswap_usage, "_keep_once", side_effect=lambda: order.append("keep")), \
+                    mock.patch.object(hswap_usage.claude_accounts, "read", side_effect=lambda: order.append("claude")), \
+                    mock.patch.object(hswap_usage, "which_tool", return_value=claude), \
+                    mock.patch.object(hswap_usage.time, "sleep", side_effect=sleep):
+                with self.assertRaises(Stop):
+                    hswap_usage.maintain()
+            self.assertEqual(order, want)  # 앞 단계가 실패해도(check 의 예외) 다음 단계를 한다
+
 
 if __name__ == "__main__":
     unittest.main()
+

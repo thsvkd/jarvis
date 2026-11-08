@@ -12,7 +12,7 @@ from . import __version__, launch
 
 launch.run(__version__)  # 받아 둔 새 릴리스가 있으면 그쪽으로 넘어가고 여기로 돌아오지 않는다
 
-from . import claude_accounts, config, relocate, self_update, tray  # noqa: E402
+from . import config, hswap_usage, relocate, self_update, tray  # noqa: E402
 from .util import hide_child_consoles  # noqa: E402
 from .collector import Collector  # noqa: E402
 from .core import Core, devices_from  # noqa: E402
@@ -86,7 +86,7 @@ def main():
         signal.pthread_sigmask(signal.SIG_UNBLOCK, sigs)
     col = Collector()
     col.start()
-    threading.Thread(target=claude_accounts.maintain, name="jarvis-hswap", daemon=True).start()
+    threading.Thread(target=hswap_usage.maintain, name="jarvis-hswap", daemon=True).start()
     devices = devices_from(config.DEVICES)
     core = Core(devices) if devices else None
     if core:
