@@ -245,12 +245,19 @@ class MergeTest(unittest.TestCase):
         old = [self.row("a@example.com", updated_at=20), self.row("vault@example.com"), self.row("기본 계정")]
         self.assertEqual(hswap_usage.merge([h], old), [h, old[1], old[2]])
 
-    def test_stale_hswap_value_gives_way_to_newer_fallback_value(self):
+    def test_prior_hswap_value_gives_way_to_newer_fallback_value(self):
         """covers: USAGE-3"""
-        stale = self.row("a@example.com", note=hswap_usage.STATES["stale"][0], updated_at=10)
-        newer, older = self.row("a@example.com", updated_at=20), self.row("a@example.com", updated_at=5)
-        self.assertEqual(hswap_usage.merge([stale], [newer]), [newer])
-        self.assertEqual(hswap_usage.merge([stale], [older]), [stale])
+        # stale 과 error 는 마지막 측정값(창)을 그대로 싣고 온다. detail 이 note 를 바꿔도 상태로 판정한다
+        newer, older = self.row("a@example.com", updated_at=NOW), self.row("a@example.com", updated_at=NOW - 7200)
+        for state in ("stale", "error"):
+            prior = hswap_usage.account(acct("grok", state=state, measuredAt=iso(NOW - 3600), windows=[CODEX_7D],
+                                             detail="Grok reported no included-credit usage"))
+            shown = {k: v for k, v in prior.items() if k != "_prior"}
+            self.assertEqual(hswap_usage.merge([prior], [newer]), [newer], state)
+            self.assertEqual(hswap_usage.merge([prior], [older]), [shown], state)
+            self.assertIn("_prior", prior, "판정 필드는 사본에서만 지운다(마지막 답을 다시 쓴다)")
+        fresh = hswap_usage.account(acct("codex", measuredAt=iso(NOW - 3600), windows=[CODEX_7D]))
+        self.assertEqual(hswap_usage.merge([fresh], [newer])[0]["source"], "hswap")  # 지금 잰 값은 시각과 상관없이 hswap 을 쓴다
 
     def test_valueless_side_gives_way(self):
         """covers: USAGE-3"""

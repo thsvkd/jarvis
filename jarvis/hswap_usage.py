@@ -76,7 +76,8 @@ def account(row):
         key = caam_usage._key(seconds) if seconds and seconds > 0 else WINDOW_NAMES.get(_str(w.get("name")), "기간 미확인")
         windows.append({"key": key, "used": used, "resets_at": claude_accounts._sec(w.get("resetsAt"))})
     extra, at = _extra(u.get("balance")), claude_accounts._sec(u.get("measuredAt"))
-    note, attention = STATES.get(_str(u.get("state")), (None, False))
+    state = _str(u.get("state"))
+    note, attention = STATES.get(state, (None, False))
     note = DETAILS.get(_str(u.get("detail")), note)
     plan = (_str(u.get("plan")) or "")[:40]  # 별칭(alias)은 사람이 붙인 이름이라 내보내지 않는다
     has = bool(windows or extra or (plan and at))
@@ -86,7 +87,9 @@ def account(row):
             "org": None, "active": row.get("active") is True,
             "status": "ok" if has else "error", "error": None if has else note or "사용량을 확인할 수 없습니다.",
             "note": note if has else None, "attention": attention, "failure": None, "plan": plan or None, "updated_at": at,
-            "windows": windows, "buckets": [], "extra": extra, "credits": None, "source": "hswap"}
+            "windows": windows, "buckets": [], "extra": extra, "credits": None, "source": "hswap",
+            # stale·error 행은 마지막 측정값을 싣고 온다. merge 가 판정에만 쓰고 지운다
+            "_prior": state in ("stale", "error")}
 
 
 def _fetch(exe, harness):
@@ -125,7 +128,7 @@ def _kill(proc):
     if os.name != "nt":
         try:
             os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
+        except OSError:  # 이미 끝났거나(ProcessLookupError) macOS 가 좀비 그룹에 EPERM 을 준다
             pass
     elif proc.poll() is None:
         try:
@@ -190,7 +193,7 @@ def _email(r):
 
 
 def merge(rows, old):
-    """계정마다 한 행. 같은 이메일이 양쪽에 있으면 값이 있는 hswap 행을 쓰되, hswap 값이 이전 값(stale)이고
+    """계정마다 한 행. 같은 이메일이 양쪽에 있으면 값이 있는 hswap 행을 쓰되, hswap 값이 이전 값(stale·error)이고
     기존 수집기 값이 더 새로우면 그것을 쓴다. hswap 에 값이 없으면 값이 있는 기존 수집기 행을 쓴다.
     한쪽에만 있는 계정은 그대로 남는다(caam 의 다른 계정, 네이티브 기본 계정, hswap 의 재로그인 안내 등)."""
     def pick(h, o):
@@ -198,10 +201,11 @@ def merge(rows, old):
             return h
         if h["status"] != "ok":
             return o
-        stale = h.get("note") == STATES["stale"][0]
-        return o if stale and (o.get("updated_at") or 0) > (h.get("updated_at") or 0) else h
+        return o if prior.get(id(h)) and (o.get("updated_at") or 0) > (h.get("updated_at") or 0) else h
 
-    hswap = {_email(h): h for h in rows or []}
+    rows = [dict(h) for h in rows or []]  # 마지막 답(_last)은 다음 읽기에도 쓰므로 사본에서 판정 필드를 지운다
+    prior = {id(h): h.pop("_prior", False) for h in rows}
+    hswap = {_email(h): h for h in rows}
     chosen, rest = dict(hswap), []  # hswap 순서를 지키고, 짝이 없는 기존 수집기 행은 뒤에 둔다
     active = next((h for h in rows or [] if h.get("active")), None)
     for o in (o for o in old if isinstance(o, dict)):
