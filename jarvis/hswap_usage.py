@@ -9,11 +9,13 @@
 """
 import json
 import math
+import os
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 
 from . import caam_usage, claude_accounts, provider_usage
+from .util import local_bin
 
 WAIT_S = 20  # 한 번의 읽기가 hswap 을 기다리는 시간. 넘기면 마지막 답이나 기존 수집기로 답한다(수집 대기 55초 안)
 TIMEOUT_S = 240  # hswap 프로세스 한도. Grok 은 RPC 120초, OpenCode 는 목록 120초 + 사용량 60초까지 쓴다
@@ -81,8 +83,10 @@ def account(row):
 def _fetch(exe, harness):
     """hswap list <하네스> --json → 계정 행. 하네스가 없거나 계정이 없거나 읽지 못하면 None."""
     try:
+        # hswap 은 하네스 CLI(codex·grok·opencode)를 PATH 로 찾는다. 서비스의 PATH 에는 사용자 설치 위치가 없어 "not installed" 로 답한다
+        env = {**os.environ, "PATH": local_bin() + os.pathsep + os.environ.get("PATH", "")}
         p = subprocess.run([exe, "list", harness, "--json"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT_S,
-                           stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                           env=env, stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         body = json.loads(p.stdout)  # 하네스 하나라도 실패하면 종료 코드 1 이지만 JSON 은 정상이다
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return None

@@ -147,6 +147,16 @@ class ReadTest(FakeHswapCase):
         with mock.patch.object(hswap_usage, "TIMEOUT_S", 0.3):
             self.assertIsNone(hswap_usage.read("codex"))
 
+    def test_child_path_starts_with_user_tool_folder(self):
+        """covers: USAGE-3"""
+        # 서비스의 짧은 PATH 에서도 hswap 이 ~/.local/bin 의 codex·grok 을 찾게 한다
+        with open(self.exe, "w", encoding="utf-8") as f:
+            f.write(f"#!{sys.executable}\nimport os\nopen({os.path.join(self.dir, 'argv')!r},'w').write(os.environ['PATH'])\n")
+        os.chmod(self.exe, stat.S_IRWXU)
+        with mock.patch.dict(os.environ, {"PATH": "/usr/bin:/bin"}):
+            hswap_usage.read("codex")
+        self.assertEqual(self.calls(), [os.pathsep.join((os.path.join(self.dir, ".local", "bin"), "/usr/bin:/bin"))])
+
     def test_without_hswap_nothing_runs(self):
         """covers: USAGE-3"""
         with mock.patch.object(hswap_usage.claude_accounts, "binary", return_value=None), \

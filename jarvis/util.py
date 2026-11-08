@@ -127,9 +127,14 @@ def org(name, email):
     return None if not name or (email and name == f"{email}'s Organization") else name
 
 
+def local_bin():
+    """사용자 도구의 기본 설치 위치 ~/.local/bin. 서비스의 PATH 에는 없다."""
+    return os.path.join(os.path.expanduser("~"), ".local", "bin")
+
+
 def which_local(name):
-    """PATH(서비스는 짧다) 다음에 사용자 도구의 기본 설치 위치 ~/.local/bin."""
-    p = os.path.join(os.path.expanduser("~"), ".local", "bin", name + (".exe" if sys.platform == "win32" else ""))
+    """PATH(서비스는 짧다) 다음에 local_bin()."""
+    p = os.path.join(local_bin(), name + (".exe" if sys.platform == "win32" else ""))
     return shutil.which(name) or (p if os.path.isfile(p) else None)
 
 
