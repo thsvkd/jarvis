@@ -48,8 +48,8 @@ PASTE = {"claude"}  # 코드를 화면에서 CLI 로 붙여 넣는 프로바이�
 
 
 def _claude_ready():
-    """macOS 는 로그인이 키체인과 파일로 갈라지지 않도록 hswap 파일 저장소(store=file)로 확인된 기기만 쓴다."""
-    return sys.platform != "darwin" or (claude_accounts._keepalive() or {}).get("store") == "file"
+    """macOS 는 hswap 파일 저장소이거나, 키체인 모드에서 이 게이트웨이가 키체인에 닿는다고 확인된 기기만 쓴다(claude_accounts.login_ready)."""
+    return sys.platform != "darwin" or claude_accounts.login_ready()
 
 
 def available():

@@ -6,7 +6,7 @@ import time
 import unittest
 from unittest import mock
 
-from jarvis import cli_login
+from jarvis import claude_accounts, cli_login
 
 FAKE = """#!/bin/sh
 printf '\\033[94mhttps://auth.example.com/device\\033[0m\\n2. Enter this one-time code\\n   \\033[94mABCD-EFGH1\\033[0m\\n'
@@ -72,7 +72,9 @@ class ClaudeLoginTest(unittest.TestCase):
                 f.write(body)
             os.chmod(path, stat.S_IRWXU)
         self.patches = [mock.patch.dict(cli_login.CLIS, {"claude": lambda: self.exe}),
-                        mock.patch.object(cli_login.claude_accounts, "binary", return_value=self.hswap)]
+                        mock.patch.object(cli_login.claude_accounts, "binary", return_value=self.hswap),
+                        # 시험하는 기기의 실제 hswap 저장소 상태에 따라 macOS 에서 버튼 가용성이 달라지지 않게 한다(가용성 판정은 아래 테스트가 따로 본다)
+                        mock.patch.object(cli_login.claude_accounts, "_keepalive", return_value={"store": "file"})]
         for p in self.patches:
             p.start()
 
@@ -133,13 +135,26 @@ class ClaudeLoginTest(unittest.TestCase):
         self.assertEqual(self.wait_state("failed"), "failed")
         self.assertEqual(cli_login.status("claude"), {"state": "failed", "unsaved": True})  # 로그인은 이미 바뀌었다
 
-    def test_macos_offers_claude_login_only_with_file_store(self):
-        """키체인 기기는 로그인이 키체인과 파일로 갈라질 수 있어 버튼을 내지 않는다"""
-        for platform, keepalive, want in (("linux", None, True), ("win32", None, True), ("darwin", None, False),
-                                          ("darwin", {"store": "keychain"}, False), ("darwin", {"store": "file"}, True)):
+    def test_macos_offers_claude_login_with_file_store_or_a_keychain_the_gateway_reaches(self):
+        """파일 저장소이거나, 키체인 모드에서 게이트웨이의 hswap 조회가 최근에 키체인에 닿았을 때만 버튼을 낸다"""
+        fresh, stale = time.monotonic(), time.monotonic() - claude_accounts.config.CLAUDE_STALE_S - 1
+        err = lambda kind: {"error": {"type": kind}}
+        cases = (("linux", None, None, None, True), ("win32", None, None, None, True),
+                 ("darwin", None, None, None, False),  # keepalive 기록이 없으면 hswap 상태를 모른다
+                 ("darwin", {"store": "file"}, None, None, True),
+                 ("darwin", {"store": "auto"}, (fresh, False), None, True),
+                 ("darwin", {"store": "keychain"}, (fresh, False), None, True),
+                 ("darwin", {"store": "auto"}, None, None, False),  # 게이트웨이의 키체인 접근을 아직 확인하지 못했다
+                 ("darwin", {"store": "auto"}, (stale, False), None, False),
+                 ("darwin", {"store": "auto"}, (fresh, True), None, False),  # LaunchDaemon·SSH: 키체인에 닿지 못한다
+                 ("darwin", {"store": "auto", **err("config_conflict")}, (fresh, False), None, False),
+                 ("darwin", {"store": "auto", **err("keychain_item_present")}, (fresh, False), None, False),
+                 ("darwin", {"store": "auto"}, (fresh, False), (fresh, "config_conflict"), False))
+        for platform, keepalive, device, fatal, want in cases:
             with mock.patch.object(cli_login, "sys", mock.Mock(platform=platform)), \
-                    mock.patch.object(cli_login.claude_accounts, "_keepalive", return_value=keepalive):
-                self.assertEqual("claude" in cli_login.available(), want, (platform, keepalive))
+                    mock.patch.object(cli_login.claude_accounts, "_keepalive", return_value=keepalive), \
+                    mock.patch.object(claude_accounts._state, "device", device), mock.patch.object(claude_accounts._state, "fatal", fatal):
+                self.assertEqual("claude" in cli_login.available(), want, (platform, keepalive, device, fatal))
 
 
 class FreshLoginTest(unittest.TestCase):

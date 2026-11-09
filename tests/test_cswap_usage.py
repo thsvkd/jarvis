@@ -27,6 +27,20 @@ def proc(body, rc=0):
 
 
 class AccountTest(unittest.TestCase):
+    def test_plan_label_from_hswap_plan_and_tier(self):
+        """covers: USAGE-3. hswap 0.2.7 의 plan·rateLimitTier 를 요금제로 보이고, 별칭·전환 제외 표시 앞에 둔다"""
+        row = {"number": 1, "email": "a@example.com", "usageStatus": "ok", "usage": None}
+        cases = (({"plan": "max", "rateLimitTier": "default_claude_max_20x"}, "Max 20x"),
+                 ({"plan": "team", "rateLimitTier": "default_claude_max_5x"}, "Team 5x"),
+                 ({"plan": "team", "rateLimitTier": "default_raven"}, "Team"),  # 모르는 티어는 배수를 붙이지 않는다
+                 ({"plan": "pro"}, "Pro"), ({}, None),
+                 ({"plan": "max\n<b>", "rateLimitTier": "default_claude_max_20x"}, None),  # 모양이 다른 값은 내지 않는다
+                 ({"plan": 5}, None))
+        for extra, want in cases:
+            self.assertEqual(claude_accounts.account({**row, **extra})["plan"], want, extra)
+        self.assertEqual(claude_accounts.account({**row, "plan": "max", "rateLimitTier": "default_claude_max_5x", "alias": "work", "disabled": True})["plan"],
+                         "Max 5x · work · 자동 전환 제외")
+
     def test_rows(self):
         # 픽스처를 받은 시점(usageFetchedAt)에 시계를 고정한다: 실제 시계면 loginExpiresAt 3일 전부터 만료 경고가 붙는다
         with mock.patch.object(claude_accounts.time, "time", return_value=claude_accounts.parse_iso("2026-10-27T16:00:02Z")):

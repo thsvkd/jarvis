@@ -74,11 +74,11 @@ _state = _State()
 # 자동 설치·올리기: 검증한 버전으로 고정한다(서비스가 최신판을 저절로 받아 실행하지 않게). PyPI 배포본이 그 태그의 소스와 같은지
 # 대조한 뒤 여기 버전을 올려 릴리스하면, 게이트웨이(hswap_usage.maintain)가 이보다 낮은 hswap 을 이 버전으로 올린다
 # ponytail: 버전만 고정한다. 같은 버전에 나중에 더해진 배포 파일은 대조 없이 받을 수 있다. 막으려면 파일 해시로 고정한다
-VERSION = "0.2.4"  # 태그 v0.2.4 = ca1551d
+VERSION = "0.2.7"  # 태그 v0.2.7 = 2f44307
 PACKAGE = f"harness-swap=={VERSION}"
 INSTALL_TIMEOUT_S = 600  # 처음이면 uv 가 Python 3.12+ 까지 받는다
 CLIS = ("claude", "codex", "grok", "opencode")  # hswap 이 다루는 하네스. 하나라도 있으면 hswap 을 설치한다
-_version = None  # 마지막으로 확인한 설치 버전("0.2.4"). 화면의 기기 행에 보인다
+_version = None  # 마지막으로 확인한 설치 버전("0.2.7"). 화면의 기기 행에 보인다
 
 
 def binary():
@@ -191,6 +191,15 @@ def _windows(u):
     return wins, buckets
 
 
+def _plan_label(row):
+    """hswap 0.2.7 의 plan("max"·"team"…)과 rateLimitTier("default_claude_max_20x")를 "Max 20x" 로. 모양이 다르면 빈 문자열(Max 5x/20x 를 모르는 티어는 배수를 붙이지 않는다)."""
+    plan, tier = row.get("plan"), row.get("rateLimitTier")
+    if not (isinstance(plan, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,23}", plan)):
+        return ""
+    times = re.fullmatch(r"default_claude_max_(\d{1,3})x", tier) if isinstance(tier, str) else None
+    return plan.capitalize() + (f" {times.group(1)}x" if times else "")
+
+
 def account(row, source="cswap"):
     """hswap claude 계정 한 줄(저장소 어댑터도 같은 모양으로 넘긴다) → 화면 계정. 조회가 실패해도 마지막으로 읽은 값(lastGoodUsage)과 그 이유를 함께 준다.
     attention: 사람이 손봐야 다시 읽히는 상태(재로그인 등). 화면이 '주의 필요'로 센다."""
@@ -210,7 +219,7 @@ def account(row, source="cswap"):
         soon = f"로그인 만료 {_span(left)} 남음. 그 계정으로 다시 /login 하세요."
         note, attention = (note + " " + soon if note else soon), True
     windows, buckets = _windows(usage)
-    plan = " · ".join(x for x in (str(row.get("alias") or "")[:40], "자동 전환 제외" if row.get("disabled") is True else "") if x)
+    plan = " · ".join(x for x in (_plan_label(row), str(row.get("alias") or "")[:40], "자동 전환 제외" if row.get("disabled") is True else "") if x)
     email = str(row.get("email") or "")[:200]
     num = row.get("number")
     return {"label": email or "이름 없는 계정", "org": str(row.get("organizationName") or "")[:80] or None,
@@ -417,6 +426,21 @@ def _keepalive():
     except (OSError, ValueError, RecursionError):
         return None
     return body if isinstance(body, dict) and body.get("schemaVersion") == 1 else None
+
+
+def login_ready():
+    """macOS 에서 화면 로그인(claude auth login → hswap claude add)을 낼 수 있는 기기인가.
+    파일 저장소이거나, 키체인 모드(store 가 file 이 아님)에서 이 게이트웨이의 hswap 조회가 최근에 키체인에 닿았고(keychainUnavailable 아님)
+    설정 충돌·키체인 항목 문제가 없을 때다. keepalive 기록이 없거나 게이트웨이의 키체인 접근을 최근에 확인하지 못했으면 아니다."""
+    k = _keepalive()
+    if k is None:
+        return False
+    if k.get("store") == "file":
+        return True
+    mono = time.monotonic()
+    err = k.get("error") if isinstance(k.get("error"), dict) else {}
+    blocked = ("config_conflict", "keychain_item_present")
+    return _recent(_state.device, mono) is False and err.get("type") not in blocked and _recent(_state.fatal, mono) not in blocked
 
 
 def _span(s):
