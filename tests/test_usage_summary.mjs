@@ -316,4 +316,39 @@ for (const cached of [false, true]) {
   assert.equal(el("usage").hidden, false);
   assert.equal(tab["data-core"], true);
 }
+// covers: USAGE-10. 실제 로그인 폴링 응답의 동기화 실패는 창을 닫지 않고 저장 실패와 구분해 안내한다.
+for (const result of [{ state: "failed", unsynced: true, error: "fixture-secret" }, { state: "failed", unsaved: true }]) {
+  const els = new Map(), calls = [];
+  const el = id => els.get(id) || els.set(id, { id, hidden: id === "usage", dataset: {}, handlers: {},
+    classList: { toggle() {} }, setAttribute() {}, toggleAttribute() {},
+    addEventListener(type, fn) { this.handlers[type] = fn; },
+    showModal() { this.open = true; }, close() { this.open = false; this.handlers.close?.(); } }).get(id);
+  const loginCtx = { ...ctx, window: {}, confirm: () => true,
+    document: { hidden: false, querySelector: s => s.startsWith("#") ? el(s.slice(1)) : null,
+      querySelectorAll: () => [], addEventListener() {} },
+    setTimeout(fn, delay) { if (delay === 3000) queueMicrotask(fn); },
+    fetch: async (url, options) => {
+      calls.push(url);
+      const body = url.includes("/login?") ? options?.method === "POST"
+        ? { url: "https://claude.example.com/oauth", paste: true, expires_at: now + 900 } : result : { devices };
+      return { ok: true, status: 200, json: async () => body };
+    } };
+  vm.runInNewContext(readFileSync(new URL("../static/shared/jarvis.js", import.meta.url), "utf8"), loginCtx);
+  vm.runInNewContext(readFileSync(new URL("../static/app/usage.js", import.meta.url), "utf8"), loginCtx);
+  await new Promise(resolve => setImmediate(resolve));
+  el("usage").handlers.click({ target: { closest: () => ({ dataset: { login: "first", lp: "claude" }, getAttribute: () => null }) } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.filter(url => url.includes("/login?")).length, 2);
+  assert.equal(el("ulDlg").open, true);
+  const text = el("ulDlgB").innerHTML;
+  if (result.unsynced) {
+    assert.match(text, /로그인은 바뀌었지만.*동기화/);
+    assert.match(text, /--adopt file/);
+    assert.match(text, /--adopt keychain/);
+    assert.doesNotMatch(text, /fixture-secret|슬롯 저장에 실패/);
+  } else {
+    assert.match(text, /슬롯 저장에 실패/);
+    assert.match(text, /hswap claude add/);
+  }
+}
 console.log("usage summary ok");

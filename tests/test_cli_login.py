@@ -1,6 +1,8 @@
+import json
 import os
 import shutil
 import stat
+import sys
 import tempfile
 import time
 import unittest
@@ -67,7 +69,7 @@ class ClaudeLoginTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp()
         self.exe, self.hswap, self.marker = (os.path.join(self.dir, n) for n in ("claude", "hswap", "added"))
-        for path, body in ((self.exe, FAKE_CLAUDE), (self.hswap, f"#!/bin/sh\necho \"$@\" > {self.marker}\n")):
+        for path, body in ((self.exe, FAKE_CLAUDE), (self.hswap, f"#!/bin/sh\nif [ \"$2\" = keepalive ]; then\n echo '{{\"schemaVersion\":1,\"ok\":true}}'\nelse\n echo \"$@\" > {self.marker}\nfi\n")):
             with open(path, "w") as f:
                 f.write(body)
             os.chmod(path, stat.S_IRWXU)
@@ -134,6 +136,88 @@ class ClaudeLoginTest(unittest.TestCase):
         cli_login.submit("claude", "good1234#state5678")
         self.assertEqual(self.wait_state("failed"), "failed")
         self.assertEqual(cli_login.status("claude"), {"state": "failed", "unsaved": True})  # 로그인은 이미 바뀌었다
+
+    def keepalive_cli(self, output, code=0, wait=False):
+        """실제 홈·키체인을 쓰지 않는 hswap: add 는 성공해도 두 저장소를 맞추지 않는다."""
+        with open(self.hswap, "w") as f:
+            f.write(f"#!{sys.executable}\nimport pathlib, sys, time\n")
+            f.write(f"marker = pathlib.Path({self.marker!r})\n")
+            f.write("if sys.argv[1:] == ['claude', 'add']:\n marker.write_text('claude add')\n sys.exit(0)\n")
+            f.write("if sys.argv[1:] != ['claude', 'keepalive', '--json']:\n sys.exit(99)\n")
+            f.write("marker.with_suffix('.checking').touch()\n")
+            if wait:
+                f.write("while not marker.with_suffix('.release').exists():\n time.sleep(.01)\n")
+            f.write(f"print({output!r})\nsys.exit({code})\n")
+
+    def test_macos_add_success_does_not_complete_with_split_stores(self):
+        """covers: USAGE-10 — add 종료 0 뒤 split_brain 이 남으면 완료 대신 동기화 실패를 알린다."""
+        self.keepalive_cli(json.dumps({"schemaVersion": 1, "ok": False,
+                                      "error": {"type": "split_brain", "message": "fixture-secret"}}), code=1)
+        with mock.patch.object(cli_login, "sys", mock.Mock(platform="darwin")):
+            cli_login.start("claude")
+            cli_login.submit("claude", "good1234#state5678")
+            self.assertEqual(self.wait_state("failed"), "failed")
+        self.assertEqual(cli_login.status("claude"), {"state": "failed", "unsynced": True})
+        self.assertNotIn("fixture-secret", repr(cli_login.status("claude")))
+
+    def test_macos_requires_a_successful_keepalive_report(self):
+        """covers: USAGE-10 — 종료 코드·형식·ok·error 를 모두 확인하고 불명확한 답은 완료로 보지 않는다."""
+        cases = ((0, '{"schemaVersion":1,"ok":true}', "done"),
+                 (3, '{"schemaVersion":1,"ok":true}', "failed"),
+                 (0, '{"schemaVersion":1,"ok":false}', "failed"),
+                 (0, '{"schemaVersion":1,"ok":true,"error":{"type":"split_brain"}}', "failed"),
+                 (0, '{"schemaVersion":1,"ok":1}', "failed"),
+                 (0, '{"schemaVersion":2,"ok":true}', "failed"),
+                 (0, '{"schemaVersion":true,"ok":true}', "failed"),
+                 (0, '{"ok":true}', "failed"),
+                 (0, 'not-json', "failed"), (0, '[]', "failed"), (0, 'null', "failed"))
+        for code, output, want in cases:
+            with self.subTest(code=code, output=output), mock.patch.object(cli_login, "sys", mock.Mock(platform="darwin")):
+                self.keepalive_cli(output, code)
+                cli_login.start("claude")
+                cli_login.submit("claude", "good1234#state5678")
+                self.assertEqual(self.wait_state(want), want)
+                self.assertEqual(cli_login.status("claude"), {"state": "done"} if want == "done" else {"state": "failed", "unsynced": True})
+
+    def test_macos_waits_for_keepalive_before_publishing_done(self):
+        """covers: USAGE-10 — CLI 와 add 가 끝나도 keepalive 검증이 끝나기 전에는 waiting 이다."""
+        self.keepalive_cli('{"schemaVersion":1,"ok":true}', wait=True)
+        checking, release = (self.marker + suffix for suffix in (".checking", ".release"))
+        with mock.patch.object(cli_login, "sys", mock.Mock(platform="darwin")):
+            cli_login.start("claude")
+            cli_login.submit("claude", "good1234#state5678")
+            try:
+                for _ in range(100):
+                    if os.path.exists(checking):
+                        break
+                    time.sleep(.01)
+                self.assertTrue(os.path.exists(checking), "keepalive 검증이 실행되어야 한다")
+                self.assertEqual(cli_login.status("claude"), {"state": "waiting"})
+                pending = cli_login._jobs["claude"]
+                for elapsed in (0, cli_login.LIFE_S + 1):
+                    with self.subTest(elapsed=elapsed), mock.patch.object(cli_login.time, "time", return_value=pending["started_at"] + elapsed):
+                        cli_login.start("claude")
+                        self.assertIs(cli_login._jobs["claude"], pending, "URL 만료 뒤에도 검증 중이면 두 번째 로그인을 시작하지 않는다")
+            finally:
+                with open(release, "w"):
+                    pass
+            self.assertEqual(self.wait_state("done"), "done")
+
+    def test_non_macos_login_does_not_require_keychain_verification(self):
+        """covers: USAGE-10 — macOS 이외 기기의 기존 로그인·슬롯 저장 완료 조건을 유지한다."""
+        self.keepalive_cli('not-json', code=1)
+        with mock.patch.object(cli_login, "sys", mock.Mock(platform="linux")):
+            cli_login.start("claude")
+            cli_login.submit("claude", "good1234#state5678")
+            self.assertEqual(self.wait_state("done"), "done")
+        self.assertFalse(os.path.exists(self.marker + ".checking"))
+
+    def test_without_hswap_login_still_follows_the_cli_exit_code(self):
+        """covers: USAGE-10 — hswap 이 없는 경로는 Claude CLI 의 성공을 따른다."""
+        with mock.patch.object(cli_login.claude_accounts, "binary", return_value=None):
+            cli_login.start("claude")
+            cli_login.submit("claude", "good1234#state5678")
+            self.assertEqual(self.wait_state("done"), "done")
 
     def test_macos_offers_claude_login_with_file_store_or_a_keychain_the_gateway_reaches(self):
         """파일 저장소이거나, 키체인 모드에서 게이트웨이의 hswap 조회가 최근에 키체인에 닿았을 때만 버튼을 낸다"""

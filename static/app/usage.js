@@ -253,7 +253,8 @@
    try{
     const r=await fetch("/api/devices/"+encodeURIComponent(dev)+"/login?provider="+prov,{cache:"no-store"}),o=await r.json();
     if(o.state==="done"){dlg.close();note(LOGIN[prov]+" 로그인을 확인했습니다");refreshOne(dev);return;}
-    if(o.state==="failed"&&o.unsaved){L.err="로그인은 바뀌었지만 슬롯 저장에 실패했습니다. 그 기기에서 hswap claude add 를 직접 실행하세요.";dlgDraw();}
+    if(o.state==="failed"&&o.unsynced){L.err="로그인은 바뀌었지만 로그인 저장소의 동기화를 확인하지 못했습니다. 그 기기의 Claude 상태를 확인하세요. 키체인 모드에서 두 저장소의 로그인이 다르면 화면 터미널에서 최근 로그인·갱신이 저장된 쪽을 확인한 뒤 hswap claude keepalive --adopt file 또는 hswap claude keepalive --adopt keychain 으로 맞추세요.";dlgDraw();}
+    else if(o.state==="failed"&&o.unsaved){L.err="로그인은 바뀌었지만 슬롯 저장에 실패했습니다. 그 기기에서 hswap claude add 를 직접 실행하세요.";dlgDraw();}
     else if(o.state==="failed"||o.state==="none"){L.err="로그인이 끝나지 않았습니다(코드가 틀렸거나 만료되었거나 취소되었습니다). 다시 시도하세요.";dlgDraw();}
    }catch(e){} // 일시적인 실패는 다음 차례에 다시 묻는다
   }

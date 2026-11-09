@@ -212,8 +212,21 @@ def _read(job):
     rc = job["proc"].wait()
     if job["paste"]:  # 로그인이 끝나야 저장한다. 저장까지 마친 뒤에 done 으로 본다
         hswap = claude_accounts.binary()
-        job["rc"] = run([hswap, "claude", "add"], 60)[0] if rc == 0 and hswap else rc
-        job["unsaved"] = rc == 0 and job["rc"] != 0  # 로그인은 바뀌었고 슬롯 저장만 실패했다
+        saved = run([hswap, "claude", "add"], 60)[0] if rc == 0 and hswap else rc
+        job["unsaved"] = rc == 0 and saved != 0  # 로그인은 바뀌었고 슬롯 저장만 실패했다
+        if saved == 0 and hswap and sys.platform == "darwin":
+            # add 가 종료 0 이어도 키체인·파일은 다른 로그인을 가질 수 있다.
+            # hswap 이 검증·동기화한다. 어느 저장소가 새 것인지 추측해 adopt 하지는 않는다.
+            checked, out, _ = run([hswap, "claude", "keepalive", "--json"], 60)
+            try:
+                report = json.loads(out)
+            except (ValueError, RecursionError):
+                report = None
+            job["unsynced"] = not (checked == 0 and isinstance(report, dict) and type(report.get("schemaVersion")) is int and report.get("schemaVersion") == 1
+                                   and report.get("ok") is True and not report.get("error"))
+            if job["unsynced"]:
+                saved = 1
+        job["rc"] = saved  # 검증과 실패 이유를 갖춘 뒤에 완료 상태를 공개한다
 
 
 def _alive(job):
@@ -233,7 +246,8 @@ def start(provider):
         return 404, {"error": f"이 기기에서는 {provider} 로그인을 화면에서 할 수 없습니다"}
     with _lock:
         job = _jobs.get(provider)
-        if not (_alive(job) and _ready(job)):
+        saving = job and job["paste"] and job["rc"] is None and job["proc"].poll() is not None
+        if not ((_alive(job) or saving) and _ready(job)):
             if job and job["proc"].poll() is None:
                 job["proc"].kill()
             proc = subprocess.Popen([exe, *ARGS.get(provider, ["login", "--device-auth"])],
@@ -241,7 +255,7 @@ def start(provider):
                                     stderr=subprocess.STDOUT, text=True, errors="replace", cwd=os.path.expanduser("~"),
                                     env={**_ENV, "NO_COLOR": "1", "TERM": "dumb"}, creationflags=_NO_WINDOW)
             job = _jobs[provider] = {"proc": proc, "out": "", "url": None, "code": None, "started_at": time.time(),
-                                     "paste": provider in PASTE, "rc": None, "unsaved": False}
+                                     "paste": provider in PASTE, "rc": None, "unsaved": False, "unsynced": False}
             threading.Thread(target=_read, args=(job,), name="jarvis-login-" + provider, daemon=True).start()
             t = threading.Timer(LIFE_S, lambda p=proc: p.poll() is None and p.kill())
             t.daemon = True  # 기다리는 로그인이 jarvis 종료를 붙잡지 않게
@@ -283,6 +297,8 @@ def status(provider):
     if job["paste"]:  # CLI 가 끝난 뒤 hswap 저장이 남았으면 아직 기다리는 중이다
         if job["rc"] is None:
             return {"state": "waiting" if _alive(job) or job["proc"].poll() is not None else "failed"}
+        if job.get("unsynced"):
+            return {"state": "failed", "unsynced": True}
         return {"state": "done"} if job["rc"] == 0 else {"state": "failed", "unsaved": True} if job["unsaved"] else {"state": "failed"}
     rc = job["proc"].poll()
     if rc is None:
