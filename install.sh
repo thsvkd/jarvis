@@ -8,17 +8,21 @@
 # Linux 는 LaunchAgent 대신 systemd 사용자 유닛(deploy/jarvis.service, python 만 venv 로)을 쓴다.
 # 코드는 ~/.local/share/jarvis/app 에 둔다(~/Workspace/jarvis 는 개발 저장소 자리). 1.8.0 이전 배치는 app 으로 옮긴다.
 # 이미 있는 설정·LaunchAgent·유닛·코드는 덮어쓰지 않는다.
+# 지우기: `sh -s -- --uninstall`. 서비스 등록과 실행본(app·venv·versions)만 지운다. 설정(config.toml)은 남기므로 다시 설치하면 이어진다.
 set -eu
 
 CORE=""
 DAEMON=""  # --daemon: macOS 에서 LaunchAgent 대신 LaunchDaemon 으로 돈다(GUI 로그인이 없는 기기. README 의 macOS 절)
+UNINSTALL=""  # --uninstall: 서비스 등록과 실행본(app·venv·versions)을 지운다. 설정·모듈이 쓴 것은 남긴다
 while [ $# -gt 0 ]; do
   case "$1" in
     --core) CORE="${2:?--core 에 tailnet IP 를 주세요}"; shift 2 ;;
     --daemon) DAEMON=1; shift ;;
+    --uninstall) UNINSTALL=1; shift ;;
     *) echo "모르는 인자: $1" >&2; exit 1 ;;
   esac
 done
+[ -z "$UNINSTALL" ] || [ -z "$CORE$DAEMON" ] || { echo "--uninstall 은 다른 인자와 함께 쓰지 않습니다" >&2; exit 1; }
 
 OS=$(uname -s)
 case "$OS" in
@@ -42,6 +46,32 @@ PY="$SHARE/venv/bin/python"
 MANIFEST="${JARVIS_MANIFEST:-https://github.com/thsvkd/jarvis/releases/latest/download/manifest.json}"
 export PATH="$HOME/.local/bin:$PATH"
 cd "$HOME"  # 이 셸과 자식(파이프의 python 등)이 옛 폴더를 작업 폴더로 쥐지 않게(relocate 가 사용 중으로 본다)
+
+if [ -n "$UNINSTALL" ]; then
+  if [ "$OS" = Darwin ]; then
+    # 이 사용자의 LaunchDaemon 이면 sudo 가 필요한 되돌리기를 먼저 한다. 실패하면 도는 서비스 밑의 코드를 지우지 않고 멈춘다
+    if [ -f "$DAEMON_PLIST" ]; then
+      owner=$(python3 -c 'import plistlib, sys; print(plistlib.load(open(sys.argv[1], "rb"))["UserName"])' "$DAEMON_PLIST" 2>/dev/null) || owner=""
+      if [ "$owner" = "$(id -un)" ]; then
+        S="$APP/deploy/macos-daemon.sh"; [ -f "$S" ] || S="$SHARE/daemon-src/deploy/macos-daemon.sh"
+        [ -f "$S" ] || { echo "LaunchDaemon 을 되돌릴 deploy/macos-daemon.sh 가 없습니다. 지우지 않고 멈춥니다" >&2; exit 1; }
+        /bin/bash "$S" uninstall </dev/null || { echo "LaunchDaemon 을 되돌리지 못했습니다. 지우지 않고 멈춥니다" >&2; exit 1; }
+      else
+        echo "이 기기의 LaunchDaemon 은 다른 사용자(${owner:-알 수 없음})의 것이라 손대지 않습니다" >&2
+      fi
+    fi
+    launchctl bootout "gui/$(id -u)/dev.jarvis" 2>/dev/null || true
+    rm -f "$AGENT" "$SHARE/dev.jarvis.plist.agent"
+  else
+    systemctl --user disable --now jarvis 2>/dev/null || true
+    rm -f "$UNIT"
+    systemctl --user daemon-reload 2>/dev/null || true
+  fi
+  # 개발 저장소($OLD)와 옛 배치는 지우지 않는다
+  rm -rf "$APP" "$SHARE/venv" "$SHARE/versions" "$SHARE/daemon-src" "$SHARE/current.json"
+  echo "jarvis 서비스와 실행본을 지웠습니다. 남긴 것: $CONFIG(설정), 훅·셋업 모듈이 쓴 ~/.claude 설정, 하네스, Tailscale"
+  exit 0
+fi
 
 if [ ! -f "$CONFIG" ] && [ -z "$CORE" ]; then
   echo "처음 설치에는 --core <core 의 tailnet IP> 가 필요합니다(이 기기의 사용량·모듈을 모아 볼 기기)" >&2

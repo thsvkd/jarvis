@@ -533,6 +533,67 @@ class InstallTest(unittest.TestCase):
         self.assertIn("install.ps1", r.stderr)
         self.assertEqual(os.listdir(self.home), [])
 
+    def test_mac_uninstall_removes_the_agent_and_the_runtime_but_keeps_the_config_and_a_dev_checkout(self):
+        """covers: BOOT-4 (제안: TEST_SPEC 승인 전)"""
+        self.assertEqual(self.run_install("--core", "100.115.245.91").returncode, 0)
+        os.makedirs(os.path.join(self.share, "versions", "1.0.0"))
+        os.makedirs(os.path.join(self.old, ".git"))
+        agent = os.path.join(self.home, "Library", "LaunchAgents", "dev.jarvis.plist")
+        os.remove(self.log)
+        r = self.run_install("--uninstall")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("launchctl bootout gui/%d/dev.jarvis" % os.getuid(), self.lines())
+        self.assertFalse(os.path.exists(agent))
+        for name in ("app", "venv", "versions"):
+            self.assertFalse(os.path.exists(os.path.join(self.share, name)), name)
+        self.assertTrue(os.path.isfile(os.path.join(self.home, ".config", "jarvis", "config.toml")))
+        self.assertTrue(os.path.isdir(os.path.join(self.old, ".git")))
+        self.assertEqual(self.run_install("--uninstall").returncode, 0)  # 이미 지운 기기에서 다시 실행해도 된다
+
+    def test_linux_uninstall_stops_and_removes_the_unit(self):
+        """covers: BOOT-4 (제안: TEST_SPEC 승인 전)"""
+        self.linux()
+        self.assertEqual(self.run_install("--core", "100.115.245.91").returncode, 0)
+        os.remove(self.log)
+        r = self.run_install("--uninstall")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("systemctl --user disable --now jarvis", self.lines())
+        self.assertFalse(os.path.exists(os.path.join(self.home, ".config", "systemd", "user", "jarvis.service")))
+        self.assertFalse(os.path.exists(self.app))
+
+    def test_uninstall_reverts_this_users_daemon_first_and_stops_when_that_fails(self):
+        """covers: BOOT-4 (제안: TEST_SPEC 승인 전)"""
+        self.assertEqual(self.run_install("--core", "100.64.0.1").returncode, 0)
+        self.daemon_plist()
+        os.remove(self.log)
+        self.env["FAKE_DAEMON_RC"] = "1"
+        r = self.run_install("--uninstall")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(f"macos-daemon cwd={self.home} uninstall", self.lines())
+        self.assertTrue(os.path.isdir(self.app))  # 도는 서비스 밑의 코드는 남는다
+        del self.env["FAKE_DAEMON_RC"]
+        self.assertEqual(self.run_install("--uninstall").returncode, 0)
+        self.assertFalse(os.path.exists(self.app))
+
+    def test_another_users_daemon_is_left_alone_by_uninstall(self):
+        """covers: BOOT-4 (제안: TEST_SPEC 승인 전)"""
+        self.assertEqual(self.run_install("--core", "100.64.0.1").returncode, 0)
+        plist = self.daemon_plist(user="nobody-else")
+        os.remove(self.log)
+        r = self.run_install("--uninstall")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("다른 사용자", r.stderr)
+        self.assertTrue(os.path.isfile(plist))
+        self.assertFalse([line for line in self.lines() if line.startswith("macos-daemon")])
+        self.assertFalse(os.path.exists(self.app))
+
+    def test_uninstall_does_not_mix_with_install_arguments_and_writes_nothing_first(self):
+        """covers: BOOT-4 (제안: TEST_SPEC 승인 전)"""
+        r = self.run_install("--uninstall", "--core", "100.64.0.1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("다른 인자와 함께", r.stderr)
+        self.assertEqual(os.listdir(self.home), [])
+
 
 if __name__ == "__main__":
     unittest.main()

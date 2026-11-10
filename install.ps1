@@ -6,8 +6,9 @@ jarvis 설치기(Windows): 최신 릴리스를 받아 게이트웨이(deploy\ins
 
 코드는 %LOCALAPPDATA%\jarvis\app 에 둔다(%USERPROFILE%\Workspace\jarvis 는 개발 저장소 자리). 1.8.0 이전 배치는 app 으로 옮긴다.
 Python 3.11+ 가 없으면 winget 으로 설치한다. 이미 있는 설정·코드는 덮어쓰지 않는다. -DryRun 은 할 일만 보이고 아무것도 바꾸지 않는다.
+-Uninstall 은 예약 작업·방화벽 규칙·실행본(app·versions)만 지운다. 설정(config.toml)과 Python 은 남긴다.
 #>
-param([string]$Core = "", [switch]$DryRun)
+param([string]$Core = "", [switch]$DryRun, [switch]$Uninstall)
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $false  # 네이티브 명령은 $LASTEXITCODE 로 판정한다
 
@@ -39,11 +40,28 @@ function Find-Python {
     return $null
 }
 
-if (-not (Test-Path $cfg) -and -not $Core) { Fail "처음 설치에는 -Core <core 의 tailnet IP> 가 필요합니다(이 기기의 사용량·모듈을 모아 볼 기기)" }
+if ($Uninstall -and $Core) { Fail "-Uninstall 은 -Core 와 함께 쓰지 않습니다" }
+if (-not (Test-Path $cfg) -and -not $Core -and -not $Uninstall) { Fail "처음 설치에는 -Core <core 의 tailnet IP> 가 필요합니다(이 기기의 사용량·모듈을 모아 볼 기기)" }
 $octet = '(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)'
 if ($Core -and $Core -notmatch "^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.$octet\.$octet$") { Fail "-Core 에는 tailnet IP(100.64.0.0/10)만 받습니다: $Core" }
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin -and -not $DryRun) { Fail "관리자 PowerShell 에서 실행하세요(방화벽 규칙과 예약 작업을 만든다)" }
+
+if ($Uninstall) {
+    # 개발 저장소($old)와 옛 배치는 지우지 않는다
+    $targets = @("app", "versions", "current.json") | ForEach-Object { Join-Path (Split-Path -Parent $repo) $_ } | Where-Object { Test-Path $_ }
+    $steps = @()
+    if (Get-ScheduledTask -TaskName jarvis -ErrorAction SilentlyContinue) { $steps += "scheduled task jarvis" }
+    if (Get-NetFirewallRule -DisplayName jarvis-9300 -ErrorAction SilentlyContinue) { $steps += "firewall rule jarvis-9300" }
+    $steps += $targets
+    if ($DryRun) { $steps | ForEach-Object { "would remove: $_" }; return }
+    Stop-ScheduledTask -TaskName jarvis -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName jarvis -Confirm:$false -ErrorAction SilentlyContinue
+    Remove-NetFirewallRule -DisplayName jarvis-9300 -ErrorAction SilentlyContinue
+    $targets | Remove-Item -Recurse -Force
+    "jarvis 서비스와 실행본을 지웠습니다. 남긴 것: $cfg(설정), 훅·셋업 모듈이 쓴 설정, 하네스, Tailscale, Python"
+    return
+}
 
 $py = Find-Python
 $steps = @()

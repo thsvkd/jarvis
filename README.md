@@ -315,6 +315,16 @@ curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh 
 그다음 설정 파일과 LaunchAgent(`dev.jarvis`, Linux 는 systemd 사용자 유닛 `jarvis`)를 만들고, 모듈(훅·셋업)을 plan 으로 보인 뒤 그 plan_id 로 apply 한다.
 이미 있는 설정·LaunchAgent·유닛·코드는 덮어쓰지 않으므로 다시 실행해도 된다. 옛 배치가 있으면 [실행본 이전](#실행본-이전-180)을 한다. Tailscale·하네스 로그인과 core 의 `devices` 등록은 직접 한다.
 
+제거는 같은 설치기에 `--uninstall` 을 준다(다른 인자와 함께 쓰지 않는다):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh -s -- --uninstall
+```
+
+서비스 등록(LaunchAgent·systemd 사용자 유닛)과 실행본(`~/.local/share/jarvis` 의 `app`·`venv`·`versions`·`daemon-src`·`current.json`)만 지운다. 이 사용자의 LaunchDaemon 이면 `deploy/macos-daemon.sh uninstall`(sudo)로 먼저 에이전트로 되돌리고, 그것이 실패하면 아무것도 지우지 않고 멈춘다. 다른 사용자의 daemon 은 건드리지 않는다.
+**남기는 것:** `~/.config/jarvis/config.toml`(다시 설치하면 이어진다), 훅·셋업 모듈이 쓴 `~/.claude` 설정(필요하면 `python -m jarvis module <hooks|setup> uninstall` 을 설치를 지우기 전에 먼저 실행한다), 하네스, Tailscale, Linux 의 linger, 개발 저장소 `~/Workspace/jarvis`.
+Windows 는 관리자 PowerShell 에서 `install.ps1 -Uninstall`(`-DryRun` 으로 지울 것만 본다)이 예약 작업 `jarvis`·방화벽 규칙 `jarvis-9300`·`%LOCALAPPDATA%\jarvis` 의 `app`·`versions`·`current.json` 을 지우고 설정과 Python 은 남긴다.
+
 수동 설치:
 
 ```sh
