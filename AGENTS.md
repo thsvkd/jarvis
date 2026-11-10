@@ -2,7 +2,7 @@
 
 ## 개요
 
-jarvis 는 기기마다 상주하는 게이트웨이(호스트 자원·서비스)와 그것을 모아 보여 주는 core 홈이다. ai-setup 의 기능(하네스 설치·갱신, 훅, 스킬·플러그인·MCP)을 모듈 단위로 흡수했다(`docs/2026-10-30-ai-setup-absorption.md`). 구조·설정·운영 방법은 `README.md` 가 소유한다.
+jarvis 는 기기마다 상주하는 게이트웨이(호스트 자원·서비스)와 그것을 모아 보여 주는 core 홈이다. ai-setup 의 기능(하네스 설치·갱신, 훅, 스킬·플러그인·MCP)을 모듈 단위로 흡수했다(`docs/2026-10-30-ai-setup-absorption.md`). `README.md` 는 소개와 빠른 시작을, 구조·설정·운영 방법은 `docs/` 의 문서(`architecture.md`·`configuration.md`·`operations.md` 등)가 소유한다.
 
 ## 원칙
 
@@ -16,7 +16,8 @@ jarvis 는 기기마다 상주하는 게이트웨이(호스트 자원·서비스
 
 | 문서 위치 | 읽는 시점 |
 | --- | --- |
-| `README.md` | 구조·설정·운영·배포 |
+| `README.md` | 소개·빠른 시작·문서 목록 |
+| `docs/architecture.md`·`configuration.md`·`operations.md`·`core-migration.md`·`usage.md`·`modules.md` | 구조·설정·운영·배포·core 전환·사용량·모듈 CLI |
 | `docs/README.md` | 문서 목록과 상태 |
 | `docs/PRD.md` | 목표·범위 (**SSoT**) |
 | `docs/SPEC.md` | 모듈 계약 (**SSoT**) |
@@ -36,7 +37,7 @@ jarvis 는 기기마다 상주하는 게이트웨이(호스트 자원·서비스
 | 단일 테스트 | `JARVIS_CONFIG=/dev/null python3 -m unittest tests.test_core -v` |
 | 화면 공용 JS | `node tests/test_jarvis_js.mjs` |
 | 옮긴 셋업 셸 진입점 | `bats tests/setup.bats`, `pwsh -NoProfile -c "Invoke-Pester tests/Setup.Tests.ps1, tests/RmShim.Tests.ps1"` |
-| 스냅샷 스키마 비교 | `README.md` 의 검증 절 |
+| 스냅샷 스키마 비교 | `docs/verification.md` |
 
 테스트는 표준 라이브러리 unittest 만 쓴다(외부 러너·의존성을 들이지 않는다). ai-setup 에서 옮긴 셸 진입점의 bats·Pester 테스트만 예외로 원래 러너로 돈다.
 

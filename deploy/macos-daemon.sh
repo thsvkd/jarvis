@@ -1,6 +1,6 @@
 #!/bin/bash
 # macOS: jarvis 를 LaunchAgent(로그인 세션)와 LaunchDaemon(시스템 도메인, GUI 로그인 불필요) 사이에서 옮긴다.
-# 사용자로 실행한다. sudo 는 처음에 한 번만 묻는다. README 의 macOS 절 참고.
+# 사용자로 실행한다. sudo 는 처음에 한 번만 묻는다. docs/operations.md 의 macOS 절 참고.
 #
 #   bash deploy/macos-daemon.sh install|uninstall|status [--dry-run]
 #

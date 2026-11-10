@@ -2,7 +2,7 @@
 
 JARVIS_TRAY=1 일 때만 켠다(deploy/jarvis-win.pyw·jarvis.plist). 그래픽 세션이 없는 SSH·systemd 실행에서는
 AppKit 이 프로세스를 죽일 수 있어서다. pystray·Pillow(macOS 는 pyobjc 도 따라온다)가 없으면 아이콘 없이 돈다.
-종료 항목은 없다: 서비스 관리자(launchd KeepAlive·예약 작업 5분 반복)가 다시 띄우므로, 끄려면 README 의 명령을 쓴다."""
+종료 항목은 없다: 서비스 관리자(launchd KeepAlive·예약 작업 5분 반복)가 다시 띄우므로, 끄려면 docs/operations.md 의 명령을 쓴다."""
 
 import base64
 import datetime

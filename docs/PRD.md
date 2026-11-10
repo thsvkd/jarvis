@@ -1,6 +1,6 @@
 # PRD
 
-> 범위: ai-setup 흡수(`2026-10-30-ai-setup-absorption.md` 의 D1~D16). 기존 jarvis 기능(게이트웨이·core 홈·사용량)은 `README.md` 가 설명하며 아직 이 문서에 없다.
+> 범위: ai-setup 흡수(`2026-10-30-ai-setup-absorption.md` 의 D1~D16). 기존 jarvis 기능(게이트웨이·core 홈·사용량)은 `README.md` 와 `architecture.md`·`usage.md` 가 설명하며 아직 이 문서에 없다.
 
 ## 문제
 

@@ -102,7 +102,7 @@ CLAUDE_KEEPALIVE_STALE_S = int(env("CLAUDE_KEEPALIVE_STALE_S", 1200))
 EXTRA_HOSTS = [h.lower() for h in env_list("HOSTS")]
 
 # ss -p 로 root 소유 리스너의 프로세스를 보려면 권한이 필요하다. pm2(일반 사용자)로 돌 때는
-# CAP_SYS_PTRACE·CAP_DAC_READ_SEARCH 파일 능력을 준 ss 사본을 쓴다(README 의 설치 절차 참고).
+# CAP_SYS_PTRACE·CAP_DAC_READ_SEARCH 파일 능력을 준 ss 사본을 쓴다(docs/operations.md 의 Linux 절 참고).
 SS_BIN = env("SS") or ("/usr/local/libexec/jarvis/ss" if os.access("/usr/local/libexec/jarvis/ss", os.X_OK) else "ss")
 PM2_BIN = env("PM2") or next((p for p in ("/home/linuxbrew/.linuxbrew/bin/pm2", "/opt/homebrew/bin/pm2",
                                           "/usr/local/bin/pm2", "/usr/bin/pm2") if os.access(p, os.X_OK)), "pm2")

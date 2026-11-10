@@ -119,7 +119,7 @@ ai-setup 의 update-ai(`jarvis/modules/setup/res/update/update_ai.py`)를 감싼
 | `plan` | 없음 | `{module: "core-trust", device, path, sha256, mode, proxy_key: set/unset, before, after, target: {ip, host}, steps: [{id: "core", summary, risk: "config", argv: []}], blocked: [{step, reason}], plan_id}` | 0 계획을 세움(막힌 단계 포함), 1 세우지 못함 |
 | `apply` | 설정 파일의 최상위 `core` 한 줄 | `{status: done/current/stale/failed, before, after, steps: [{id, result, message}]}` | 0 done·current, 1 failed(blocked 포함), 3 stale |
 
-- 진입점: `python -m jarvis` 는 인자가 없으면 게이트웨이를 기동하고, 첫 인자가 `update`·`module`·`agentsmd`·`core-trust`·`relocate`·`--version` 이면 그 명령을 돈다. 그 밖의 첫 인자(오타 포함)는 게이트웨이를 기동하지 않고 사용법을 표준 오류에 내고 종료 코드 1 이다. 런처가 받아 둔 릴리스(`versions/<버전>`)로 넘어가므로 실제로 도는 것은 그 릴리스의 코드다. `core-trust` 가 없는 옛 릴리스에서는 이 명령이 게이트웨이를 하나 더 띄우므로, 실행 전에 `python -m jarvis --version` 으로 버전을 확인한다(절차는 `README.md`).
+- 진입점: `python -m jarvis` 는 인자가 없으면 게이트웨이를 기동하고, 첫 인자가 `update`·`module`·`agentsmd`·`core-trust`·`relocate`·`--version` 이면 그 명령을 돈다. 그 밖의 첫 인자(오타 포함)는 게이트웨이를 기동하지 않고 사용법을 표준 오류에 내고 종료 코드 1 이다. 런처가 받아 둔 릴리스(`versions/<버전>`)로 넘어가므로 실제로 도는 것은 그 릴리스의 코드다. `core-trust` 가 없는 옛 릴리스에서는 이 명령이 게이트웨이를 하나 더 띄우므로, 실행 전에 `python -m jarvis --version` 으로 버전을 확인한다(절차는 `core-migration.md`).
 - 연산
   - `--add` 는 IP 를 목록 맨 앞에 둔다(이미 있으면 맨 앞으로 옮긴다). 트레이의 core 주소는 `CORE[0]` 이다. IP 는 IPv4 `100.64.0.0/10` 이고 `str(ipaddress.ip_address(x)) == x` 인 정규형만 받는다(서버는 IPv4 로만 bind 하고 `_trusted` 는 문자열이 정확히 같아야 통과시킨다).
   - `--remove` 는 목록에서 같은 문자열 항목을 뺀다.
@@ -165,7 +165,7 @@ ai-setup 의 update-ai(`jarvis/modules/setup/res/update/update_ai.py`)를 감싼
 
   - 옛 IP 를 빼는 좁히기(`--remove`)는 새 core 에서 200 을 받은 기기에서만 한다. 501·502 를 받은 기기는 미반영으로 남긴다.
   - 서비스가 읽는 설정 경로는 `/api/snapshot` 의 `config_path` 로 대조한다.
-- 전환 순서(넓히기 → 확인 → 인그레스 → 좁히기)와 수동 단계(새 core 설정·proxy_key 회전·재시작, pit5 Caddy, 옛 core 정리), 기기별 실행 위치와 python, 최소 버전 확인은 `README.md` 가 소유한다.
+- 전환 순서(넓히기 → 확인 → 인그레스 → 좁히기)와 수동 단계(새 core 설정·proxy_key 회전·재시작, pit5 Caddy, 옛 core 정리), 기기별 실행 위치와 python, 최소 버전 확인은 `core-migration.md` 가 소유한다.
 
 ## SSH 기기
 

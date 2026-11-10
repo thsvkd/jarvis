@@ -14,6 +14,13 @@
 | `2026-10-30-ai-setup-absorption.md` | 흡수 결정·기각한 대안·열린 문제·진행 기록 | `draft` |
 | `guard-policy.md` | 훅(danger_guard·rm 셔임)이 왜 그렇게 판정하는가 | `reference` (ai-setup README 에서 옮김) |
 | `setup-guide.md` | setup·harness 모듈이 무엇을 설치하고 바꾸는가(사용량에 영향을 주는 mod, 줄바꿈 키, update-ai) | `reference` (ai-setup README 에서 옮김) |
+| `architecture.md` | 무엇을 수집하고 코드가 어떻게 놓여 있는가, 운영 홈 | `reference` |
+| `configuration.md` | 설정 키, SSH 기기 | `reference` |
+| `operations.md` | 릴리스·갱신, 접속과 접근 통제, 운영체제별 설치와 운영, 실행본 이전 | `reference` |
+| `core-migration.md` | core 를 다른 기기로 옮기는 순서 | `reference` |
+| `usage.md` | AI 구독 사용량 수집, 로그인 상태와 다시 로그인 | `reference` |
+| `modules.md` | 모듈 CLI(plan·apply) | `reference` |
+| `verification.md` | 테스트와 스냅샷 스키마 비교 | `reference` |
 
 - 완료 판정은 `TEST_SPEC.md` 하나가 소유한다.
-- `SPEC.md` 는 자주 바뀌지 않는 계약만 담는다. 구조·설정·운영 방법은 `README.md` 가 소유한다.
+- `SPEC.md` 는 자주 바뀌지 않는 계약만 담는다. 구조·설정·운영 방법은 위 표의 `reference` 문서가 소유한다(2026-11-10 `README.md` 에서 옮김. `README.md` 는 소개와 빠른 시작만 담는다).

@@ -1,6 +1,6 @@
 #!/bin/sh
 # jarvis 설치기(macOS·Linux): 게이트웨이를 설치해 띄우고 모듈(훅·셋업)을 적용한다. 다시 실행해도 된다.
-# Windows 는 install.ps1 을 쓴다(README 의 운영 절).
+# Windows 는 install.ps1 을 쓴다(docs/operations.md).
 #
 #   curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh -s -- --core <core 의 tailnet IP> [--daemon]
 #
@@ -12,7 +12,7 @@
 set -eu
 
 CORE=""
-DAEMON=""  # --daemon: macOS 에서 LaunchAgent 대신 LaunchDaemon 으로 돈다(GUI 로그인이 없는 기기. README 의 macOS 절)
+DAEMON=""  # --daemon: macOS 에서 LaunchAgent 대신 LaunchDaemon 으로 돈다(GUI 로그인이 없는 기기. docs/operations.md 의 macOS 절)
 UNINSTALL=""  # --uninstall: 서비스 등록과 실행본(app·venv·versions)을 지운다. 설정·모듈이 쓴 것은 남긴다
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -27,7 +27,7 @@ done
 OS=$(uname -s)
 case "$OS" in
   Darwin|Linux) ;;
-  *) echo "macOS·Linux 만 지원합니다. Windows 는 install.ps1 을 쓰세요(README 의 운영 절)" >&2; exit 1 ;;
+  *) echo "macOS·Linux 만 지원합니다. Windows 는 install.ps1 을 쓰세요(docs/operations.md)" >&2; exit 1 ;;
 esac
 if [ -n "$DAEMON" ] && [ "$OS" != Darwin ]; then
   echo "--daemon 은 macOS 전용입니다" >&2
@@ -154,7 +154,7 @@ fi
 # 4. 서비스: macOS 는 LaunchAgent(로그인한 사용자 세션), Linux 는 systemd 사용자 유닛
 if [ -n "$MY_DAEMON" ]; then
   # 에이전트를 새로 만들면 다음 GUI 로그인 때 두 번째 jarvis 가 같은 포트를 잡으려 한다
-  [ -n "$DAEMON" ] || echo "LaunchDaemon 으로 등록된 기기라 LaunchAgent 를 만들지 않습니다(되돌리기: README 의 LaunchDaemon 모드 절)"
+  [ -n "$DAEMON" ] || echo "LaunchDaemon 으로 등록된 기기라 LaunchAgent 를 만들지 않습니다(되돌리기: docs/operations.md 의 LaunchDaemon 모드 절)"
 elif [ "$OS" = Darwin ]; then
   if [ ! -f "$AGENT" ]; then
     mkdir -p "$(dirname "$AGENT")"

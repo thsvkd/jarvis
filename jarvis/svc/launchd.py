@@ -1,5 +1,5 @@
 """launchd 작업(macOS). systemd 유닛과 같은 모양으로 내놓는다. 자원은 주 프로세스(psutil)로 센다.
-실동작은 Mac Studio 에서 한 번 확인해야 한다(README 참고). 파서는 tests/ 의 fixture 로 검증한다."""
+실동작은 Mac Studio 에서 한 번 확인해야 한다(docs/operations.md 참고). 파서는 tests/ 의 fixture 로 검증한다."""
 
 import re
 import time

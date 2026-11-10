@@ -1,499 +1,107 @@
-# Jarvis (옛 PIT5 Monitor)
+# Jarvis
 
-개발 저장소: `~/Workspace/jarvis`(git 체크아웃). 설치기(install.sh·install.ps1)가 설치한 실행본은 `~/.local/share/jarvis/app`
-(Windows `%LOCALAPPDATA%\jarvis\app`)이다. 아래의 '저장소'는 서비스가 띄우는 이 폴더(실행본 app 또는 개발 체크아웃)를 말한다.
-1.8.0 이전 설치기가 `~/Workspace/jarvis` 에 푼 실행본은 [실행본 이전](#실행본-이전-180)으로 app 으로 옮긴다.
-원본은 s2 의 이 저장소이고, 운영 기기는 GitHub 릴리스를 받는다(`claude update` 와 같은 방식, `jarvis/self_update.py`·`jarvis/launch.py`).
-- 릴리스: s2 에서 `jarvis/__init__.py` 의 `__version__` 을 올려 커밋한 뒤 `python3 tools/release.py`. 태그 `v<버전>` 과
-  소스 묶음·`manifest.json`(버전·주소·SHA256)을 GitHub 릴리스에 올린다.
-- 갱신: core 홈 기기 목록의 **jarvis 업데이트**(또는 **jarvis 모두 업데이트**, core 자신은 마지막) 또는 그 기기에서 `python3 -m jarvis update`
-  (`--check` 는 확인만). 새 버전이면 묶음을 받아 SHA256 을 확인하고 `~/.local/share/jarvis/versions/<버전>`
-  (Windows `%LOCALAPPDATA%\jarvis\versions`)에 풀고 `current.json` 을 바꾼 뒤 스스로 끝난다. 자동 갱신은 없다.
-- 기동: 서비스는 그대로 저장소에서 `python3 -m jarvis` 를 띄우고, 런처가 받아 둔 릴리스가 저장소보다 새로우면 그 폴더의 코드로 넘어간다
-  (s2 처럼 저장소가 같거나 새로우면 저장소가 돈다). 새 릴리스가 60초를 못 버티고 세 번째로 뜨면 이전 버전(없으면 저장소)으로 되돌리고,
-  그 버전은 다음 릴리스가 나올 때까지 다시 받지 않는다. `python3 -m jarvis --version` 이 지금 쓰는 버전을 보인다.
-- 의존 패키지(psutil 등)나 서비스 정의(plist·pyw·유닛)가 바뀌는 릴리스는 버튼만으로 반영되지 않는다. 그 기기에서 직접 손본다.
+기기마다 상주하는 게이트웨이가 호스트 자원과 서비스를 읽고, core 홈이 여러 기기를 한 화면에 모아 보여 주는 읽기 전용 대시보드다.
+Python 수집기(표준 라이브러리 + psutil)와 정적 HTML 로 되어 있고, macOS·Linux·Windows 에서 같은 코드로 돈다.
 
-기기 한 대를 통째로 보는 읽기 전용 대시보드. Python 수집기(표준 라이브러리 + psutil) + 정적 HTML(홈·네트워크 맵).
-Linux(지금은 pit5 = Raspberry Pi 5 에서 운영)와 macOS(Mac Studio 로 옮길 예정)에서 같은 코드로 돈다.
-기기마다 다른 값(인그레스 경로·컨테이너 이름·도메인 등)은 설정 파일로 준다([설정](#설정)).
+## 주요 기능
 
-## 접속 (pit5)
+- **하드웨어**: CPU·메모리·디스크·네트워크. Raspberry Pi 의 전력·팬·스로틀링, Apple Silicon 의 온도·GPU·전력
+- **서비스**: 컨테이너·compose·서비스 관리자 유닛(systemd·launchd)·열린 포트와 소유 프로세스
+- **인그레스**: Caddy 라우트와 Cloudflare Tunnel 의 경로별 프로브, 설정 드리프트, 인증서 잔여일
+- **네트워크 맵**: 서비스가 노출되는 경로(개념)와 기기·인터페이스·도커 네트워크 구성(물리)
+- **여러 기기**: core 홈에 기기 목록을 모으고, 기기별 화면과 jarvis 업데이트를 한곳에서 다룬다
+- **AI 구독 사용량**: Claude·Codex·Grok 등의 계정별 한도, 로그인 상태, 다시 로그인과 계정 전환
+- **AI 셋업 모듈**: 하네스·훅·스킬·플러그인·MCP 를 계획(plan)으로 먼저 보이고 승인한 대로 적용(apply)
 
-| 경로 | 주소 |
-|---|---|
-| tailnet (HTTPS) | https://jarvis.example.com/ — Caddy `(private)` 스니펫. 터널 경로(:80)에서는 404 |
-| tailnet (직접) | http://pit5:9300/ · http://100.64.0.2:9300/ |
-| LAN | http://192.168.0.10:9300/ (유선) · http://192.168.0.11:9300/ (Wi-Fi) |
+전체 목록은 [구조와 화면](docs/architecture.md)에 있다.
 
-| 페이지 | 경로 |
-|---|---|
-| 홈(개요) — Bento Focus | `/` |
-| 서비스 네트워크 맵 — Atlas | `/map/` — 개념 모드(서비스가 어떤 경로로 노출되는가) · 물리 모드(어느 기기·인터페이스·도커 네트워크 안에 무엇이 있는가). `#focus=<서비스 id>` 로 특정 노드를 연다 |
+## 빠른 시작
 
-인증이 없으므로 접근 통제가 전부다. 공개 라우트(Caddy `(public)`)나 터널에 절대 올리지 않는다.
-- 접속 IP: 루프백·사설망·tailnet 만. 도커 대역은 Caddy 컨테이너에서 온 요청만, X-Forwarded-For 원 클라이언트가 허용 대역일 때만.
-- Host 헤더: 이 기기의 IP·호스트명·`<호스트명>.local`·tailnet 이름·설정의 `hosts`(pit5: `jarvis.example.com`)·모니터로 가는 Caddy 라우트만(DNS 리바인딩 차단, 그 밖은 421).
-- Cloudflare 헤더가 붙은 요청은 403(터널로 잘못 노출돼도 열리지 않게).
-- Caddy `@mon` 은 `remote_ip` 로 tailnet 대역만 받는다(:443 이 모든 인터페이스에 열려 있어서).
-- 동시 연결 48개·소켓 타임아웃 15초. 정적 경로의 제어 문자·역슬래시·인코딩된 슬래시는 400, 점 파일은 404.
-- 홈·맵은 엄격한 CSP(`script-src 'self'`, 인라인 스크립트·이벤트 핸들러 금지). 공용 `JARVIS.html` 템플릿은 자동 이스케이프하고
-  href/src 에 안전한 URL 만 넣으며, 이벤트 핸들러·따옴표 없는 속성·script/style 본문에는 값을 넣지 않는다.
+준비물은 [Tailscale](https://tailscale.com/) 뿐이다. git·Homebrew·Python 이 없어도 설치기가 uv 로 Python 을 받는다.
 
-## 무엇을 보나
+> 인증이 없으므로 접근 통제가 전부다. 루프백·사설망·tailnet 에서만 열리며, 공개 라우트나 터널에 올리지 않는다([접속과 접근 통제](docs/operations.md#접속-pit5)).
 
-- 하드웨어: CPU(전체·코어별·클럭·부하·온도), 메모리·스왑, 디스크 용량·I/O, 네트워크(LAN·tailnet·도커).
-  Raspberry Pi 면 GPU(V3D 큐별 사용률·클럭)·PMIC 보드 전력·5V 입력·팬·스로틀링, Apple Silicon 이면 macmon 이 있을 때 온도·GPU·시스템 전력.
-  기기에 없는 계기는 화면에서 숨긴다
-- 서비스 7개 카테고리: 공개(Cloudflare Tunnel) · Tailnet 전용(Caddy :443) · Hermes · 호스트 서버(직접 포트) · 내부 백엔드 · 인프라 · 시스템 데몬
-- 라우트별 3경로 프로브: Caddy :443(tailnet 경로) · Caddy :80(터널 경로 — 비공개는 404 여야 함) · 공개 DNS→Cloudflare(공개만), 인증서 잔여일, 공개 DNS 가 가리키는 곳
-- Caddy 활성 설정 vs Caddyfile vs 터널 ingress vs create-public-tunnel.sh 드리프트
-- Caddy adapter로 해석한 파일과 활성 라우트의 호스트·업스트림·수신 포트 비교. 같은 도메인의 배포 대상 변경도 감지
-- 원격 Caddy 업스트림을 Tailscale 피어에 연결하고 HTTP 응답과 실행 위치를 표시. 원격 호스트 내부의 컨테이너·자원은 수집하지 않는다
-- LAN 이웃 테이블(ip neigh / arp)에서 관측한 기기. STALE 캐시는 온라인 증거로 사용하지 않는다. 통신하지 않은 기기는 발견되지 않을 수 있다
-- 구성 변경 최근 200건(컨테이너·라우트·Tailscale·LAN 기기·유닛·PM2). 이미지 ID·OCI revision으로 같은 태그의 재배포도 구분
-- Caddy 접근 로그 24시간(호스트별·상태별·경로별), cloudflared 연결·엣지·RTT·버전
-- Tailscale 피어, Hermes 게이트웨이 상태 API(어댑터별 연결)와 이 기기의 Hermes 컨테이너·프로세스(2026-10-13 OpenClaw 에서 Hermes 로 옮김)
-- 열린 포트 전부(바인딩 범위·소유 프로세스), 컨테이너·compose·서비스 관리자 유닛(systemd·launchd), 경보
-- 물리 구성: 기기 ⊃ 인터페이스·Docker 엔진 ⊃ 도커 네트워크 ⊃ 컨테이너, LAN(게이트웨이)·tailnet 과 다른 기기(같은 기기 안 노드 묶음)
-- 이 모니터 자신: 버전·커밋·수집기별 최신성과 오류·루프 시간·스냅샷 크기(멈추면 경보)
+**1. 첫 기기에 설치한다** (macOS·Linux)
+
+```sh
+curl -fsSL https://github.com/thsvkd/jarvis/releases/latest/download/install.sh | sh
+```
+
+설치가 끝나면 서비스(macOS LaunchAgent `dev.jarvis`, Linux systemd 사용자 유닛 `jarvis`)가 뜬다. 브라우저에서 `http://<기기>:9300/` 을 연다.
+
+**2. 다른 기기를 core 에 모은다**
+
+모을 기기에서 core 의 tailnet IP 를 주어 설치한다.
+
+```sh
+curl -fsSL https://github.com/thsvkd/jarvis/releases/latest/download/install.sh | sh -s -- --core <core 의 tailnet IP>
+```
+
+Windows 는 관리자 PowerShell 에서 실행한다.
+
+```powershell
+& ([scriptblock]::Create((irm https://github.com/thsvkd/jarvis/releases/latest/download/install.ps1))) -Core <core 의 tailnet IP>
+```
+
+**3. core 의 설정에 기기를 등록한다**
+
+core 기기의 `~/.config/jarvis/config.toml` 에 모을 게이트웨이와 조작 버튼을 누를 수 있는 기기를 적고 core 를 재시작한다.
+
+```toml
+devices = [
+  { id = "my-mac", url = "http://<그 기기의 tailnet IP>:9300" },
+]
+viewers = ["<조작을 허용할 기기의 tailnet IP>"]
+```
+
+core 홈(`/`) 위쪽에 기기 목록이 생기고, `/?device=<id>` 로 그 기기 화면을 연다. 키 전체와 SSH 로만 닿는 기기는 [설정](docs/configuration.md)을 본다.
 
 ## 구조
 
 ```
-jarvis/          수집기 + HTTP 서버 (python3 -m jarvis)
-  config.py      설정: 환경 변수 > 설정 파일(TOML) > 기본값
-  system.py      호스트 자원(psutil) — CPU·메모리·디스크·네트워크·프로세스
-  platform/      운영체제별 구현. common.py(psutil·Docker API 기본값) ← linux.py(cgroup·ss·ip·sysfs) / darwin.py(route·lsof·sysctl)
-  hw/            기기 전용 선택 수집기: rpi.py(vcgencmd·V3D·팬), macmon.py(Apple Silicon 온도·GPU·전력)
-  svc/           서비스 관리자: systemd.py / launchd.py (같은 모양의 유닛 목록)
-  runtime.py     docker API(unix socket)·pm2·리스닝 소켓 → 소유 주체
-  ingress.py     Caddy autosave.json·접근 로그, cloudflared metrics/로그, 프로브, DoH
-  tailnet.py     tailscale status, Hermes 게이트웨이
-  model.py       스냅샷 조립: 서비스 분류·경보·토폴로지
-  collector.py   2/10/60/300초 주기 스레드, 히스토리(1h@5s, 24h@1m → ~/.local/state/jarvis), 경보 since·연속 실패 카운트
-  server.py      /api/*, 정적 파일, 접근 대역 제한
-  module.py      모듈 공통 계약의 CLI 와 모듈 목록(MODULES)
-  modules/       doctor·hooks·setup·harness. 폴더마다 contract.py 가 계약 층(jarvis 안에서만 쓰고 설치본에 복사하지 않는다)이고, 나머지는 ai-setup 에서 옮긴 독립 실행 파일이다
-static/
-  index.html     홈(개요, Bento)
-  map/           서비스 네트워크 맵(Atlas)
-  setup/         AI 셋업: 기기별 모듈(훅·셋업·하네스·doctor) 상태 → 계획 → 실행 → 결과(API 는 docs/SPEC.md 의 "AI 셋업 화면")
-  app/           제품 자산: tokens.css(디자인 토큰·라이트/다크 값), shell.*(공통 헤더·공용 유틸리티·테마), theme-init.js, bento.*, focus-layout.js·focus.js·focus.css(운영 Focus), atlas.*
-  shared/        jarvis.js(공용 클라이언트, 전역 JARVIS), API.md(스냅샷 스키마), favicon
-                 화면 설정은 localStorage `jarvis.*` 에 두고, 이름을 바꾸기 전 `pit5.*` 값도 이어 읽는다
-tests/           파서·플랫폼 층·스냅샷 조립 단위 테스트, tests/data/ 는 명령 출력 fixture
-tools/shot.mjs   헤드리스 chromium 스크린샷·콘솔 오류·가로 넘침 검사 (CDP 직접, 의존성 없음)
-tools/snapcheck.py  시험 포트로 기동해 /api/snapshot 스키마를 기준선과 비교
-deploy/          systemd 사용자 유닛(Linux)·pm2 ecosystem, launchd plist·LaunchDaemon 전환 스크립트(macOS), 기기별 설정(s2.toml·pit5.toml·gateway.toml·macstudio.toml)
+기기 A ─ 게이트웨이(:9300) ┐
+기기 B ─ 게이트웨이(:9300) ┼─ core 홈 ─ 브라우저(tailnet)
+기기 C ─ SSH 로만 닿는 기기 ┘
 ```
 
-의존성: Python 3.11+(설정 파일을 읽는 tomllib), psutil. 선택: pystray·Pillow(Windows 알림 영역·macOS 메뉴 막대 아이콘, `JARVIS_TRAY=1` 일 때). Linux 에서 쓰면 좋은 것: iproute2(`ip`·`ss`), docker, tailscale, pm2.
+- **게이트웨이**: `python -m jarvis`. 그 기기의 자원·서비스를 수집해 스냅샷 API 와 화면(`/`, `/map/`)을 낸다.
+- **core**: 설정에 `devices` 가 있는 게이트웨이. 다른 게이트웨이의 값을 요청마다 모아 보여 주고 조작을 전달한다.
+- **모듈**: 기기 쪽 설치(훅·셋업·하네스)를 `plan` → `apply` 계약으로 다룬다.
 
-## 운영 홈 — Focus
+코드 배치와 수집 항목은 [구조와 화면](docs/architecture.md)에 있다.
 
-`/`는 선택한 Focus 개선판을 사용한다. 기존 Bento 카드·계기·상세 창을 재사용한다.
-서비스를 개수 제한 없이 고정하고, 전체 보기·검색·카테고리로 모든 서비스에 접근한다.
-고정 목록 밖의 저하·다운·확인 불가 항목은 별도 상세 바로가기로 표시한다.
-헤더의 탭 한 줄(개요·기기·AI 사용량·서비스·하드웨어·네트워크·런타임 | 네트워크 맵·AI 셋업)이 화면을 고른다.
-`/` 안의 탭은 주소 해시(`#usage` 등)로 섹션 하나만 보이며 다시 불러오지 않는다. 해시가 없으면 개요다.
-기기·AI 사용량 탭은 core 에서만 보인다. 맵·셋업 페이지는 개요에서 마지막으로 본 값(localStorage `jarvis.shellCore`)으로 판단한다.
-페이지를 옮길 때 헤더는 마지막으로 받은 호스트(localStorage `jarvis.shellHost`)를 먼저 그리고 응답이 오면 바꾼다.
-개요의 네트워크 맵은 접고 제목에 경로 수·문제 수를 표시한다. 수치는 갱신될 때 중간 값 없이 바로 최종 값으로 바뀐다.
-모바일에서는 분류별 막대·운영 통계와 경보 상세를 선택해 펼친다.
-
-서비스 고정·전체 보기·지도 접기·모바일 통계·경보 펼치기는 localStorage `jarvis.home.focus.*`에 저장한다.
-기존 테마·지도 관점·검색 필터의 저장 경로를 유지한다.
+## 갱신과 제거
 
 ```sh
-node tools/check-home.mjs http://100.64.0.2:9300 /tmp/jarvis-home-check
+python3 -m jarvis update            # 새 릴리스를 받는다(--check 는 확인만). core 홈의 'jarvis 업데이트' 버튼과 같다
+python3 -m jarvis --version         # 지금 쓰는 버전
+curl -fsSL https://github.com/thsvkd/jarvis/releases/latest/download/install.sh | sh -s -- --uninstall
 ```
 
-같은 브라우저 프로필에서 데스크톱→모바일 재접속 시 설정 복원, 헤더 탭 이동(해시가 없으면 개요, 탭마다 섹션 하나),
-검색·필터·상세·경보 이동, 폴링 후 고정 목록 유지, 지도 접기 저장, 실제 수집 오류 키·연결 지연을 검사한다.
+자동 갱신은 없다. 제거는 서비스 등록과 실행본만 지우고 설정(`config.toml`)은 남긴다. 릴리스 방법, 되돌리기, Windows 제거는 [운영](docs/operations.md)에 있다.
 
-## 설정
+## 문서
 
-우선순위: 환경 변수 `JARVIS_*` > 설정 파일 > `jarvis/config.py` 의 기본값.
-
-- 설정 파일: `$JARVIS_CONFIG` 또는 `~/.config/jarvis/config.toml`. 키는 환경 변수 이름에서 접두어를 뗀 소문자다
-  (`JARVIS_INGRESS_DIR` → `ingress_dir`). 목록은 TOML 배열 또는 쉼표 구분 문자열.
-- 예시: `deploy/pit5.toml`(pit5 운영값), `deploy/macstudio.toml`.
-- 코드의 기본값은 중립이다(Caddy 컨테이너 `caddy`, 터널 `cloudflared`, 인그레스 경로·도메인·추가 Host 없음). pit5 는 설정 파일이 있어야
-  지금과 같은 결과가 나온다. 설정 파일을 못 읽으면 `meta.errors.config` 에 이유가 뜬다.
-- Caddy·터널이 없는 기기는 `caddy = ""`·`tunnel = ""` 로 두면 그 수집을 건너뛰고 인프라 목록에서 뺀다.
-- `[infra_units]`: 인프라 항목의 서비스 관리자 이름(Linux 는 systemd 유닛, macOS 는 launchd 라벨). 빈 값이면 뺀다.
-
-주요 키: `port`(9300) · `bind` · `allow` · `hosts` · `state` · `ingress_dir` · `caddy` · `tunnel` · `tunnel_name` · `domain` ·
-`docker_sock`(자동: /var/run/docker.sock → ~/.orbstack/run/docker.sock → ~/.docker/run/docker.sock. Docker 가 없는 기기는 `""`) ·
-`hermes_re`(Hermes 카테고리로 묶을 컨테이너·프로세스 이름, 기본 `hermes`) · `hermes_url`(Hermes 게이트웨이 `/api/status`, 빈 값이면 안 봄) · `ss` · `pm2` · `tailscale` ·
-`core`(이 기기의 사용량·계정·모듈 경로를 부를 core 기기 tailnet IP 목록. 루프백은 받지 않는다) ·
-`devices`(core 역할: 모을 게이트웨이 `[{id, url}, …]`, SSH 로만 닿는 기기는 `{id, ssh}`(아래 "SSH 기기"), 설정 파일 전용·재시작 필요) · `viewers`(core 홈의 조작 버튼(jarvis 갱신·로그인·계정 전환·모듈 적용)을 누를 수 있는 tailnet IP) · `proxies`(viewers 판정에서 X-Forwarded-For 마지막 항목을 믿을 리버스 프록시 tailnet IP. 도메인을 받는 pit5 Caddy) · `cswap_install`(hswap 자동 설치, 기본 true) · `claude_stale_s`(Claude 사용량 저장소 값이 오래됐다고 볼 기준, 기본 900초) · `claude_keepalive_stale_s`(hswap keepalive 확인이 멈췄다고 볼 기준, 기본 1200초). `core`·`viewers` 는 호스트명이 아니라 tailnet IP 로 적는다(루프백·LAN IP 는 적어도 받지 않는다. core 가 자기 자신도 모으면 그 `url` 도 tailnet IP 로 적는다).
-core 홈(`/`) 위쪽에 기기 목록이 생기고, `/?device=<id>`·`/map/?device=<id>` 로 그 기기 화면을 연다.
-
-설정 파일은 10초마다 변경 여부를 확인한다. 인그레스 대상·도메인·추가 Host·Hermes·인프라 유닛·기대 서비스는 자동 반영한다.
-잘못된 TOML은 마지막 정상 설정을 유지하고 수집 오류로 표시하며, 파일을 고치면 재시작 없이 회복한다.
-`port`, `bind`, `allow`, `state`, `static`, `docker_sock`, `user_uid`, 명령 경로(`ss`·`pm2`·`tailscale`) 변경은
-기존 리스너·접근 통제와 함께 재시작해야 하며 화면에 경보가 뜬다. 환경 변수 우선순위는 동일하다.
-
-- `caddyfile_container_path`: adapter가 읽는 컨테이너 안 파일(기본 `/etc/caddy/Caddyfile`). 호스트 파일의 주석·설명은 `ingress_dir/Caddyfile`에서 읽는다.
-- `expected_services`: 없어지면 경보할 서비스 ID 목록(예: `["route:card.example.com", "ctr:chat-ai-db"]`). 의도적으로 철거하면 목록에서도 뺀다.
-- `expected_units`: 중지·언로드되어도 감시할 시스템 유닛 목록(예: `["my-app.service"]`). 일반 loaded 유닛도 inactive 상태를 목록에 유지한다.
-
-홈의 런타임 섹션과 `/api/changes`에서 구성 변경 이력을 본다. `~/.local/state/jarvis/inventory.json`에
-30초마다, 종료 시 저장한다. 최초 관측은 기준선으로 잡으며 수집 실패는 대량 삭제로 기록하지 않는다.
-명령줄·환경 변수·임의 Docker label은 저장하지 않는다. 기기 제거는 관측 목록에서 빠졌다는 의미다.
-
-## core 전환
-
-core 를 다른 기기로 옮길 때 각 기기 설정의 `core`(그 기기를 조작할 수 있는 core 의 tailnet IP)를 바꾸는 절차다. 계약은 `docs/SPEC.md` 의 "core 전환" 절이다.
-`core` 는 HTTP 로는 바꿀 수 없다. 각 기기의 셸 사용자가 `python -m jarvis core-trust` 로 바꾼다.
-
-실행 위치와 python: 그 기기의 서비스가 쓰는 python 을 저장소 폴더에서 부른다.
-
-| 기기 | 폴더 | python(아래 `$PY`) |
-| --- | --- | --- |
-| macOS | `cd ~/.local/share/jarvis/app`(개발 체크아웃 기기는 `~/Workspace/jarvis`) | `~/.local/share/jarvis/venv/bin/python`(install.sh 설치. 수동 설치면 LaunchAgent plist 의 python) |
-| Linux | `cd ~/.local/share/jarvis/app`(개발 체크아웃 기기는 `~/Workspace/jarvis`) | `systemctl --user cat jarvis` 의 `ExecStart` 에 적힌 python |
-| Windows | `cd $env:LOCALAPPDATA\jarvis\app`(개발 체크아웃 기기는 `$env:USERPROFILE\Workspace\jarvis`) | 예약 작업의 python: `(Get-ScheduledTask jarvis).Actions.Execute` 의 `pythonw.exe` 와 같은 폴더의 `python.exe` |
-
-각 단계 전에 `$PY -m jarvis --version` 이 **1.7.11 이상**인지 본다. 그보다 옛 릴리스는 `core-trust` 를 모르고 게이트웨이를 하나 더 띄우려 한다.
-
-```sh
-$PY -m jarvis core-trust plan --add <새 core IP> --json                          # before·after·target.host·blocked·plan_id
-$PY -m jarvis core-trust apply --add <새 core IP> --plan-id <plan_id> --json     # 같은 계획일 때만 core 한 줄을 바꾼다
-```
-
-- `target.host` 가 옮길 core 의 tailnet 호스트명(MagicDNS 이름, 예: `thsvkd-macmini.<tailnet>.ts.net`)인지 보고 승인한다. `blocked` 가 있으면 apply 는 `failed` 다.
-- 설정 파일 소유자로 실행한다. `sudo` 로 실행하면 막힌다(바꾼 파일을 게이트웨이가 읽지 못하게 된다).
-- `core` 줄의 꼬리 주석이나 여러 줄 배열처럼 막힌 사유는 손으로 고친 뒤 다시 plan 한다.
-- 출력에는 `proxy_key` 의 값이 아니라 `set`/`unset` 만 나온다. 백업 파일은 만들지 않는다.
-
-순서는 넓히기 → 확인 → 인그레스·proxy_key 회전 → 좁히기 → 옛 core 정리다.
-
-0. **사전**: 옛 core 홈의 **jarvis 모두 업데이트**로 1.7.11 이상을 깐다. 꺼져 있거나 갱신하지 못한 기기는 미반영 목록에 적는다.
-1. **새 core 준비(수동)**
-   - `devices`·`viewers`·`hosts`·`proxies`·`hermes_url` 을 첫 테이블 앞 최상위에 적는다.
-   - proxy_key 는 전환할 때마다 새로 만든다. 새 키는 화면·명령 인자·셸 히스토리에 남기지 않고 새 core 설정의 `proxy_key`(파일 권한 0600)에만 넣는다.
-   - 서비스를 재시작한다(`devices` 는 재시작 키다). 이 시점에 게이트웨이 조작이 403 인 것은 정상이다.
-2. **넓히기**: 새 core 의 `devices` 에 든 모든 기기(옛 core 와 새 core 자신 포함)에서 `plan --add <새 IP>` → `apply` 를 한다. 10초 안에 반영되며 재시작은 필요 없다.
-3. **확인**: 새 core 의 `GET /api/devices/modules` 에서 기기별 `status` 를 본다.
-
-   | 코드 | 뜻 | 할 일 |
-   | --- | --- | --- |
-   | 200 | 그 기기가 새 core 를 믿는다 | 5단계 대상 |
-   | 403 | 믿지 않는다 | 2단계가 빠졌거나 서비스 환경이 다르다. 그 기기 `/api/snapshot` 의 `config_path` 를 CLI 출력의 `path` 와 대조한다 |
-   | 501 | 판단할 수 없다(게이트웨이가 옛 버전) | 갱신한 뒤 다시 확인한다. 그때까지 미반영 |
-   | 502 | 닿지 않는다 | 미반영 |
-
-4. **인그레스·proxy_key 회전(pit5, 수동)**
-   - ingress `.env` 의 `JARVIS_PROXY_KEY` 를 1단계의 새 키로 바꾼다. 이때도 화면에 내지 않는다.
-   - Caddy upstream 을 새 core 로 바꾸고 Caddy 를 재생성한다.
-   - 도메인 화면에서 viewer 전용 읽기(모듈 계획 보기)가 되면 `proxies`·`proxy_key` 가 맞은 것이다.
-   - 실패하면 Caddy 만 되돌린다. 아직 두 IP 를 모두 믿으므로 다른 롤백은 필요 없다.
-5. **좁히기**: 3단계에서 200 을 받은 기기에서만 `plan --remove <옛 IP>` → `apply` 를 한다. 결과에 유효한 tailnet IP 가 하나도 남지 않으면 막힌다.
-6. **옛 core 정리(수동)**: 옛 core 설정에서 `devices`·`viewers`·`proxies`·`proxy_key` 줄을 지우고 재시작한다. 그 설정의 백업·사본에서도 `proxy_key` 줄을 지운다.
-7. **미반영 기기**: 켜지거나 갱신되면 그 기기에만 2·3·5단계를 한다.
-   - 그때까지 그 기기는 옛 core IP 를 믿는다.
-   - 옛 core 기기를 재활용하거나 처분하기 전에 이 목록을 비운다. 그 tailnet IP 가 다른 기기에 가면 그 기기가 core 권한을 얻는다.
-
-롤백:
-
-- 5단계 전이면 두 IP 를 모두 믿으므로 Caddy 와 새 core 설정만 되돌린다.
-- 5단계 뒤면 그 기기에서 `plan --add <옛 IP>` → `apply` 로 되돌린다.
-- 실행 중에는 마지막 정상 설정을 유지하지만 재시작하면 `CONFIG_ERROR` 로 빈 신뢰가 된다. 그래서 CLI 는 다시 파싱해 검증된 파일만 교체한다. 설정을 손으로 고쳤다면 재시작 전에 `plan` 에 TOML 오류가 없는지 본다.
-
-사례: 2026-11-04 의 s2(pi5-server2) → thsvkd-macmini 전환은 이 CLI 가 생기기 전이라 각 기기 설정을 손으로 고쳤다.
-
-## SSH 기기
-
-core 의 tailnet 으로는 닿지 않고 SSH 로만 닿는 기기(예: 다른 tailnet 의 회사 기기에 ProxyJump 로 닿는 경우)는 core 설정에 `ssh` 로 적는다. 계약은 `docs/SPEC.md` 의 "SSH 기기" 절이다.
-
-```toml
-[[devices]]
-id = "thsvkd-kgolf-macmini"
-ssh = "kgolf-macmini-m1"   # core 사용자 ~/.ssh/config 의 Host 별칭
-```
-
-- 항목은 `{id, url}` 또는 `{id, ssh}` 중 하나다. 별칭은 영숫자로 시작하는 `[A-Za-z0-9._-]` 64자 이하만 받는다. `/api/devices` 의 `url` 은 `ssh://<별칭>` 이고, 카드에 'SSH 경유' 가 붙는다.
-- 조회(스냅샷·history·changes)는 `ssh -W 127.0.0.1:9300` 으로 그 기기 게이트웨이의 루프백에 GET 한다. 조작은 AI 셋업 모듈(status·plan·apply)과 jarvis 업데이트만 원격 `python -m jarvis …` 로 한다. 사용량·로그인·계정 전환은 501 이다.
-- jarvis 업데이트는 원격 `update` 로 받은 뒤 새 판이면 스냅샷의 게이트웨이 pid 에 `kill -TERM` 을 보낸다(그 pid 의 명령줄이 `-m jarvis` 로 끝날 때만). 다시 띄우는 것은 서비스 관리자다.
-
-전제(사용자가 준비한다. jarvis 는 ssh 설정을 읽거나 쓰지 않는다):
-
-- core 기기
-  - 별칭과 ProxyJump 를 core 서비스 사용자의 `~/.ssh/config` 에 둔다. macOS 는 `/usr/bin/ssh` 를 쓴다(Homebrew openssh 는 `UseKeychain` 을 거절한다).
-  - **점프 호스트 Host 블록에도** `BatchMode yes`·`ConnectTimeout 5`·`ServerAliveInterval 5` 를 둔다. 명령줄 `-o` 는 목적지 홉에만 걸린다.
-  - known_hosts 에 점프 호스트와 대상의 호스트 키를 미리 등록한다(대화형 `ssh <별칭> true` 한 번).
-  - core 서비스(LaunchAgent·systemd) 세션에서 passphrase 입력 없이 쓸 수 있는 키(에이전트·키체인)가 있어야 한다. 대화형 셸에서 되더라도 서비스에서는 `Permission denied` 일 수 있다. [LaunchDaemon 모드](#launchdaemon-모드-gui-로그인-없는-mac)에는 에이전트·키체인이 없어 passphrase 없는 키 파일만 쓸 수 있다.
-- 대상 기기
-  - sshd 가 명령 실행과 TCP 포워딩을 허용한다. 키를 `permitopen` 전용으로 좁히면 조작이 안 된다.
-  - install.sh 배치다: 저장소 `~/.local/share/jarvis/app`(없으면 옛 배치·개발 체크아웃 `~/Workspace/jarvis`), python `~/.local/share/jarvis/venv/bin/python`. 손으로 설치한 기기는 조작이 502(배치 아님)로 끝난다. 대상은 macOS·Linux 이고 jarvis 1.7.8 이상이다(낮으면 501, 그 기기에서 직접 갱신).
-  - **jarvis 업데이트 버튼은** 서비스 정의가 `KeepAlive=true`(launchd) 또는 `Restart=always`(systemd)이고, 스냅샷의 `monitor.pid` 가 서비스 관리자가 띄운 pid 일 때만 쓴다. 아니면 kill 뒤 게이트웨이가 꺼진 채 남는다. install.sh 는 이미 있는 plist 를 덮어쓰지 않으므로 그 기기에서 확인한다.
-
-        plutil -extract KeepAlive raw -o - ~/Library/LaunchAgents/dev.jarvis.plist     # true
-        launchctl print gui/$(id -u)/dev.jarvis | grep -m1 'pid ='                      # 스냅샷 monitor.pid 와 같은지
-        # LaunchDaemon 모드는 /Library/LaunchDaemons/dev.jarvis.plist 와 system/dev.jarvis 로 확인한다
-
-절차:
-
-1. core 기기 대화형 셸에서 `/usr/bin/ssh -T -o BatchMode=yes -- <별칭> true` 가 되는지 본다.
-2. core 설정에 `{id, ssh}` 를 넣고 core 서비스를 재시작한다(`devices` 는 재시작 키다).
-3. `/api/devices` 의 그 행이 `reachable` 이고 `error` 가 비어 있으며 `fails` 가 0 인지 본다. `Permission denied` 면 서비스 세션의 키 문제다.
-4. AI 셋업 화면에서 그 기기의 모듈 상태가 보이는지, 사용량 버튼이 'SSH 로 닿는 기기는 …' 사유를 보이는지 본다.
-
-위험: 원격과 core 사이에 프로세스 잠금이 없다(그 기기 화면에서 시작한 작업과 겹칠 수 있다). apply 중 연결이 끊기면 core 는 `interrupted` 로 두지만 원격은 계속 돌 수 있다. core 가 재시작하면 SSH 작업 기록은 사라진다. 그 기기 스냅샷(피어 목록·명령줄)과 ssh 오류 마지막 줄이 core 의 tailnet 에 보인다.
-
-## 운영 — Linux (systemd 사용자 유닛)
-
-모니터는 도커가 아니라 **호스트 프로세스**다. 도커가 멈춰도 모니터는 살아서 "Docker 다운"을 보여 줘야 하고,
-호스트 전체(프로세스·cgroup·소켓·PMIC)를 봐야 하므로 컨테이너 격리가 이득이 없다.
-Linux 기기(s2·pit5·pi5-s3·cm5-1)는 모두 systemd 사용자 유닛 `jarvis`(deploy/jarvis.service)로 돈다.
-새 Linux 기기는 macOS 와 같은 `install.sh` 한 줄로 설치한다(아래 macOS 절). 유닛만 venv 의 python 을 부르는 사용자 유닛으로 만들고 linger 를 켠다.
-
-```sh
-systemctl --user status jarvis           # 상태
-systemctl --user restart jarvis          # 파이썬을 고쳤을 때 (정적 파일은 재시작 불필요)
-journalctl --user -u jarvis -n 50        # 수집 실패만 찍힌다(접근 로그는 남기지 않음)
-curl -s localhost:9300/api/health
-```
-
-개발 기기(s2 처럼 저장소에서 바로 도는 기기)의 처음 설치. 운영 기기는 `install.sh` 를 쓴다(실행본은 app 에 둔다):
-
-```sh
-git clone https://github.com/thsvkd/jarvis.git ~/Workspace/jarvis && cd ~/Workspace/jarvis   # public 저장소라 인증이 필요 없다
-install -Dm644 deploy/gateway.toml ~/.config/jarvis/config.toml     # core 는 deploy/s2.toml 형식(지금 core 는 thsvkd-macmini), pit5 는 deploy/pit5.toml
-mkdir -p ~/.config/systemd/user   # 유닛의 작업 폴더를 app 대신 이 저장소로
-sed 's#^WorkingDirectory=.*#WorkingDirectory=%h/Workspace/jarvis#' deploy/jarvis.service > ~/.config/systemd/user/jarvis.service
-loginctl enable-linger && systemctl --user daemon-reload && systemctl --user enable --now jarvis
-# ss -p 로 root 소유 리스너의 프로세스를 보려면: pi 그룹만 실행할 수 있는 능력 부여 사본(없으면 10초마다 sudo 를 시도한다)
-sudo install -d /usr/local/libexec/jarvis
-sudo install -o root -g pi -m 0750 /usr/bin/ss /usr/local/libexec/jarvis/ss
-sudo setcap cap_sys_ptrace,cap_dac_read_search+ep /usr/local/libexec/jarvis/ss
-```
-
-- 히스토리: `~/.local/state/jarvis/history.json` (5분마다, 종료 시 저장).
-- 컨테이너·root 프로세스 메모리는 PSS 를 읽을 권한이 없어 RSS 합(상한)으로 센다. pi 소유 프로세스는 PSS.
-- pm2 로 띄우고 싶은 기기는 `deploy/ecosystem.config.cjs`(앱 이름 `jarvis`)를 쓴다.
-- pit5 재부팅 가드는 사용자 유닛도 기록·복구하고, 모니터는 `127.0.0.1:9300/api/snapshot` 으로 읽는다.
-- pm2 앱에서 옮길 때는 먼저 `pm2 delete jarvis && pm2 save`(부팅 때 resurrect 가 :9300 을 두고 부딪히지 않게) 뒤 유닛을 켠다.
-
-Caddy 에 부담을 주지 않으려고:
-- 설정은 admin API 대신 컨테이너 안 `/config/caddy/autosave.json` 을 읽는다(admin API 를 두드리면 Caddy 로그에 요청 줄이 쌓인다).
-- 접근 로그는 docker API follow 스트림 하나로 받는다(`docker logs --since` 반복은 dockerd 가 로그 파일을 매번 훑는다).
-- 프로브(User-Agent `jarvis/…`)는 Caddyfile `log_skip @jarvis_probe` 로 접근 로그에서 빠지고, 집계에서도 뺀다.
-- 라우트 프로브는 60초마다, Cloudflare 경유 공개 프로브는 2분마다(앱 레이트 리밋 예산 보호).
-- 컨테이너 구성이나 Caddyfile이 바뀌면 10초 수집에서 라우트 재수집을 깨운다. 새·변경 라우트의 이전 프로브·DNS·실패 횟수는 버린다.
-- Caddy 버전은 라우트와 함께 다시 읽고, cloudflared 프로세스가 재시작되면 이전 ingress 캐시를 비운다.
-
-화면 검사:
-
-```sh
-node tools/shot.mjs http://127.0.0.1:9300/ /tmp/shots/home --sizes 1440x900,390x844 --full --wait 6000 --dark
-```
-
-## 운영 — macOS (launchd 또는 pm2)
-
-**실동작 미검증.** macOS 경로(`platform/darwin.py`·`svc/launchd.py`·`hw/macmon.py`)는 명령 출력 fixture 로 파서만 검증했고,
-s2(Linux)에서 `sys.platform` 을 darwin 으로 바꿔 크래시 없이 스냅샷이 나오는 것까지만 봤다. Mac Studio 에서 한 번 확인해야 할 것:
-
-- `launchctl print system` 의 services 블록 형식(열 순서: PID·마지막 종료 코드·라벨로 가정)과 `launchctl list` 출력
-- 비 root 에서 `psutil.net_connections` 가 AccessDenied 를 내고 `lsof -F pcPn` 폴백으로 가는지, 남의 프로세스 리스너가 얼마나 보이는지
-- Docker Desktop·OrbStack 게시 포트가 컨테이너로 묶이는지(게시 포트 번호로 매칭), 컨테이너 CPU·메모리(Docker stats API)
-- `macmon pipe -s 1` 의 JSON 키(temp.cpu_temp_avg·gpu_usage·sys_power)
-- APFS 볼륨 목록(`/`·`/System/Volumes/Data`·`/Volumes/*` 만 남기는지), 인터페이스 이름(en0·utun·bridge)
-
-설치(새 Mac·Linux 포함. git·Homebrew 가 없어도 된다):
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh -s -- --core 100.107.29.19
-```
-
-릴리스에도 설치기가 자산으로 올라가 있어 `https://github.com/thsvkd/jarvis/releases/latest/download/install.sh` 로 받아도 같다(릴리스 본문에 한 줄 안내가 있다. `tools/release.py`).
-
-`install.sh` 는 uv 로 Python venv(`~/.local/share/jarvis/venv`)를 만들고, 최신 릴리스 묶음을 sha256 으로 확인해 `~/.local/share/jarvis/app` 에 푼다.
-그다음 설정 파일과 LaunchAgent(`dev.jarvis`, Linux 는 systemd 사용자 유닛 `jarvis`)를 만들고, 모듈(훅·셋업)을 plan 으로 보인 뒤 그 plan_id 로 apply 한다.
-이미 있는 설정·LaunchAgent·유닛·코드는 덮어쓰지 않으므로 다시 실행해도 된다. 옛 배치가 있으면 [실행본 이전](#실행본-이전-180)을 한다. Tailscale·하네스 로그인과 core 의 `devices` 등록은 직접 한다.
-
-제거는 같은 설치기에 `--uninstall` 을 준다(다른 인자와 함께 쓰지 않는다):
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh -s -- --uninstall
-```
-
-서비스 등록(LaunchAgent·systemd 사용자 유닛)과 실행본(`~/.local/share/jarvis` 의 `app`·`venv`·`versions`·`daemon-src`·`current.json`)만 지운다. 이 사용자의 LaunchDaemon 이면 `deploy/macos-daemon.sh uninstall`(sudo)로 먼저 에이전트로 되돌리고, 그것이 실패하면 아무것도 지우지 않고 멈춘다. 다른 사용자의 daemon 은 건드리지 않는다.
-**남기는 것:** `~/.config/jarvis/config.toml`(다시 설치하면 이어진다), 훅·셋업 모듈이 쓴 `~/.claude` 설정(필요하면 `python -m jarvis module <hooks|setup> uninstall` 을 설치를 지우기 전에 먼저 실행한다), 하네스, Tailscale, Linux 의 linger, 개발 저장소 `~/Workspace/jarvis`.
-Windows 는 관리자 PowerShell 에서 `install.ps1 -Uninstall`(`-DryRun` 으로 지울 것만 본다)이 예약 작업 `jarvis`·방화벽 규칙 `jarvis-9300`·`%LOCALAPPDATA%\jarvis` 의 `app`·`versions`·`current.json` 을 지우고 설정과 Python 은 남긴다.
-
-수동 설치:
-
-```sh
-brew install python && python3 -m pip install psutil     # Python 3.11+ (시스템 python3 는 3.9 라 설정 파일을 못 읽는다)
-python3 -m pip install pystray pillow                      # 선택: 메뉴 막대 아이콘(plist 의 JARVIS_TRAY=1)
-brew install macmon                                        # 선택: 온도·GPU·전력
-mkdir -p ~/.config/jarvis && cp deploy/macstudio.toml ~/.config/jarvis/config.toml
-# launchd(LaunchAgent, 로그인 세션에서 돈다)
-sed -e "s#/Users/USER/.local/share/jarvis/app#$PWD#" -e "s#/Users/USER#$HOME#g" deploy/jarvis.plist > ~/Library/LaunchAgents/dev.jarvis.plist   # 작업 폴더는 이 저장소
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.jarvis.plist
-launchctl kickstart -k gui/$(id -u)/dev.jarvis            # 코드를 고친 뒤 재시작(메뉴 막대 아이콘의 '재시작'도 같다)
-launchctl bootout gui/$(id -u)/dev.jarvis                 # 잠시 끄기(다음 로그인 또는 bootstrap 까지). 아이콘 메뉴에는 종료가 없다
-# 또는 pm2: ecosystem.config.cjs 의 script 를 /opt/homebrew/bin/python3 로 바꿔 pm2 start, pm2 startup launchd
-```
-
-### LaunchDaemon 모드 (GUI 로그인 없는 Mac)
-
-기본 LaunchAgent(`gui/<uid>/dev.jarvis`)는 GUI 로그인 세션이 있어야 뜬다. CLI·SSH 로만 쓰고 자동 로그인을 끈 Mac 은 시스템 도메인의 LaunchDaemon(`system/dev.jarvis`, 사용자 권한)으로 돌린다. 선택 사항이고, 플래그를 주지 않으면 지금까지와 같다.
-
-```sh
-# 새 기기는 --core 도 준다. 이미 설치한 기기도 같은 한 줄이다(app 에 스크립트가 없으면 ~/.local/share/jarvis/daemon-src 에 받는다)
-curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh -s -- --daemon
-
-# 스크립트 위치: ~/.local/share/jarvis/app/deploy, 없으면 ~/.local/share/jarvis/daemon-src/deploy(설치가 끝날 때 경로를 출력한다)
-# 사용자로 실행한다. sudo 는 처음에 한 번만 묻는다
-bash deploy/macos-daemon.sh install --dry-run   # 렌더한 plist 와 실행할 명령만 본다(sudo 도 묻지 않는다)
-bash deploy/macos-daemon.sh install             # LaunchAgent → LaunchDaemon
-bash deploy/macos-daemon.sh status              # 어느 쪽이 로드됐는지, health
-bash deploy/macos-daemon.sh uninstall           # LaunchDaemon → LaunchAgent
-```
-
-- `/Library/LaunchDaemons/dev.jarvis.plist` 는 에이전트 plist 를 기준으로 렌더한다(`python -m jarvis.macos_daemon render`). 허용한 키(`Label`·`ProgramArguments`·`Program`·`WorkingDirectory`·`EnvironmentVariables`·`RunAtLoad`·`KeepAlive`·`ThrottleInterval`·`ExitTimeOut`·`ProcessType`·`SoftResourceLimits`·`HardResourceLimits`·`Nice`)만 옮기고, 나머지(`Sockets`·`MachServices`·`UserName` 등)는 버리고 이름을 알린다. 고친 ProgramArguments·WorkingDirectory·환경 변수는 남고, `UserName`·`GroupName`·`InitGroups`·`HOME`·`USER`·`LOGNAME` 이 더해지며 `KeepAlive`·`RunAtLoad` 는 true 가 된다. 이 파일은 누구나 읽을 수 있으므로 비밀로 보이는 환경 변수 이름이나 인자(TOKEN·SECRET·PASSWORD·`_KEY` 등)가 있으면 렌더를 거절한다. 이름으로만 판별하므로 그 밖의 비밀은 직접 뺀다.
-- 에이전트 plist 는 `~/.local/share/jarvis/dev.jarvis.plist.agent` 로 옮긴다(남겨 두면 다음 GUI 로그인 때 두 번째 jarvis 가 같은 포트를 잡으려 한다). `uninstall` 이 되돌린다.
-- `install` 은 어느 단계에서든 실패하거나 Ctrl-C 로 중단하면 daemon 을 내리고 LaunchAgent 로 되돌린 뒤 0 이 아닌 코드로 끝난다. GUI 세션이 없으면 에이전트는 다음 GUI 로그인 때까지 뜨지 않고, 스크립트가 그렇게 알린다(`uninstall` 도 같다). 렌더 결과가 같으면 다시 실행해도 아무것도 하지 않는다.
-- SSH 연결이 끊겨도 전환은 멈추지 않고 끝까지 돈다(끊긴 뒤에는 sudo 권한이 사라질 수 있어서다). 뒤 단계가 실패했는데 sudo 가 없거나 bootout 이 실패해 daemon 을 내리지 못하면 에이전트를 띄우지 않고 daemon 과 plist 를 그대로 둔다. 다시 접속해 `status` 로 확인하고 필요하면 `uninstall` 한다.
-- 스크립트는 PATH 를 시스템 폴더로 고정하고 sudo 아래 명령을 절대경로(`/usr/bin/install`·`/bin/launchctl`·`/bin/rm`)로만 부른다. 설치한 뒤 bootstrap 전에 root 소유 사본의 소유·권한(root:wheel 0644), `UserName`, `GroupName`, `InitGroups`, `StandardOutPath`·`StandardErrorPath`, `Label`, 허용 목록 밖의 최상위 키, 렌더 직후의 sha256 을 검사하고, 다르면 지운 뒤 되돌린다. 그래도 렌더 코드와 스크립트는 사용자 쓰기 가능한 파일이므로, 같은 uid 프로세스를 믿지 않는 기기에서는 실행 전에 두 파일의 해시를 확인한다.
-- 시스템 도메인의 `dev.jarvis` 는 기기에 하나다. 기존 daemon plist 의 `UserName` 이 지금 사용자와 다르면 스크립트는 아무것도 바꾸지 않고 거절하고, `install.sh` 는 안내만 하고 LaunchAgent 로 설치한다(`--daemon` 을 줘도 같다). `system/dev.jarvis` 가 로드돼 있는데 plist 가 없거나 `launchctl print` 의 `path` 가 그 plist 가 아니면 소유를 알 수 없으므로 스크립트가 거절한다. `install.sh` 는 plist 만 보므로, 플래그 없이는 LaunchAgent 로 설치하고 `--daemon` 이면 스크립트의 거절로 실패한다.
-- 이 사용자의 daemon 으로 등록된 기기에서 `install.sh` 를 플래그 없이 다시 실행해도 LaunchAgent 를 만들지 않는다. [실행본 이전](#실행본-이전-180)은 root 소유 등록을 고칠 수 없어 `noop` 과 안내로 끝난다.
-- **메뉴 막대 아이콘이 없다.** GUI 세션이 없으면 AppKit 이 프로세스를 죽일 수 있어 `JARVIS_TRAY` 를 뺀다.
-- **로그:** `~/Library/Logs/jarvis.log`(LaunchAgent 와 같은 파일). launchd 는 `StandardOutPath` 를 root 로 열 수 있어 둘 다 `/dev/null` 로 두고, 사용자 권한으로 바뀐 뒤 셸이 이 파일에 덧붙인 다음 `<python> -m jarvis` 로 exec 한다.
-- **SSH(core 로 쓸 때):** ssh-agent·키체인이 없다. passphrase 없는 키 파일만 쓸 수 있다.
-- **키체인에 의존하는 도구는 안 될 수 있다.** 파일 저장소를 쓰는 도구는 그대로 돈다.
-- **사용자 작업 목록:** 시스템 도메인에서는 `launchctl list` 대신 `launchctl print gui/<uid>` 로 읽고, GUI 세션이 없으면 사용자 작업이 없는 것으로 보인다.
-- **업데이트 버튼:** `KeepAlive=true` 와 사용자 권한이면 그대로 돈다(서비스 정의 조건은 위 SSH 기기 절의 확인 명령을 daemon 경로로 본다). 게이트웨이 코드 경로는 `~/.local/share/jarvis` 의 런처·`versions` 그대로다.
-
-## 운영 — Windows (게이트웨이)
-
-Windows 는 게이트웨이로만 돈다: 호스트 자원(CPU·메모리·디스크·네트워크·프로세스).
-서비스 관리자·Docker·Caddy 수집은 없다. SSH 세션에서 띄운 프로세스는 세션이 끝나면 죽으므로 예약 작업(로그온 시)으로 돌린다.
-
-새 기기는 관리자 PowerShell 에서 한 줄로 설치한다. Python 이 없으면 winget 으로 깔고, 최신 릴리스를 sha256 으로 확인해 `%LOCALAPPDATA%\jarvis\app` 에 푼 뒤 아래 `deploy\install-windows.ps1` 과 모듈(훅·셋업) 적용까지 한다. `-DryRun` 은 할 일만 보인다.
-
-```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/thsvkd/jarvis/main/install.ps1))) -Core 100.107.29.19
-```
-
-인자가 없으면 `irm https://github.com/thsvkd/jarvis/releases/latest/download/install.ps1 | iex` 로도 된다.
-
-```powershell
-# 저장소: git clone https://github.com/thsvkd/jarvis.git (갱신은 core 의 jarvis 업데이트 버튼이 GitHub 릴리스를 받는다)
-winget install -e --id Python.Python.3.13 --scope user          # python 3.11+ (WindowsApps 의 python.exe 는 안내용 껍데기)
-cd $env:USERPROFILE\Workspace\jarvis                           # 손으로 설치하는 저장소(install.ps1 설치본은 $env:LOCALAPPDATA\jarvis\app)
-powershell -ExecutionPolicy Bypass -File deploy\install-windows.ps1 -Python "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe"
-Stop-ScheduledTask jarvis; Start-ScheduledTask jarvis           # 코드 갱신 뒤 재시작(알림 영역 아이콘의 '재시작'도 같다)
-Disable-ScheduledTask jarvis; Stop-ScheduledTask jarvis         # 잠시 끄기(Stop 만 하면 5분 반복 트리거가 다시 켠다). 되돌리기: Enable-ScheduledTask jarvis; Start-ScheduledTask jarvis
-Get-Content -Encoding UTF8 $env:LOCALAPPDATA\jarvis\jarvis.log -Tail 20
-```
-
-## 실행본 이전 (1.8.0)
-
-1.8.0 부터 실행본은 `~/.local/share/jarvis/app`(Windows `%LOCALAPPDATA%\jarvis\app`)에 둔다. 그 전 설치기가 `~/Workspace/jarvis` 에 푼 실행본(.git 없음)은
-macOS·Linux 는 게이트웨이가 새 릴리스로 60초를 버틴 뒤 스스로 옮긴다(업데이트 버튼만 누르면 된다).
-**Windows 는 업데이트 버튼만으로는 옮겨지지 않는다.** 게이트웨이가 관리자 권한 없이(RunLevel Limited) 돌아 예약 작업을 고칠 수 없으므로,
-관리자 PowerShell 에서 `install.ps1` 을 다시 실행하거나 app·versions 의 python 으로 `python -m jarvis relocate` 를 실행한다. 계약은 `docs/SPEC.md` 의 "실행본 배치와 이전" 절이다.
-
-- `~/Workspace/jarvis` 에 `.git` 이 있으면(개발 체크아웃) 아무것도 하지 않는다. 서비스 등록이 그 폴더를 가리키지 않아도(pm2·수동) 그대로다.
-- 옛 폴더를 app 으로 복사하고 LaunchAgent plist·systemd 유닛·예약 작업 `jarvis` 가 app 을 가리키게 고친다. 원본 파일은 `~/.local/share/jarvis/<파일 이름>.bak-relocate` 에 남는다.
-- 옛 폴더는 지우지 않고 `~/.local/share/jarvis/workspace-old` 로 옮긴다. 서비스 관리자가 실제로 app 을 쓰고, 등록에 옛 경로가 남지 않았고, 옛 폴더에서 도는 프로세스가 없을 때만 옮긴다.
-- **macOS 는 지연 완료다.** launchd 는 plist 를 다시 읽기 전까지(로그인·재부팅·bootout/bootstrap) 옛 폴더에서 띄우므로, 그때까지 옛 폴더를 남긴다(`pending_reload`).
-  jarvis 는 원격 기기가 꺼질 수 있어 스스로 다시 읽히지 않는다. 바로 끝내려면 그 기기에서:
-
-      launchctl bootout gui/$(id -u)/dev.jarvis; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.jarvis.plist
-
-  다음 기동이 60초 뒤 옛 폴더를 옮긴다. `install.sh` 를 다시 실행해도 같은 일을 한다.
-- Linux·Windows 는 재시작을 강제하지 않는다. 다음 기동부터 app 에서 뜬다. 단 Linux 에서 `install.sh` 가 이번에 유닛을 옮겼다면 게이트웨이를 한 번 `try-restart` 하고 health 를 기다린 뒤 옛 폴더를 정리한다.
-- 설치기를 다시 실행해도 옛 base 를 그대로 app 으로 옮긴다(새 릴리스를 app 에 풀지 않는다. 롤백 기준이 바뀌지 않게). 이전 코드는 임시 폴더에 받은 최신 릴리스의 것을 쓴다.
-- 한 번에 하나만 돈다(`~/.local/share/jarvis/.relocate.lock`). 다른 이전이 도는 중이면 `busy` 로 끝나고 아무것도 바꾸지 않는다.
-
-```sh
-$PY -m jarvis relocate --dry-run      # 할 일만 본다
-$PY -m jarvis relocate --json         # 지금 한 번 돈다: {"state": noop|busy|registered|pending_reload|cleaned|failed, "detail", "steps"}
-```
-
-되돌리기: `workspace-old` 를 `~/Workspace/jarvis` 로 옮기고, `~/.local/share/jarvis/<파일 이름>.bak-relocate` 를 원래 자리(`~/Library/LaunchAgents/`·`~/.config/systemd/user/`)로 되돌린다(Linux 는 `systemctl --user daemon-reload`,
-Windows 는 백업 파일 대신 옛 폴더에서 `deploy\install-windows.ps1` 을 다시 실행한다).
-게이트웨이 로그에는 기동마다 `[jarvis] 실행본 이전: <state> <detail>` 한 줄이 남는다.
-
-## 검증
-
-모듈을 기기에서 직접 다룰 때는 `python -m jarvis module <이름> plan --json` 으로 계획을 보고, 그 `plan_id` 로 `apply --json --plan-id <id>` 를 실행한다.
-python 은 게이트웨이 서비스가 쓰는 것을 쓴다(Mac 의 PATH 첫 `python3` 는 psutil 이 없는 시스템 3.9 일 수 있다: LaunchAgent 의 `/opt/homebrew/bin/python3` 나 venv).
-하네스·도구 점검은 `python -m jarvis module doctor status --json` 이다. 읽기 전용이며 설치 위치·버전, 중복 설치, 은퇴한 훅, 평문 시크릿의 위치와 키 이름(값은 내지 않는다), lock 밖 스킬을 보고한다.
-
-ai-setup 이 하던 설치·갱신도 같은 모듈 계약으로 한다(core 홈의 AI 셋업 화면 또는 같은 CLI).
-
-| 모듈 | 하는 일 |
+| 문서 | 내용 |
 | --- | --- |
-| `setup` | 하네스(claude·codex 와 영수증의 하네스)·Claude 플러그인·번들 스킬·CodeGraph·MCP 등록·줄바꿈 키·출력 스타일·mod·OMC HUD·Tailscale 을 없는 것만 설치하고, 이미 설치한 설정은 배포본이 바뀌면 다시 적용한다. 엔진은 ai-setup 에서 옮긴 `jarvis/modules/setup/` 이다 |
-| `harness` | 설치된 하네스·도구를 최신으로 올린다(update-ai). codex 관리형 데몬이 CLI 와 어긋나면 데몬 재시작을 승인 단계로 보인다 |
+| [구조와 화면](docs/architecture.md) | 무엇을 보나, 코드 구조, 운영 홈 |
+| [설정](docs/configuration.md) | 설정 키, SSH 기기 |
+| [운영](docs/operations.md) | 릴리스·갱신, 접속과 접근 통제, Linux·macOS·Windows 설치와 운영, 실행본 이전 |
+| [core 전환](docs/core-migration.md) | core 를 다른 기기로 옮기는 순서 |
+| [AI 구독 사용량](docs/usage.md) | 사용량 수집, hswap·caam, 로그인 상태와 다시 로그인 |
+| [모듈 다루기](docs/modules.md) | 모듈 CLI(plan·apply), setup·harness·doctor |
+| [검증](docs/verification.md) | 테스트와 스냅샷 스키마 비교 |
+| [문서 지도](docs/README.md) | PRD·SPEC·TEST_SPEC 등 계약 문서와 상태 |
 
-`setup` 계획은 Claude Code의 `~/.claude/settings.json`에 `cleanupPeriodDays`가 없으면 로컬 세션 보존 기간을 36,500일로 늘리는 설정을 포함한다. 이미 지정된 값은 그대로 두고 상태에 표시한다. 설정 적용 전에 계획을 승인해야 하며, 기존 설정은 백업하고 영수증에 기록한 값만 제거한다. 교체 직전에 파일 변경을 다시 확인하지만, 그 확인과 교체 사이 다른 프로그램의 쓰기까지 원자적으로 막을 수는 없다. 작업이 중단돼 영수증에 `session_retention.state: pending`이 남으면 설정·백업·영수증을 직접 확인하기 전에는 다시 쓰지 않는다. 상위 설정이 사용자 설정보다 우선할 수 있고 클라우드 보존 정책은 바뀌지 않는다. Codex 전체 세션에는 확인된 동일 설정이 없어 미확인으로 표시한다. 장기 보존은 디스크 사용량을 늘릴 수 있다. [Claude Code 설정](https://code.claude.com/docs/en/settings-reference)
-
-개별 설정만 다시 적용하려면 옮긴 워커 진입점을 그대로 쓴다: `bash jarvis/modules/setup/scripts/setup.sh --keybinds`(Windows 는 `setup.ps1 -Keybinds`). 프로젝트 폴더의 AGENTS.md·CLAUDE.md 는 그 폴더에서 `python -m jarvis agentsmd [--harness claude,codex] [--force] [--dry-run]` 로 쓴다.
-
-core 홈의 **AI 구독 사용량** 화면은 각 기기의 사용량을 읽는다. core `GET /api/devices/usage` 는 설정된 게이트웨이의 `GET /api/usage/independent` 를 모은다. 그 경로가 없는 옛 게이트웨이는 미지원으로 표시한다.
-
-Claude 는 [hswap](https://github.com/thsvkd/harness-swap)의 Claude 엔진(claude-swap, 기존 cswap 과 같은 저장소)을 아래 "Claude 신선도와 로그인 상태" 규칙으로 읽고, Codex·Grok·Cursor 는 [caam](https://github.com/Dicklesworthstone/coding_agent_account_manager)의 저장된 프로필과 사용량을 읽는다. Codex 는 현재 CLI 자격의 사용량도 읽는다. 자격의 `id_token` 이 같은 계정(`chatgpt_account_id`)의 검증된 이메일을 담고 있으면 그 이메일로, 아니면 기본 계정으로 표시한다(토큰 서명은 확인하지 않는 표시용 값이다). 동일 계정인지 확인할 수 없으면 금고 계정과 따로 보인다. 이 경로는 hswap·caam 을 새로 설치하거나 계정을 전환하지 않는다(hswap 설치·올리기는 게이트웨이가 따로 한다, 아래 hswap·caam 절). caam 은 조회 중 상태 메타데이터를 기록하고 `CAAM_HOME` 이 설정되어 있으면 기존 데이터를 복사할 수 있다. 2026-10-30 요금제 개편 뒤 인증된 Ultra 계정은 Claude 사용량 API 가 5시간 창을 주지 않는다([Ultra 개편](https://www.datastudios.org/post/claude-max-20x-renamed-ultra-removes-5-hour-limit-verified-accounts)). 주간 창만 있는 Claude 계정은 "5시간 한도 없음"으로 적어 읽지 못한 경우와 구분한다. caam 결과는 2분 묶는다.
-
-**hswap 이 재는 Codex·Grok·OpenCode Go**(`jarvis/hswap_usage.py`). hswap 이 있으면 하네스마다 `hswap list <codex|grok|opencode> --json` 을 한 번 부른다(Claude 는 위 규칙으로 따로 읽고, Antigravity 는 부르지 않는다). 하네스가 설치되지 않아 종료 코드가 1 이어도 JSON 을 읽는다. hswap 은 서비스의 짧은 PATH 대신 사용자 설치 위치(`~/.local/bin`, `$GROK_HOME/bin`(기본 `~/.grok/bin`), `~/.opencode/bin`, macOS 는 `/opt/homebrew/bin`·`/usr/local/bin`)를 앞에 붙인 PATH 로 하네스 CLI 를 찾는다. 원격 측정(`usage.remote`, 비어 있으면 아래 로그인 유지가 `codex,grok,opencode` 로 정한다)은 하네스 CLI 를 띄워 수십 초가 걸릴 수 있어 뒤에서 읽고 위의 caam·CLI 수집기와 동시에 돌린다. 시작한 뒤 8초(기존 수집기가 더 오래 걸리면 그것이 끝날 때까지) 안에 끝나지 않으면 30분 안의 마지막 답을 준다. 240초를 넘긴 hswap 은 그 자식까지 함께 끝낸다. 측정 간격과 실패 백오프는 hswap 이 정한다. OpenCode 는 Go 한도를 재는 OpenCode Console 로그인만 보인다. 상태(`stale`·`authentication_required`·`unsupported` 등)는 고정 한국어 문구로 note 에 붙이고, 사용률 창 없이 요금제·잔액만 있는 계정(Grok)도 행으로 보인다. 두 결과는 계정(이메일, 대소문자 무시)마다 한 행으로 합친다: 값(창·잔액, 또는 요금제와 측정 시각)이 있는 hswap 행을 쓰되, hswap 값이 이전 값(`stale`·`error`)이고 기존 수집기 값이 더 새로우면 그것을 쓴다. 잰 적이 없는 `stale` 은 "아직 잰 값이 없습니다"로 보인다. 한쪽에만 있는 계정은 남고, 이메일을 모르는 활성 "기본 계정"(네이티브 수집기)은 hswap 의 활성 계정과 같은 로그인으로 본다. 계정은 이메일과 hswap 의 요금제 이름만 내보낸다(계정 ID·별칭·hswap detail 원문은 내보내지 않는다).
-
-**hswap 설치와 로그인 유지**(`hswap_usage.maintain`, USAGE-5·9). 게이트웨이는 Claude Code·Codex·Grok·OpenCode CLI 중 하나라도 있으면 고정판 hswap 을 설치하고, 시작할 때와 그 뒤 1시간마다 다음을 한다: `usage.remote` 가 비어 있으면 `codex,grok,opencode` 로 정한다(값이 있으면 그대로 둔다). CLI 가 있는 Codex·Grok 마다 지금 로그인이 hswap 에 없으면 `hswap <하네스> add` 로 등록하고, `hswap <하네스> refresh` 로 하네스가 기한이 된 토큰을 스스로 갱신하게 한다(그 하네스가 실행 중이면 hswap 이 건너뛴다). OpenCode 는 스스로 로그인을 갱신하고 hswap 이 저장된 로그인을 목록에서 등록하므로 건드리지 않는다(네이티브 모드의 `add` 는 대화형 `opencode auth login` 을 띄운다). 설치를 막 시작했으면 끝날 때까지 기다린 뒤 한다. Claude 는 고정판 0.2.1 에 refresh 가 없어 같은 주기로 사용량을 읽어 hswap 이 토큰을 갱신하게 한다. 계정 전환·자동 회전은 하지 않고 cron·예약 작업도 만들지 않는다. 기기마다 따로 로그인해야 한다: 같은 로그인 파일을 여러 기기에 복사하면 한 기기의 갱신이 refresh token 을 써 버려 다른 기기의 로그인이 끊긴다.
-
-**Claude 신선도와 로그인 상태**(`jarvis/claude_accounts.py`). 새로고침이거나, hswap 에 물은 지 `claude_stale_s`(기본 900초)가 지났거나, 보일 실값 중 그보다 오래된 것이 있으면 `hswap claude list --json` 으로 실값을 받는다(30초 안에 다시 묻지 않는다). 이때 hswap 이 만료된 접근 토큰을 갱신할 수 있지만 계정을 전환하지는 않는다. 읽기 한 번은 재시도 2번과 잠금 대기를 합쳐 40초 안에 끝나고, 그 안에 확정하지 못하면 지금 저장소 값과 로그인 상태를 준다. 새로고침은 진행 중인 보통 읽기에 얹히지 않고 그것이 끝난 뒤 다시 묻는다. 저장소에는 로그인 기한이 없어 예약 실행이 저장소를 늘 새로 써도 만료 경고가 사라지지 않게 하기 위함이다. 그 사이에는 마지막 실값을 쓰되, 저장소에 적힌 계정별 인증 실패(`authDeadStrikes`)는 읽을 때마다 슬롯과 신원(이메일·조직 UUID)이 같은 계정에 재로그인 안내로 붙인다. hswap 의 답은 물을 때의 저장소 모습(슬롯 구성, 사용 중 슬롯, 인증 실패인 슬롯, keepalive 의 정상·실패 종류와 `loginExpiresAt`)과 함께 보관하고, 지금 모습과 같을 때만 다시 쓴다. 이 값이 달라지면(`/login` 뒤 다시 저장한 경우 포함) 진행 중인 호출에도 얹히지 않고 바로 다시 묻는다. `checkedAt` 같은 시각만 바뀌면 다시 묻지 않는다. 신원 비교는 한 규칙을 쓴다: 조직 UUID 의 null·누락·빈 문자열은 같은 값이고 이메일의 앞뒤 공백과 대소문자는 보지 않는다. 조직 UUID 는 비교에만 쓰고 내보내지 않는다. hswap 이 없거나 실패하면 저장소 캐시를 대체값으로 쓰고 이유를 note 에 적는다. 저장소를 읽지 못해도 hswap 으로 계정을 찾은 적이 있으면 기준이 지난 뒤 다시 묻고, 찾은 적이 없으면 새로고침 전까지 hswap 을 실행하지 않는다. 값이 기준보다 오래됐으면 "N시간 전 값"을 붙이고 '주의 필요'로 센다. 토큰 갱신과 조회 간격은 hswap 이 정한다. 만료 경고는 `loginExpiresAt` 3일 전부터 붙인다. 사용 중 계정은 실제 로그인(`.claude.json`)과 같은 슬롯으로 판정한다(읽지 못하면 hswap 의 값).
-
-hswap 은 조직 이름을 슬롯을 등록할 때만 저장하므로 조직 이름이 바뀌면 기기마다 값이 달라진다. core 는 조직 UUID 해시로 같은 조직을 알아보고 가장 늦게 등록된 슬롯의 이름으로 통일하므로, 새 이름은 어느 한 기기에서 로그인 후 슬롯을 다시 등록(`hswap claude add`)하면 반영된다.
-
-Claude 칸에는 기기 단위 로그인 상태를 한 줄로 보인다(`providers[].login`, `static/shared/API.md`). hswap 의 `hswap claude keepalive` 가 저장소의 `cache/keepalive.json`(0600, 토큰 없음)에 남긴 결과와 hswap 이 보고한 `keychainUnavailable`, 사용 중 계정의 재로그인 필요 여부로 정한다. `claude_keepalive_stale_s`(기본 1200초)보다 오래된 파일은 '자동 갱신 멈춤'이다. 파일이 없으면 이 기능을 쓰지 않는 기기로 보고 경고하지 않는다. 파일의 `activeSlot` 이 지금 로그인의 슬롯과 다른 번호이면(전환 직후, 저장되지 않은 로그인) 그 기록의 만료·오류를 붙이지 않고 "자동 갱신 기록이 이전 계정의 것"만 보이며, 다음 keepalive 가 돌면 사라진다. `activeSlot` 이 없으면 다른 계정으로 보지 않고 상태를 그대로 보이되 `--slot` 만 안내하지 않는다. 자격이 없다는 기록(`no_credentials`)은 늘 `/login` 부터 안내한다. 계정이 하나도 없어도 이 상태는 보인다. hswap 이 답한 키체인 상태는 계정 값과 따로 `claude_stale_s` 동안 들고 있다가 다시 묻는다. 정상이 아닌 상태는 '주의 필요'로 세고 **다시 로그인 방법** 버튼으로 절차를 안내한다: Claude 는 device-code 가 없어 화면이 URL 로그인과 인증 코드 붙여 넣기로 한다(USAGE-10, 아래). 이 버튼을 낼 수 없는 기기(macOS 의 키체인 저장소 등)는 jarvis 가 대신 로그인하지 않는다.
-
-값을 신선하게 유지하고 로그인을 잇도록 hswap 을 예약 실행하기를 권한다(`hswap claude keepalive` 는 hswap 0.2.2 이상, `hswap claude auto --once`). macOS 의 자격은 로그인 키체인에 있으므로 LaunchDaemon·SSH 가 아니라 GUI 세션의 LaunchAgent 로 돌린다: 키체인에 닿지 못하는 곳에서 돌면 파일과 키체인으로 로그인이 갈라질 수 있다. SSH 로만 쓰는 Mac 은 hswap 0.2.3 의 파일 저장소 모드(`credentials.store=file`)를 쓸 수 있다: 이때 jarvis 는 키체인 접근 불가를 경고하지 않고 정상 기록(`ok:true`)만 "로그인됨 · 파일 저장소"로 보이며(keychain_unavailable 실패는 "자동 갱신 확인되지 않음"이고 `claude_keepalive_stale_s` 동안 계속되면 주의로 센다), 다시 로그인 안내도 화면 터미널이 아니라 SSH 를 기준으로 한다. 키체인에 로그인 항목이 있거나 hswap 이 그것을 확인하지 못하면(`keychain_item_present`) 복구 명령과 확인할 로그를 안내한다. 자세한 절차는 hswap 문서를 따른다.
-같은 Claude 계정은 이메일과 hswap 의 조직 이름으로 묶어 기기가 달라도 한 번 센다.
-Antigravity 는 현재 CLI 로그인에 남은 유효한 접근 토큰으로 Google 사용량과 [UserInfo](https://developers.google.com/identity/openid-connect/reference)를 조회한다. 같은 토큰에 연결된 검증된 이메일만 표시하고 확인할 수 없으면 기본 계정으로 표시한다. 만료된 토큰을 갱신하거나 `agy` 를 실행하지 않는다. 현재 사용 중인 계정만 지원한다.
-OpenCode Go 는 OpenCode 의 현재 자격으로 사용량을 조회한다. v2 는 선택된 Console 계정의 만료되지 않은 자격을 사용하며 Console 계정이 없을 때 Go 키를 사용한다. v1 은 Go API 키를 사용한다. 서비스가 토큰을 갱신하도록 사용량 API 를 호출하지 않는다. Kimi 는 CLI 에 설정된 파일 자격의 유효한 접근 토큰을 읽으며, [0% 오류 사례](https://github.com/MoonshotAI/kimi-code/issues/3908)가 있는 5시간·주간 비율은 상세 카운터가 없을 때 0% 로 단정하지 않는다. ZCode 는 `ZAI_API_KEY` 또는 Z.ai 공식 주소가 지정된 `ANTHROPIC_AUTH_TOKEN` 으로, Gemini 는 유효한 CLI 자격과 `GOOGLE_CLOUD_PROJECT` 가 있으면 조회한다. MiniMax 는 CLI 의 Token Plan 자격을 읽고, 응답에 명시된 잔량 비율을 확인할 수 있을 때만 표시한다. 자격과 계정 ID 는 응답·로그에 넣지 않으며 자격이나 한도를 확인할 수 없는 경우는 화면에 확인 불가로 표시한다.
-
-hswap·caam 의 설정과 동작:
-
-계정은 이메일만 내보내고 홈 경로·조직 UUID·프로바이더 계정 ID 는 넣지 않는다.
-Claude 는 그 기기에 [hswap](https://github.com/thsvkd/harness-swap)(harness-swap)이 있으면 `hswap claude list --json`(claude-swap 엔진, cswap 과 같은 schemaVersion 1)의 계정 목록을 쓴다.
-토큰 갱신·조회 간격은 hswap 이 맡고 jarvis 는 자격 증명 파일을 열지 않는다.
-hswap 은 사용량을 읽을 때 만료된 접근 토큰을 갱신 토큰으로 다시 받는다(쉬는 계정 포함). 로그인 자체(갱신 토큰)는 기한이 있어
-새 `/login` 만이 늘린다: `loginExpiresAt` 3일 전부터 그 계정에 남은 기간을 붙이고 '주의 필요'로 센다.
-hswap 은 PATH 다음에 `~/.local/bin/hswap(.exe)` 에서 찾는다. 계정은 위 "Claude 신선도와 로그인 상태" 규칙으로 읽는다.
-Claude Code(`claude`)가 있는 기기에서 hswap 이 없거나 `jarvis/claude_accounts.py` 의 `VERSION` 보다 낮으면, 게이트웨이가 시작할 때와 그 뒤 1시간마다 확인해 뒤에서 `uv tool install harness-swap==<VERSION>`(uv 가 없으면 `pipx install --force`)으로 설치한다.
-PyPI 배포본을 버전으로 고정한다(서비스가 최신판을 저절로 받아 실행하지 않게). uv 는 이미 깐 도구 환경의 Python 을 그대로 쓴다. 버전이 같거나 높거나(사람이 먼저 올린 것) 읽지 못하면 그대로 둔다.
-올리기는 PyPI 배포본이 그 태그의 소스와 같은지 대조한 뒤 `VERSION` 을 바꿔 릴리스한다. 실패하면 이유를 화면에 보이고 6시간 뒤 다시 시도한다. 사용량 화면의 기기 행에 확인한 버전(고정 버전과 다르면 함께)을 보인다.
-설치 뒤 계정은 그 기기에서 `hswap claude add` 로 직접 넣는다. 이미 깔린 cswap 은 지우지 않는다(같은 저장소를 쓴다). 설정 `cswap_install = false`(또는 `JARVIS_CSWAP_INSTALL=0`, 호환을 위해 이름 유지)로 끈다.
-Codex 는 그 기기에 [caam](https://github.com/Dicklesworthstone/coding_agent_account_manager)(coding_agent_account_manager)이 있고 Codex 프로필을 저장해 두었으면,
-`caam ls codex --json`(프로필 → 이메일)과 `caam limits codex --format json`(한도)으로 계정별 사용량을 더한다. 결과는 2분 묶는다.
-limits 는 caam 금고의 접근 토큰으로 읽기만 한다. jarvis 는 caam refresh·daemon·activate 를 부르지 않는다(Codex 갱신 토큰은 쓸 때마다 바뀐다).
-jarvis 는 caam 을 설치하지 않는다(그 기기에 직접 둔다). 계정은 그 기기에서 caam 으로 직접 저장한다.
-caam 의 라이선스는 MIT 에 OpenAI·Anthropic 관련 추가 조항이 붙어 있다(사용자가 확인하고 도입을 정했다).
-core `GET /api/devices/usage`(전체, `?refresh=1` 강제)·`/api/devices/<id>/usage` 는 모아 두지 않고 요청마다 게이트웨이에 묻는다.
-
-Claude 계정 행의 **이 계정 사용**(viewers 만)은 core `POST /api/devices/<id>/account?slot=<n>` → 게이트웨이 `POST /api/usage/account`(설정 core 만) →
-`hswap claude switch <n> --json` 으로 그 기기의 Claude Code 로그인을 바꾼다. 슬롯 번호는 기기마다 다르다. Codex 는 jarvis 가 caam activate 를 부르지 않으므로 전환하지 않는다.
-화면은 간략히(칸마다 최대 사용률, 누르면 계정 상세)와 자세히(칸 안에 계정별 한도 창 전부) 보기를 전환한다. 선택은 localStorage `jarvis.usage.mode` 에 둔다.
-기기별 표 위에는 프로바이더별 계정 요약을 표시한다. 같은 프로바이더·이메일·조직의 계정은 사용량이 있는 값 중 최근 값을 한 번 보여 주고, 이메일이 없으면 기기별로 구분한다. 한도 창별 사용률과 출처 기기·확인 시각을 표시하며 프로바이더·주의 필터가 함께 적용된다.
-사용량 화면의 다시 로그인은 core `POST /api/devices/<id>/login?provider=` → 게이트웨이 `POST /api/usage/login`(설정 core 만)으로 간다.
-**Claude 다시 로그인**(`cli_login.py`, USAGE-10): 게이트웨이가 `claude auth login --claudeai` 를 표준 입력을 열어 둔 채 띄우고 로그인 URL 을 화면에 준다. 사람이 그 URL 로 저장할 계정에 로그인해 받은 인증 코드를 화면에 붙여 넣으면 core 가 헤더 `X-Jarvis-Login-Code` 로 전달하고(서버는 요청 본문을 받지 않으며 코드를 URL 에 넣지 않는다), 게이트웨이가 그 CLI 의 표준 입력으로 넘긴다. CLI 가 끝나면 `hswap claude add` 로 슬롯에 저장한다. macOS 는 아래 동기화 검증까지 성공해야 `done` 이 되고, 그 밖에는 슬롯 저장 성공으로 완료된다. 로그인한 계정이 그 기기의 Claude Code 로그인이 되므로 화면이 누르기 전에 확인을 받는다. macOS 는 hswap 파일 저장소(`store=file`)이면서 이 게이트웨이가 로그인 키체인에 닿지 않거나(`security show-keychain-info` 실패. 화면 세션의 LaunchAgent 처럼 키체인에 닿는 곳에서는 Claude Code 가 로그인을 키체인에 써서 `hswap claude add` 가 파일에서 찾지 못한다), 키체인 모드(`auto`·`keychain`)에서 이 게이트웨이의 hswap 조회가 최근에 키체인에 닿았고(`keychainUnavailable` 아님) 설정 충돌·키체인 항목 문제가 없을 때만 버튼을 낸다(LaunchDaemon·SSH 처럼 키체인에 닿지 못하는 곳에서는 내지 않는다). SSH 기기는 501 이다. 그 두 경로(`/api/usage/login`·`/api/usage/account`)가 없는 옛 게이트웨이는 501 로 답한다(갱신 필요).
-
-macOS 에서는 슬롯 저장 뒤 `hswap claude keepalive --json` 의 정상 보고까지 확인해야 로그인이 완료된다. 검증 중에는 기다리는 상태를 유지하고 같은 시작 요청으로 두 번째 로그인을 띄우지 않는다. add 가 종료 코드 0 이어도 키체인·파일 불일치는 남을 수 있다. 후속 검증이 실패하거나 응답을 확인할 수 없으면 `failed, unsynced: true` 로 알리며, CLI 로그인은 성공했지만 슬롯 저장이 실패한 `unsaved: true` 와 구분한다. jarvis 는 어느 저장소가 새 로그인인지 추측해 덮어쓰지 않는다. 불일치 복구는 그 기기의 화면 터미널에서 최근 로그인·갱신이 실제 쓰인 쪽을 확인하고 `hswap claude keepalive --adopt file` 또는 `hswap claude keepalive --adopt keychain` 으로 한다. 만료 시각만으로 새 자격을 고르지 않는다. 이 명령은 교체되는 자격을 hswap 이 먼저 보관하고, 선택한 자격으로 저장소와 슬롯을 맞춘다(이번 실행에서 토큰 갱신 요청은 보내지 않는다). 근거: [hswap v0.2.7 keepalive](https://github.com/thsvkd/harness-swap/blob/v0.2.7/src/claude_swap/keepalive.py), [add 의 새 로그인 판정](https://github.com/thsvkd/harness-swap/blob/v0.2.7/src/claude_swap/switcher.py).
+## 개발
 
 ```sh
-JARVIS_CONFIG=/dev/null python3 -m unittest discover -s tests   # 파서·플랫폼 층·스냅샷 조립(이 기기 설정 파일과 무관하게)
-node tests/test_jarvis_js.mjs                             # 화면 공용 HTML 이스케이프(jarvis.js)
-# 시험 포트로 기동해 스키마 비교(9300 은 쓰지 않는다). 기준선 fixtures/ 는 내부 정보라 git 에 없다.
-JARVIS_CONFIG=deploy/pit5.toml python3 tools/snapcheck.py --port 9391 \
-    --baseline fixtures/pit5-baseline-20260928 --known fixtures/s2-pre-refactor/known.txt
-# 기기 환경이 바뀌어(컨테이너·서비스가 사라지는 등) 알려진 차이 목록이 낡으면 실패가 나온다.
-# 목록은 반드시 리팩토링 전 코드로 같은 기기에서 다시 만든다(지금 코드로 만들면 회귀도 기기 차이로 묻힌다).
-#   git archive 9432919 | tar -x -C "$TMP" && (cd "$TMP" && python3 tools/snapcheck.py --port 9393 --module pit5mon \
-#       --baseline <이 저장소>/fixtures/pit5-baseline-20260928 --write-known <이 저장소>/fixtures/s2-pre-refactor/known.txt)
+JARVIS_CONFIG=/dev/null python3 -m unittest discover -s tests   # 단위 테스트(표준 라이브러리 unittest)
+node tests/test_jarvis_js.mjs                                    # 화면 공용 JS
 ```
+
+작업 규칙은 [AGENTS.md](AGENTS.md), 완료 기준은 [docs/TEST_SPEC.md](docs/TEST_SPEC.md)가 소유한다.
+
+## 라이선스
+
+[LICENSE](LICENSE)

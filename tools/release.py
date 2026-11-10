@@ -35,7 +35,7 @@ irm {DL}/install.ps1 | iex
 & ([scriptblock]::Create((irm {DL}/install.ps1))) -Core <core 의 tailnet IP>
 ```
 
-이미 설치한 기기는 core 의 'jarvis 업데이트' 버튼이나 `python -m jarvis update` 로 갱신한다. 자세한 내용은 README 의 운영 절에 있다.
+이미 설치한 기기는 core 의 'jarvis 업데이트' 버튼이나 `python -m jarvis update` 로 갱신한다. 자세한 내용은 docs/operations.md 에 있다.
 """
 
 

@@ -1,4 +1,4 @@
-"""macOS: route·lsof·sysctl 로 채운다. 실동작은 Mac Studio 에서 한 번 확인해야 한다(README 참고).
+"""macOS: route·lsof·sysctl 로 채운다. 실동작은 Mac Studio 에서 한 번 확인해야 한다(docs/operations.md 참고).
 파서는 tests/ 의 명령 출력 fixture 로 검증한다."""
 
 import platform as _pf
