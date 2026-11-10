@@ -76,7 +76,8 @@ class ClaudeLoginTest(unittest.TestCase):
         self.patches = [mock.patch.dict(cli_login.CLIS, {"claude": lambda: self.exe}),
                         mock.patch.object(cli_login.claude_accounts, "binary", return_value=self.hswap),
                         # 시험하는 기기의 실제 hswap 저장소 상태에 따라 macOS 에서 버튼 가용성이 달라지지 않게 한다(가용성 판정은 아래 테스트가 따로 본다)
-                        mock.patch.object(cli_login.claude_accounts, "_keepalive", return_value={"store": "file"})]
+                        mock.patch.object(cli_login.claude_accounts, "_keepalive", return_value={"store": "file"}),
+                        mock.patch.object(cli_login.claude_accounts, "_keychain_open", return_value=False)]
         for p in self.patches:
             p.start()
 
@@ -239,6 +240,13 @@ class ClaudeLoginTest(unittest.TestCase):
                     mock.patch.object(cli_login.claude_accounts, "_keepalive", return_value=keepalive), \
                     mock.patch.object(claude_accounts._state, "device", device), mock.patch.object(claude_accounts._state, "fatal", fatal):
                 self.assertEqual("claude" in cli_login.available(), want, (platform, keepalive, device, fatal))
+
+    def test_macos_file_store_hides_claude_login_when_the_gateway_reaches_the_keychain(self):
+        """covers: USAGE-10 — 화면 세션의 게이트웨이는 로그인을 키체인에 써서 파일 저장소의 hswap claude add 가 실패한다"""
+        with mock.patch.object(cli_login, "sys", mock.Mock(platform="darwin")), \
+                mock.patch.object(cli_login.claude_accounts, "_keychain_open", return_value=True):
+            self.assertNotIn("claude", cli_login.available())
+            self.assertEqual(cli_login.start("claude")[0], 404)
 
 
 class FreshLoginTest(unittest.TestCase):

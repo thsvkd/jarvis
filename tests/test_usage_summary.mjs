@@ -145,7 +145,7 @@ assert.equal(hotNow(), hotBase);
 for (const [state, text] of [["relogin", "재로그인 필요"], ["expiring", "로그인 만료 임박(2일)"], ["keychain", "키체인 접근 불가"], ["stalled", "자동 갱신 멈춤"], ["failed", "자동 갱신 실패"]]) {
   claudeOf(devices[0]).login = { state, text, note: null, attention: true, slot: "2" };
   click({ prov: "all" });
-  assert.ok(rendered().includes(`<p class="ul-err">${text}</p><button type="button" class="seg-action" data-guide="first">다시 로그인 방법</button>`), state);
+  assert.ok(rendered().includes(`<div class="ul-st" data-tone="crit"><p class="ul-st-t">${text}</p><div class="ul-acts"><button type="button" class="seg-action" data-guide="first">다시 로그인 방법</button></div></div>`), state);
   assert.equal(hotNow(), hotBase + 1); // 기기 하나로 센다
   assert.match(rendered(), new RegExp(`주의 필요 계정</span><b>${hotBase + 1}</b>`));
 }
@@ -219,7 +219,8 @@ assert.doesNotMatch(guide, /GUI|migrate-store|unlock-keychain|first/);
 // 이전 계정의 기록이면 파일 저장소에서도 add 만 안내한다
 guide = guideOf({ ...fileStore, state: "other_account", slot: null, other: true });
 assert.match(guide, /<code>ssh &lt;그 기기&gt;<\/code>/);
-assert.match(guide, /<p>2\. <code>hswap claude add<\/code> 로 지금 로그인을 새 슬롯에 저장합니다/);
+assert.match(guide, /<ol class="ul-steps"><li><code>ssh &lt;그 기기&gt;<\/code>[^<]*<code>claude<\/code>[^<]*<\/li><li><code>hswap claude add<\/code> 로 지금 로그인을 새 슬롯에 저장합니다/); // 단계는 번호 목록이다(번호는 목록이 매긴다)
+assert.equal((guide.match(/<li>/g) || []).length, 2);
 assert.doesNotMatch(guide, /\/login/);
 // 키체인 항목이 있거나 확인하지 못했으면 복구 명령과 그 조건, 항목이 없을 때 볼 로그가 재로그인보다 먼저 온다
 guide = guideOf({ ...fileStore, state: "keychain_item_present" });
@@ -260,7 +261,7 @@ for (const other of [false, true]) {
   claudeOf(devices[0]).login = { state: "failed", text: "자동 갱신 실패(자격 증명 없음)", note: null, attention: true, slot: null, other };
   click({ guide: "first" });
   guide = element("ulDlgB").innerHTML;
-  assert.match(guide, /^<div class="ul-login"><p>1\. [^<]*<code>claude<\/code>[^<]*<code>\/login<\/code>/, String(other));
+  assert.match(guide, /^<div class="ul-login"><ol class="ul-steps"><li>[^<]*<code>claude<\/code>[^<]*<code>\/login<\/code>/, String(other));
   assert.ok(guide.indexOf("/login") < guide.indexOf("<code>hswap claude add</code>"));
   assert.doesNotMatch(guide, /--slot \d/);
   guideDialog.close();
@@ -276,6 +277,29 @@ delete claudeOf(devices[0]).login;
 click({ prov: "all" });
 assert.equal(hotNow(), hotBase); // 상태가 없으면(keepalive 를 쓰지 않는 기기) 세지 않는다
 
+// 로그인 줄의 설명(note)은 상태와 따로 나오고, 같은 칸의 계정 카드는 같은 'Claude 다시 로그인' 버튼을 되풀이하지 않는다
+{
+  devices[0].logins = ["claude"];
+  claudeOf(devices[0]).login = { state: "relogin", text: "재로그인 필요", note: "접근 토큰 만료됨", attention: true, slot: "2" };
+  const row = claudeOf(devices[0]).accounts[0];
+  Object.assign(row, { active: true, attention: true, note: "다시 로그인해야 합니다: 그 계정으로 Claude Code 에서 /login 한 뒤 hswap claude add 를 실행하세요." });
+  click({ mode: "full" }); // 계정 카드는 자세히 모드의 칸과 대화 상자에 나온다
+  const cell = rendered().match(/<tr aria-busy="false"><th scope="row"><b>first<\/b>[\s\S]*?<\/tr>/)?.[0] || "";
+  assert.match(cell, /<p class="ul-st-t">재로그인 필요<\/p><p class="ul-why">접근 토큰 만료됨<\/p><div class="ul-acts"><button[^>]*data-lp="claude">Claude 다시 로그인<\/button>/);
+  assert.match(cell, /<p class="ul-why">다시 로그인해야 합니다/); // 계정 주의 문구는 붉은 상자가 아니라 설명이다
+  assert.equal((cell.match(/data-lp="claude"/g) || []).length, 1);
+  Object.assign(row, { active: false, attention: undefined, note: undefined });
+  delete devices[0].logins; delete claudeOf(devices[0]).login;
+  click({ mode: "brief" });
+}
+// 기기가 프로바이더를 확인 불가로 보고했으면 칸에 이유 없는 – 대신 '확인 불가'를 낸다
+devices[2].unavailable = ["claude"];
+click({ prov: "all" });
+assert.match(rendered(), /<td data-label="Claude" class="ul-unk">확인 불가<\/td>/);
+devices[2].unavailable = ["grok"];
+click({ prov: "all" });
+assert.match(rendered(), /<td data-label="Claude" class="ul-nil">–<\/td>/);
+
 // covers: USAGE-7. 계정이 하나도 없어도 로그인 상태가 있으면 Claude 칸에 그리고, 세고, 안내한다
 {
   const noAccounts = { id: "claude", name: "Claude", accounts: [], login: { state: "relogin", text: "재로그인 필요", note: null, attention: true, slot: null, other: false } };
@@ -284,7 +308,7 @@ assert.equal(hotNow(), hotBase); // 상태가 없으면(keepalive 를 쓰지 않
   click({ prov: "all" });
   assert.equal(hotNow(), before);
   const cellOf = () => rendered().match(/<tr aria-busy="false"><th scope="row"><b>empty<\/b>[\s\S]*?<\/tr>/)?.[0] || "";
-  assert.match(cellOf(), /<td data-label="Claude" class="ul-full"><p class="ul-err">재로그인 필요<\/p><button type="button" class="seg-action" data-guide="empty">다시 로그인 방법<\/button>/);
+  assert.match(cellOf(), /<td data-label="Claude" class="ul-full"><div class="ul-st" data-tone="crit"><p class="ul-st-t">재로그인 필요<\/p><div class="ul-acts"><button type="button" class="seg-action" data-guide="empty">다시 로그인 방법<\/button>/);
   click({ guide: "empty" });
   assert.match(element("ulDlgB").innerHTML, /\/login/);
   element("ulDlg").close();
@@ -316,8 +340,17 @@ for (const cached of [false, true]) {
   assert.equal(el("usage").hidden, false);
   assert.equal(tab["data-core"], true);
 }
-// covers: USAGE-10. 실제 로그인 폴링 응답의 동기화 실패는 창을 닫지 않고 저장 실패와 구분해 안내한다.
-for (const result of [{ state: "failed", unsynced: true, error: "fixture-secret" }, { state: "failed", unsaved: true }]) {
+// covers: USAGE-10. 실제 로그인 폴링 응답의 실패는 창을 닫지 않고 제목·원인·다음에 할 일·동작으로 나눠 안내하며, 동기화 실패와 저장 실패를 구분한다.
+const reread = { id: "first", host: "first", status: 200, unavailable: [], providers: [{ ...provider("claude", "Claude", []),
+  login: { state: "keychain_item_present", text: "키체인에 Claude 로그인이 있거나 확인하지 못해 자동 갱신을 멈췄습니다", note: null, attention: true, slot: null, store: "file" } }] };
+const failCases = [
+  { name: "unsynced", poll: { state: "failed", unsynced: true, error: "fixture-secret" } },
+  { name: "unsaved", poll: { state: "failed", unsaved: true } }, // 다시 읽어도 로그인 상태를 모르면 add 직접 실행으로 안내한다
+  { name: "unsaved-reread", poll: { state: "failed", unsaved: true }, reread }, // 다시 읽은 상태(키체인 항목)의 안내를 그대로 보인다
+  { name: "failed", poll: { state: "none" } },
+  { name: "start", post: { ok: false, status: 409, body: { error: "이미 진행 중인 로그인이 있습니다" } } },
+];
+for (const c of failCases) {
   const els = new Map(), calls = [];
   const el = id => els.get(id) || els.set(id, { id, hidden: id === "usage", dataset: {}, handlers: {},
     classList: { toggle() {} }, setAttribute() {}, toggleAttribute() {},
@@ -329,26 +362,46 @@ for (const result of [{ state: "failed", unsynced: true, error: "fixture-secret"
     setTimeout(fn, delay) { if (delay === 3000) queueMicrotask(fn); },
     fetch: async (url, options) => {
       calls.push(url);
-      const body = url.includes("/login?") ? options?.method === "POST"
-        ? { url: "https://claude.example.com/oauth", paste: true, expires_at: now + 900 } : result : { devices };
-      return { ok: true, status: 200, json: async () => body };
+      if (url.includes("/login?")) {
+        if (options?.method !== "POST") return { ok: true, status: 200, json: async () => c.poll };
+        return c.post ? { ok: c.post.ok, status: c.post.status, json: async () => c.post.body }
+          : { ok: true, status: 200, json: async () => ({ url: "https://claude.example.com/oauth", paste: true, expires_at: now + 900 }) };
+      }
+      return { ok: true, status: 200, json: async () => c.reread && url === "/api/devices/first/usage" ? c.reread : { devices } };
     } };
   vm.runInNewContext(readFileSync(new URL("../static/shared/jarvis.js", import.meta.url), "utf8"), loginCtx);
   vm.runInNewContext(readFileSync(new URL("../static/app/usage.js", import.meta.url), "utf8"), loginCtx);
   await new Promise(resolve => setImmediate(resolve));
   el("usage").handlers.click({ target: { closest: () => ({ dataset: { login: "first", lp: "claude" }, getAttribute: () => null }) } });
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(calls.filter(url => url.includes("/login?")).length, 2);
-  assert.equal(el("ulDlg").open, true);
+  assert.equal(calls.filter(url => url.includes("/login?")).length, c.post ? 1 : 2, c.name);
+  assert.equal(el("ulDlg").open, true, c.name);
   const text = el("ulDlgB").innerHTML;
-  if (result.unsynced) {
+  assert.match(text, /<div class="ul-st" data-tone="(crit|warn)" role="alert"><p class="ul-st-t">[^<]+<\/p><p class="ul-why">[^<]+<\/p><\/div>/, c.name); // 제목과 원인은 따로, 오류 영역은 alert
+  const changed = c.name.startsWith("un");
+  assert.equal(text.includes('data-refresh="first"'), changed, c.name); // 로그인이 이미 바뀐 실패는 다시 읽기, 그 밖에는 다시 시도
+  assert.equal(text.includes('data-login="first" data-lp="claude">다시 시도'), !changed, c.name);
+  assert.doesNotMatch(text, /fixture-secret/, c.name);
+  if (c.name === "unsynced") {
     assert.match(text, /로그인은 바뀌었지만.*동기화/);
-    assert.match(text, /--adopt file/);
-    assert.match(text, /--adopt keychain/);
-    assert.doesNotMatch(text, /fixture-secret|슬롯 저장에 실패/);
-  } else {
+    assert.match(text, /<ol class="ul-steps"><li>그 기기의 Claude 상태를 확인하세요\.<\/li><li>/);
+    assert.match(text, /<code>hswap claude keepalive --adopt file<\/code>/);
+    assert.match(text, /<code>hswap claude keepalive --adopt keychain<\/code>/);
+    assert.doesNotMatch(text, /슬롯 저장에 실패/);
+  } else if (c.name === "unsaved") {
     assert.match(text, /슬롯 저장에 실패/);
-    assert.match(text, /hswap claude add/);
+    assert.match(text, /<ol class="ul-steps"><li>그 기기에서 <code>hswap claude add<\/code> 를 직접 실행하세요\.<\/li><\/ol>/);
+  } else if (c.name === "unsaved-reread") {
+    assert.match(text, /슬롯 저장에 실패/);
+    assert.match(text, /<code>hswap claude migrate-store --to file --keep keychain<\/code>/);
+    assert.ok(text.indexOf("migrate-store") < text.indexOf("ssh &lt;그 기기&gt;"));
+    assert.doesNotMatch(text, /직접 실행하세요/);
+  } else if (c.name === "failed") {
+    assert.match(text, /로그인이 끝나지 않았습니다/);
+    assert.doesNotMatch(text, /ul-steps|다음에 할 일/);
+  } else {
+    assert.match(text, /로그인을 시작하지 못했습니다/);
+    assert.match(text, /이미 진행 중인 로그인이 있습니다/);
   }
 }
 console.log("usage summary ok");

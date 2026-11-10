@@ -1135,6 +1135,16 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
 .ul-dot[data-p="grok"] { background: var(--s3); } .ul-dot[data-p="antigravity"] { background: var(--s2); }
 .ul-muted { color: var(--text-3); font-size: var(--fs-sm); }
 .ul-err { color: var(--crit-ink); font-size: var(--fs-sm); background: var(--crit-soft); padding: var(--sp-2) var(--sp-2_5); border-radius: var(--r-xs); overflow-wrap: anywhere; }
+/* 로그인 문제 한 덩어리: 상태(ul-st-t) -> 설명(ul-why) -> 동작(ul-acts). 기기 로그인 줄과 로그인 실패 화면이 같은 모양이다 */
+.ul-st { display: grid; gap: var(--sp-1_5); margin: var(--sp-2) 0; padding: var(--sp-2_5) var(--sp-3); border-radius: var(--r-xs); background: var(--tone-soft); }
+.ul-st:first-child { margin-top: 0; } .ul-st:last-child { margin-bottom: 0; }
+.ul-st-t { color: var(--tone-ink); font-size: var(--fs-sm); font-weight: var(--fw-semibold); overflow-wrap: anywhere; }
+.ul-why { color: var(--text-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.ul-acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.ul-steps { list-style: decimal; padding-left: var(--sp-5); }
+.ul-steps li + li { margin-top: var(--sp-2); }
+.ul-steps li::marker { color: var(--text-3); font-weight: var(--fw-semibold); }
+.ul-dlg code { font-family: var(--mono); font-size: .92em; padding: 0 var(--sp-1_5); border-radius: var(--r-xs); background: var(--tile-3); user-select: all; overflow-wrap: anywhere; }
 .ul-meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1_5) var(--sp-2_5); color: var(--text-3); font-size: var(--fs-sm); }
 #usage [aria-busy="true"] { opacity: .6; transition: opacity var(--dur); }
 #usage .tile { animation: none; } /* 1분마다·필터마다 다시 그리므로 등장 애니메이션을 끈다 */
@@ -1146,7 +1156,7 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
 .ul-wr { color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; text-align: right; }
 .ul-extra, .ul-age { color: var(--text-2); font-size: var(--fs-xs); margin-top: var(--sp-1_5); }
 .ul-note { color: var(--warn-ink); background: var(--warn-soft); font-size: var(--fs-xs); padding: var(--sp-1_5) var(--sp-2); border-radius: var(--r-xs); margin-bottom: var(--sp-2); }
-.ul-err + .ul-wins { margin-top: var(--sp-2); }
+.ul-why + .ul-wins { margin-top: var(--sp-2); }
 .ul-age { color: var(--text-3); }
 .ul-ah { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1_5) var(--sp-2); margin-bottom: var(--sp-2); min-width: 0; }
 .ul-email { font-weight: var(--fw-semibold); overflow-wrap: anywhere; }
@@ -1182,6 +1192,7 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
 .ul-full .ul-acct + .ul-acct { margin-top: var(--sp-2); padding-top: var(--sp-2_5); border-top: 0; }
 .ul-full .ul-win { grid-template-columns: 56px minmax(40px, 1fr) 36px minmax(0, auto); gap: var(--sp-1_5); font-size: var(--fs-xs); }
 .ul-nil { color: var(--text-3); }
+.ul-unk { color: var(--text-3); font-size: var(--fs-sm); }
 .ul-cell { font: inherit; display: grid; gap: var(--sp-0_5); width: 100%; min-width: 92px; text-align: left; padding: var(--sp-2) var(--sp-2_5); border-radius: var(--r-sm); border: 1px solid transparent; background: var(--tone-soft); color: var(--text); cursor: pointer; }
 .ul-cell:hover { border-color: var(--accent); }
 .ul-cell b { font-size: var(--fs-lg); color: var(--tone-ink); }

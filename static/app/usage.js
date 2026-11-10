@@ -105,7 +105,7 @@
  }
  function body(a){
   if(isErr(a)){const k=kind(a);return html`<p class="ul-err">${k[2]}</p>${a.error?html`<details class="ul-raw"><summary>원문 보기</summary><pre>${a.error}</pre></details>`:""}`;}
-  const note=a.note?html`<p class="${a.attention?"ul-err":"ul-note"}">${a.note}</p>`:""; // 마지막으로 읽은 값에 붙는 이유
+  const note=a.note?html`<p class="${a.attention?"ul-why":"ul-note"}">${a.note}</p>`:""; // 마지막으로 읽은 값에 붙는 이유
   // 창 없이 요금제·잔액만 있는 계정(hswap 의 Grok)은 잔액 줄을 함께 보인다
   if(!a.windows.length&&!a.buckets.length)return (note||a.extra)?html`${note}${extra(a.extra)}`:html`<p class="ul-muted">${a.status==="fetching"?"사용량을 읽는 중입니다.":"아직 사용량을 읽지 않았습니다."}</p>`;
   // Claude(hswap) 는 2026-10-30 요금제 개편 뒤 계정에 따라 5시간 창이 없다(인증된 Ultra). 읽지 못한 것과 구분해 적는다
@@ -119,8 +119,9 @@
  // 인증 실패·조치 필요 계정에는 그 기기에서 다시 로그인할 버튼을 함께 낸다(요약 카드도 상세와 같다)
  const relogIf=(a,d,p)=>(isErr(a)&&kind(a)[0]==="auth"||a.attention)&&(d.logins||[]).includes(p.id)?relog(d,p.id):"";
  // 기기 단위 로그인 상태 한 줄. 정상이면 작게, 이상이면 주의 색과 로그인(게이트웨이가 낼 수 있는 기기만)·안내 버튼
- const loginLine=(d,p)=>p.login?html`<p class="${p.login.attention?"ul-err":"ul-age"}">${p.login.text}${p.login.note?" · "+p.login.note:""}</p>${p.login.attention?html`${(d.logins||[]).includes("claude")?relog(d,"claude"):""}<button type="button" class="seg-action" data-guide="${d.id}">다시 로그인 방법</button>`:""}`:"";
- const acct=(a,d,p)=>html`<div class="ul-acct">${head(a)}${body(a)}${useBtn(a,d)}${relogIf(a,d,p)}${a.updated_at?html`<p class="ul-age">${P.fmt.ago(a.updated_at)} 확인</p>`:""}</div>`;
+ const loginLine=(d,p)=>!p.login?"":!p.login.attention?html`<p class="ul-age">${p.login.text}${p.login.note?" · "+p.login.note:""}</p>`
+  :html`<div class="ul-st" data-tone="crit"><p class="ul-st-t">${p.login.text}</p>${p.login.note?html`<p class="ul-why">${p.login.note}</p>`:""}<div class="ul-acts">${(d.logins||[]).includes("claude")?relog(d,"claude"):""}<button type="button" class="seg-action" data-guide="${d.id}">다시 로그인 방법</button></div></div>`;
+ const acct=(a,d,p)=>html`<div class="ul-acct">${head(a)}${body(a)}${useBtn(a,d)}${p.login&&p.login.attention?"":relogIf(a,d,p)}${a.updated_at?html`<p class="ul-age">${P.fmt.ago(a.updated_at)} 확인</p>`:""}</div>`;
  const badge=d=>{const [t,l]=state(d);return html`<span class="badge" data-tone="${t}">${l}</span>`;};
  function devMeta(d){
   const busy=S.busy.has(d.id),unknown=(d.unavailable||[]).filter(id=>!fresh(d).includes(id));
@@ -146,7 +147,7 @@
   const cell=(d,c)=>{
    const p=provs(d).find(p=>p.id===c.id),list=p?shown(d,p):[],L=p&&loginShown(p)?loginLine(d,p):"";
    if(!list.length&&fresh(d).includes(c.id))return html`<td data-label="${c.name}" class="ul-full"><div class="ul-acct"><p class="ul-muted">로그인하지 않았습니다.</p>${relog(d,c.id,false)}</div></td>`;
-   if(!list.length)return L?html`<td data-label="${c.name}" class="ul-full">${L}</td>`:html`<td data-label="${c.name}" class="ul-nil">–</td>`;
+   if(!list.length)return L?html`<td data-label="${c.name}" class="ul-full">${L}</td>`:!p&&(d.unavailable||[]).includes(c.id)?html`<td data-label="${c.name}" class="ul-unk">확인 불가</td>`:html`<td data-label="${c.name}" class="ul-nil">–</td>`;
    if(S.mode==="full")return html`<td data-label="${c.name}" class="ul-full">${L}${list.map(a=>acct(a,d,p))}</td>`;
    // 칸 값은 계정마다 가장 찬 한도의 평균이다(읽지 못한 계정은 빼고 센다)
    const err=list.some(isErr),act=list.some(a=>a.attention),pk=list.map(peak).filter(v=>v!=null),avg=pk.length?pk.reduce((x,y)=>x+y,0)/pk.length:null;
@@ -155,28 +156,41 @@
   return html`${kpi}${soon}${summary}<div class="tile ul-mx" data-mode="${S.mode}"><table style="${"--n:"+cols.length}"><thead><tr><th scope="col">기기</th>${cols.map(c=>html`<th scope="col">${dot(c.id)}${c.name}</th>`)}</tr></thead><tbody>${rows.map(d=>html`<tr aria-busy="${String(S.busy.has(d.id))}"><th scope="row"><b>${d.host||d.id}</b> ${badge(d)}${devMeta(d)}${state(d)[2]?html`<span class="ul-muted">${state(d)[2]}</span>`:""}</th>${cols.map(c=>cell(d,c))}</tr>`)}</tbody></table></div>`;
  }
  const dlg=$("#ulDlg");
+ // 다시 로그인 안내: 경고(붉은 문단)는 위에, 순서가 있는 일은 번호 목록에 둔다. 다시 로그인 방법 대화 상자와 로그인 실패 화면이 함께 쓴다
+ const guideSteps=L=>{
+  const add=L&&L.slot?"hswap claude add --slot "+L.slot:"hswap claude add",other=!!(L&&L.other),onlyAdd=!!(L&&L.state==="other_account");
+  const save=html`<code>${add}</code> 로 ${other?"지금 로그인을 새 슬롯에 저장합니다. 이미 저장한 계정이면 다음 자동 갱신 뒤 이 표시가 사라집니다.":html`그 계정을 다시 저장합니다.${L&&L.slot?"":" 슬롯 번호를 알면 --slot N 을 덧붙입니다."}`}`;
+  const gui=html`${L&&L.state==="keychain"?html`<p class="ul-err">SSH·서비스가 아니라 로그인 세션에서 실행해야 합니다.</p>`:""}<ol class="ul-steps">${onlyAdd?"":html`<li>그 기기의 로그인된 화면(GUI) 터미널에서 <code>claude</code> 를 실행해 <code>/login</code> 합니다. SSH 나 원격 실행 맥락은 피합니다.</li>`}<li>${save}</li></ol>`;
+  // 파일 저장소: 키체인이 열린 곳에서 claude 를 실행하면 키체인에 쓰고 파일을 지운다. 그래서 키체인이 잠긴 SSH 로 안내한다
+  const ssh=html`<ol class="ul-steps"><li><code>ssh &lt;그 기기&gt;</code> 로 접속합니다. 화면 터미널은 피합니다: 키체인이 열린 곳에서 <code>claude</code> 를 실행하면 로그인이 키체인으로 옮겨집니다.</li>${onlyAdd?"":html`<li><code>claude</code> 를 실행해 <code>/login</code> 합니다.</li>`}<li>${save}</li></ol>`;
+  // 복구가 먼저다: 항목이 남아 있으면 SSH 의 /login 이 저장되지 않을 수 있다
+  const repair=html`<p class="ul-err"><code>hswap claude migrate-store --to file --keep keychain</code>은 항목이 있을 때 씁니다. 항목이 없는데도 이 표시가 계속되면 <code>~/Library/Logs/hswap-keepalive.log</code>를 확인합니다.</p><p>이 명령은 키체인이 열린 맥락에서만 동작합니다. 그 기기의 화면 세션에서 실행하거나, 같은 셸에서 <code>security unlock-keychain</code> 을 먼저 실행합니다. 그 셸에서는 <code>claude</code> 를 실행하지 않습니다.</p><p class="ul-muted">복구한 뒤에도 로그인이 풀려 있으면 아래 순서로 다시 로그인합니다.</p>`;
+  const conflict=html`<p class="ul-err">hswap 설정에서 파일 저장소(<code>credentials.store</code>)와 키체인 필수 모드(<code>credentials.requireKeychain</code>) 중 하나만 켭니다. 다시 로그인하지 않아도 됩니다.</p>`;
+  return L&&L.state==="config_conflict"?conflict:L&&L.state==="keychain_item_present"?html`${repair}${ssh}`:L&&L.store==="file"?ssh:gui;
+ };
+ // 로그인 실패: 무슨 일(제목) -> 원인 -> 다음에 할 일 -> 동작. kind 는 login() 이 정한다. unsynced·unsaved 는 로그인이 이미 바뀐 뒤의 실패라 다시 읽기를, 그 밖에는 다시 시도를 낸다
+ const FAIL={start:["crit","로그인을 시작하지 못했습니다"],failed:["crit","로그인이 끝나지 않았습니다"],unsynced:["warn","로그인 저장소 동기화 미확인"],unsaved:["warn","슬롯 저장 실패"]};
+ const failView=(L,d)=>{
+  const [t,title]=FAIL[L.kind]||FAIL.failed,lg=((d&&d.providers||[]).find(x=>x.id==="claude")||{}).login,changed=L.kind==="unsynced"||L.kind==="unsaved";
+  // unsaved: 그 기기를 다시 읽은 결과의 로그인 상태가 주의면 그 상태의 안내를 그대로 보인다(키체인에 저장된 경우 add 만으로는 고쳐지지 않는다)
+  const steps=L.kind==="unsynced"?html`<ol class="ul-steps"><li>그 기기의 Claude 상태를 확인하세요.</li><li>키체인 모드에서 두 저장소의 로그인이 다르면 화면 터미널에서 최근 로그인·갱신이 저장된 쪽을 확인한 뒤 <code>hswap claude keepalive --adopt file</code> 또는 <code>hswap claude keepalive --adopt keychain</code> 으로 맞추세요.</li></ol>`
+   :L.kind!=="unsaved"?"":S.busy.has(L.dev)?html`<p class="ul-muted">그 기기의 로그인 상태를 다시 읽는 중입니다…</p>`
+   :lg&&lg.attention?guideSteps(lg):html`<ol class="ul-steps"><li>그 기기에서 <code>hswap claude add</code> 를 직접 실행하세요.</li></ol>`;
+  return html`<div class="ul-login"><div class="ul-st" data-tone="${t}" role="alert"><p class="ul-st-t">${title}</p><p class="ul-why">${L.err}</p></div>${steps?html`<p class="ul-wl">다음에 할 일</p>${steps}`:""}<div class="ul-acts">${changed?html`<button type="button" class="seg-action" data-refresh="${L.dev}" aria-disabled="${String(S.busy.has(L.dev))}">기기 다시 읽기</button>`:html`<button type="button" class="seg-action" data-login="${L.dev}" data-lp="${L.prov}">다시 시도</button>`}</div></div>`;
+ };
  function dlgDraw(){
   if(S.login){
    const L=S.login,d=S.devs.find(x=>x.id===L.dev);
    $("#ulDlgT").textContent=(d?d.host||d.id:L.dev)+" · "+LOGIN[L.prov]+" 로그인";
-   P.render($("#ulDlgB"),L.err?html`<p class="ul-err">${L.err}</p>`:!L.url?html`<p class="ul-muted">로그인 URL 을 받는 중입니다…</p>`
-    :L.paste?html`<div class="ul-login"><p>1. 아래 주소를 열어 저장할 계정으로 로그인하고, 표시되는 인증 코드를 복사하세요.</p><p><a href="${L.url}" target="_blank" rel="noopener noreferrer">${L.url}</a></p><form class="ul-paste" data-paste="1"><p>2. 인증 코드를 붙여 넣으세요.</p><input name="code" type="text" required autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="인증 코드" ${L.sent?"disabled":""}><button type="submit" class="seg-action" ${L.sent?"disabled":""}>코드 보내기</button></form>${L.msg?html`<p class="ul-err">${L.msg}</p>`:""}<p class="ul-muted">${L.sent?"코드를 보냈습니다. 저장을 마치면 이 창이 저절로 닫힙니다.":"이 기기의 Claude Code 로그인이 그 계정으로 바뀌고 슬롯에 저장됩니다."}</p></div>`
+   P.render($("#ulDlgB"),L.err?failView(L,d):!L.url?html`<p class="ul-muted">로그인 URL 을 받는 중입니다…</p>`
+    :L.paste?html`<div class="ul-login"><p>1. 아래 주소를 열어 저장할 계정으로 로그인하고, 표시되는 인증 코드를 복사하세요.</p><p><a href="${L.url}" target="_blank" rel="noopener noreferrer">${L.url}</a></p><form class="ul-paste" data-paste="1"><p>2. 인증 코드를 붙여 넣으세요.</p><input name="code" type="text" required autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="인증 코드" ${L.sent?"disabled":""}><button type="submit" class="seg-action" ${L.sent?"disabled":""}>코드 보내기</button></form>${L.msg?html`<p class="ul-err" role="alert">${L.msg}</p>`:""}<p class="ul-muted">${L.sent?"코드를 보냈습니다. 저장을 마치면 이 창이 저절로 닫힙니다.":"이 기기의 Claude Code 로그인이 그 계정으로 바뀌고 슬롯에 저장됩니다."}</p></div>`
     :html`<div class="ul-login"><p>아래 주소를 열어 로그인하고 일회용 코드를 넣으세요. 코드는 ${new Date(L.expires_at*1000).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",hour12:false})}까지 유효합니다.</p><p><a href="${L.url}" target="_blank" rel="noopener noreferrer">${L.url}</a></p><p class="ul-code">${L.code}</p><p class="ul-muted">로그인을 마치면 이 창이 저절로 닫히고 사용량을 다시 읽습니다.</p></div>`);
    return;
   }
   if(S.guide){ // 안내만 한다: 로그인은 그 기기에서 사람이 한다(파일 저장소는 SSH, 그 밖에는 화면 세션). 문구에 기기 이름·경로를 넣지 않는다
    const d=S.devs.find(x=>x.id===S.guide),L=d&&(d.providers||[]).find(x=>x.id==="claude")?.login;
    $("#ulDlgT").textContent=(d?d.host||d.id:S.guide)+" · Claude 다시 로그인";
-   const add=L&&L.slot?"hswap claude add --slot "+L.slot:"hswap claude add",other=!!(L&&L.other),onlyAdd=!!(L&&L.state==="other_account");
-   const save=html`<code>${add}</code> 로 ${other?"지금 로그인을 새 슬롯에 저장합니다. 이미 저장한 계정이면 다음 자동 갱신 뒤 이 표시가 사라집니다.":html`그 계정을 다시 저장합니다.${L&&L.slot?"":" 슬롯 번호를 알면 --slot N 을 덧붙입니다."}`}`;
-   const gui=html`${L&&L.state==="keychain"?html`<p class="ul-err">SSH·서비스가 아니라 로그인 세션에서 실행해야 합니다.</p>`:""}${onlyAdd?"":html`<p>1. 그 기기의 로그인된 화면(GUI) 터미널에서 <code>claude</code> 를 실행해 <code>/login</code> 합니다. SSH 나 원격 실행 맥락은 피합니다.</p>`}<p>${onlyAdd?"":"2. "}${save}</p>`;
-   // 파일 저장소: 키체인이 열린 곳에서 claude 를 실행하면 키체인에 쓰고 파일을 지운다. 그래서 키체인이 잠긴 SSH 로 안내한다
-   const ssh=html`<p>1. <code>ssh &lt;그 기기&gt;</code> 로 접속합니다. 화면 터미널은 피합니다: 키체인이 열린 곳에서 <code>claude</code> 를 실행하면 로그인이 키체인으로 옮겨집니다.</p>${onlyAdd?"":html`<p>2. <code>claude</code> 를 실행해 <code>/login</code> 합니다.</p>`}<p>${onlyAdd?"2":"3"}. ${save}</p>`;
-   // 복구가 먼저다: 항목이 남아 있으면 SSH 의 /login 이 저장되지 않을 수 있다
-   const repair=html`<p class="ul-err"><code>hswap claude migrate-store --to file --keep keychain</code>은 항목이 있을 때 씁니다. 항목이 없는데도 이 표시가 계속되면 <code>~/Library/Logs/hswap-keepalive.log</code>를 확인합니다.</p><p>이 명령은 키체인이 열린 맥락에서만 동작합니다. 그 기기의 화면 세션에서 실행하거나, 같은 셸에서 <code>security unlock-keychain</code> 을 먼저 실행합니다. 그 셸에서는 <code>claude</code> 를 실행하지 않습니다.</p><p class="ul-muted">복구한 뒤에도 로그인이 풀려 있으면 아래 순서로 다시 로그인합니다.</p>`;
-   const conflict=html`<p class="ul-err">hswap 설정에서 파일 저장소(<code>credentials.store</code>)와 키체인 필수 모드(<code>credentials.requireKeychain</code>) 중 하나만 켭니다. 다시 로그인하지 않아도 됩니다.</p>`;
-   const steps=L&&L.state==="config_conflict"?conflict:L&&L.state==="keychain_item_present"?html`${repair}${ssh}`:L&&L.store==="file"?ssh:gui;
-   P.render($("#ulDlgB"),html`<div class="ul-login">${steps}<p class="ul-muted">이 기기가 화면 로그인을 낼 수 있으면 'Claude 다시 로그인' 버튼으로도 할 수 있습니다.</p></div>`);
+   P.render($("#ulDlgB"),html`<div class="ul-login">${guideSteps(L)}<p class="ul-muted">이 기기가 화면 로그인을 낼 수 있으면 'Claude 다시 로그인' 버튼으로도 할 수 있습니다.</p></div>`);
    return;
   }
   if(!S.dlg)return;
@@ -242,8 +256,8 @@
   const L=S.login={dev,prov};dlgDraw();if(!dlg.open)dlg.showModal();
   try{
    const r=await fetch("/api/devices/"+encodeURIComponent(dev)+"/login?provider="+prov,{method:"POST",cache:"no-store",headers:{"X-Jarvis-Action":"usage-login"}}),o=await r.json();
-   if(r.ok)Object.assign(L,{url:o.url,code:o.code,paste:o.paste===true,expires_at:o.expires_at});else L.err=o.error||"HTTP "+r.status;
-  }catch(e){L.err=e.message||String(e);}
+   if(r.ok)Object.assign(L,{url:o.url,code:o.code,paste:o.paste===true,expires_at:o.expires_at});else Object.assign(L,{kind:"start",err:o.error||"HTTP "+r.status});
+  }catch(e){Object.assign(L,{kind:"start",err:e.message||String(e)});}
   if(S.login!==L)return;
   dlgDraw();
   // 로그인을 마치면(CLI 가 자격을 저장하고 끝나면) 창을 닫고 그 기기를 다시 읽는다
@@ -253,9 +267,11 @@
    try{
     const r=await fetch("/api/devices/"+encodeURIComponent(dev)+"/login?provider="+prov,{cache:"no-store"}),o=await r.json();
     if(o.state==="done"){dlg.close();note(LOGIN[prov]+" 로그인을 확인했습니다");refreshOne(dev);return;}
-    if(o.state==="failed"&&o.unsynced){L.err="로그인은 바뀌었지만 로그인 저장소의 동기화를 확인하지 못했습니다. 그 기기의 Claude 상태를 확인하세요. 키체인 모드에서 두 저장소의 로그인이 다르면 화면 터미널에서 최근 로그인·갱신이 저장된 쪽을 확인한 뒤 hswap claude keepalive --adopt file 또는 hswap claude keepalive --adopt keychain 으로 맞추세요.";dlgDraw();}
-    else if(o.state==="failed"&&o.unsaved){L.err="로그인은 바뀌었지만 슬롯 저장에 실패했습니다. 그 기기에서 hswap claude add 를 직접 실행하세요.";dlgDraw();}
-    else if(o.state==="failed"||o.state==="none"){L.err="로그인이 끝나지 않았습니다(코드가 틀렸거나 만료되었거나 취소되었습니다). 다시 시도하세요.";dlgDraw();}
+    if(o.state==="failed"&&(o.unsynced||o.unsaved)){ // 로그인은 이미 바뀌었다: 그 기기를 다시 읽어 기기 단위 로그인 상태로 안내한다
+     Object.assign(L,o.unsynced?{kind:"unsynced",err:"로그인은 바뀌었지만 로그인 저장소의 동기화를 확인하지 못했습니다."}:{kind:"unsaved",err:"로그인은 바뀌었지만 슬롯 저장에 실패했습니다."});
+     dlgDraw();refreshOne(dev,true);
+    }
+    else if(o.state==="failed"||o.state==="none"){Object.assign(L,{kind:"failed",err:"코드가 틀렸거나 만료되었거나 취소되었습니다."});dlgDraw();}
    }catch(e){} // 일시적인 실패는 다음 차례에 다시 묻는다
   }
  }

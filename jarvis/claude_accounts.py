@@ -428,15 +428,23 @@ def _keepalive():
     return body if isinstance(body, dict) and body.get("schemaVersion") == 1 else None
 
 
+def _keychain_open():
+    """이 프로세스가 로그인 키체인에 닿는가(비밀값은 읽지 않는다). 확인하지 못하면 닿지 않는 쪽으로 본다."""
+    try:
+        return subprocess.run(["security", "show-keychain-info"], capture_output=True, timeout=5).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def login_ready():
     """macOS 에서 화면 로그인(claude auth login → hswap claude add)을 낼 수 있는 기기인가.
-    파일 저장소이거나, 키체인 모드(store 가 file 이 아님)에서 이 게이트웨이의 hswap 조회가 최근에 키체인에 닿았고(keychainUnavailable 아님)
+    파일 저장소이면서 이 게이트웨이가 키체인에 닿지 않거나(닿으면 claude 가 로그인을 키체인에 써서 hswap 이 파일에서 찾지 못한다), 키체인 모드(store 가 file 이 아님)에서 이 게이트웨이의 hswap 조회가 최근에 키체인에 닿았고(keychainUnavailable 아님)
     설정 충돌·키체인 항목 문제가 없을 때다. keepalive 기록이 없거나 게이트웨이의 키체인 접근을 최근에 확인하지 못했으면 아니다."""
     k = _keepalive()
     if k is None:
         return False
     if k.get("store") == "file":
-        return True
+        return not _keychain_open()
     mono = time.monotonic()
     err = k.get("error") if isinstance(k.get("error"), dict) else {}
     blocked = ("config_conflict", "keychain_item_present")
