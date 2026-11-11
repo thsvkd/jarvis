@@ -1029,6 +1029,44 @@ class SwitchRaceTest(StoreCase):
         self.assertEqual(self.lists, 1)
 
 
+class RemoveTest(StoreCase):
+    """계정 삭제: hswap claude remove 에 확인(y)을 넘기고, 지운 것은 'Removed' 줄로만 인정한다."""
+
+    def run_with(self, rc, out="", err=""):
+        self.binary.return_value = "/fake/hswap"
+        done = subprocess.CompletedProcess([], rc, out, err)
+        with mock.patch.object(claude_accounts.subprocess, "run", return_value=done) as run:
+            result = claude_accounts.remove("3")
+        return result, run
+
+    def test_remove_passes_yes_and_reports_removed(self):
+        """covers: USAGE-12"""
+        claude_accounts._state.cache = (time.monotonic(), {"accounts": []}, None)
+        (code, body), run = self.run_with(0, "Removed Account-3 (b@example.com)\n")
+        self.assertEqual((code, body), (200, {"removed": True}))
+        self.assertEqual(run.call_args.args[0], ["/fake/hswap", "claude", "remove", "3"])
+        self.assertEqual(run.call_args.kwargs["input"], "y\n")
+        self.assertIsNone(claude_accounts._state.cache)  # 다음 읽기는 hswap 에 다시 묻는다
+
+    def test_refusal_and_cancel_are_not_success(self):
+        """covers: USAGE-12. 거절 이유는 색·Error: 머리를 떼고 홈 경로를 지워 준다"""
+        home = os.path.expanduser("~")
+        (code, body), _ = self.run_with(1, err=f"\x1b[31mError: Account-3 has a live session. Inspect {home}/x\x1b[0m\n")
+        self.assertEqual(code, 409)
+        self.assertTrue(body["error"].startswith("Account-3 has a live session"), body)
+        self.assertNotIn(home, body["error"])
+        (code, body), _ = self.run_with(0, "Cancelled\n")
+        self.assertEqual(code, 409)
+        self.assertIn("종료 코드 0", body["error"])
+
+    def test_bad_slot_and_missing_hswap_do_not_run(self):
+        """covers: USAGE-12"""
+        with mock.patch.object(claude_accounts.subprocess, "run", side_effect=AssertionError("실행했다")):
+            for slot in ("", "a1", "12345", None, "../1"):
+                self.assertEqual(claude_accounts.remove(slot)[0], 400, slot)
+            self.assertEqual(claude_accounts.remove("1")[0], 404)
+
+
 class DiscoveryTest(StoreCase):
     """저장소를 읽지 못하는 기기: CLI 로 계정을 찾은 적이 있는지와 찾은 적이 없는지를 나눈다."""
 

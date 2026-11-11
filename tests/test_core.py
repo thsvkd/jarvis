@@ -250,6 +250,7 @@ class RouteTest(unittest.TestCase):
         """다시 로그인·계정 전환은 viewers 만, 게이트웨이의 /api/usage/* 로 경로와 헤더를 그대로 전달한다"""
         Gateway.routes["/api/usage/login?provider=codex"] = (200, b'{"url":"https://x","code":"ABCD-EFGH"}', False)
         Gateway.routes["/api/usage/account?slot=2"] = (200, b'{"switched":true}', False)
+        Gateway.routes["/api/usage/account/remove?slot=2"] = (200, b'{"removed":true}', False)
         post = lambda path, action: urllib.request.Request(self.base + path, data=b"", method="POST", headers={"X-Jarvis-Action": action})
         kind, vw = server.client_kind, config.VIEWERS
         server.client_kind, config.VIEWERS = (lambda ip: "tailnet"), ["127.0.0.1"]
@@ -260,8 +261,12 @@ class RouteTest(unittest.TestCase):
             with urllib.request.urlopen(post("/api/devices/gw/account?slot=2", "usage-account")) as r:
                 self.assertEqual(json.loads(r.read()), {"switched": True})
             self.assertEqual(Gateway.posted, ("/api/usage/account?slot=2", "usage-account"))
+            with urllib.request.urlopen(post("/api/devices/gw/account/remove?slot=2", "usage-account")) as r:  # covers: USAGE-12
+                self.assertEqual(json.loads(r.read()), {"removed": True})
+            self.assertEqual(Gateway.posted, ("/api/usage/account/remove?slot=2", "usage-account"))
             # 옛 게이트웨이는 그 경로가 없다(404): 다른 경로로 다시 묻지 않고 501 로 알린다
-            for path, action in (("/api/devices/gw/login?provider=grok", "usage-login"), ("/api/devices/gw/account?slot=9", "usage-account")):
+            for path, action in (("/api/devices/gw/login?provider=grok", "usage-login"), ("/api/devices/gw/account?slot=9", "usage-account"),
+                                 ("/api/devices/gw/account/remove?slot=9", "usage-account")):
                 with self.assertRaises(urllib.error.HTTPError) as e:
                     urllib.request.urlopen(post(path, action))
                 self.assertEqual(e.exception.code, 501)

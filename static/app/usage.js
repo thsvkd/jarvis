@@ -10,7 +10,7 @@
  // 셸이 기억한 core 값이 있으면 확인 전에도 섹션을 연다('불러오는 중…'). 게이트웨이면 load 가 404 로 다시 숨긴다
  if(document.querySelector('[data-sh-sec="usage"][data-core]'))sec.hidden=false;
  const MODE_KEY="jarvis.usage.mode";
- const S={devs:null,prov:"all",hot:false,busy:new Set(),dlg:null,login:null,guide:null,
+ const S={devs:null,hn:{},hnWatch:new Set(),hnTimer:null,prov:"all",hot:false,busy:new Set(),dlg:null,login:null,guide:null,
   mode:(()=>{try{return localStorage.getItem(MODE_KEY)==="full"?"full":"brief";}catch(e){return "brief";}})()};
  const WIN={session:"5시간",weekly:"주간",fable:"Fable 주간",monthly:"월간"};
  const PROVIDER={claude:"Claude",codex:"Codex",grok:"Grok",antigravity:"Antigravity",gemini:"Gemini",kimi:"Kimi",minimax:"MiniMax",zcode:"Z Code",cursor:"Cursor",opencodeGo:"OpenCode Go"};
@@ -118,6 +118,8 @@
  const addBtn=(d,id)=>(d.login_adds||[]).includes(id)?html`<button type="button" class="seg-action" data-login="${d.id}" data-lp="${id}" data-add="1">${LOGIN[id]} 계정 추가</button>`:"";
  // slot: 게이트웨이 hswap 의 슬롯 번호(Claude). 그 기기의 Claude Code 로그인을 이 계정으로 바꾼다
  const useBtn=(a,d)=>a.slot&&!a.active?html`<button type="button" class="seg-action" data-use="${d.id}" data-slot="${a.slot}" data-label="${a.label}" aria-disabled="${String(S.busy.has(d.id))}">이 계정 사용</button>`:"";
+ // 사용 중이 아닌 저장 계정(hswap 슬롯)을 그 기기의 hswap 에서 지운다. 사용 중 계정은 지우면 지금 로그인이 관리 밖으로 남아 내지 않는다
+ const rmBtn=(a,d)=>a.slot&&!a.active?html`<button type="button" class="seg-action" data-remove="${d.id}" data-slot="${a.slot}" data-label="${a.label}" aria-disabled="${String(S.busy.has(d.id))}">계정 삭제</button>`:"";
  // 인증 실패·조치 필요 계정에는 그 기기에서 다시 로그인할 버튼을 함께 낸다(요약 카드도 상세와 같다)
  const relogIf=(a,d,p)=>(isErr(a)&&kind(a)[0]==="auth"||a.attention)&&(d.logins||[]).includes(p.id)?relog(d,p.id):"";
  // 기기 단위 로그인 상태 한 줄. 정상이면 작게, 이상이면 주의 색과 로그인(게이트웨이가 낼 수 있는 기기만)·안내 버튼
@@ -126,7 +128,7 @@
  const loginLine=(d,p)=>!p.login?"":p.login.attention&&SCHED[p.login.state]?html`<div class="ul-st" data-tone="warn"><p class="ul-st-t">${p.login.text}</p><p class="ul-why">${SCHED[p.login.state]} <code>hswap claude keepalive --install-service --ahead 7200</code></p></div>`
   :!p.login.attention?html`<p class="ul-age">${p.login.text}${p.login.note?" · "+p.login.note:""}</p>`
   :html`<div class="ul-st" data-tone="crit"><p class="ul-st-t">${p.login.text}</p>${p.login.note?html`<p class="ul-why">${p.login.note}</p>`:""}<div class="ul-acts">${(d.logins||[]).includes("claude")?relog(d,"claude"):""}<button type="button" class="seg-action" data-guide="${d.id}">다시 로그인 방법</button></div></div>`;
- const acct=(a,d,p)=>html`<div class="ul-acct">${head(a)}${body(a)}${useBtn(a,d)}${p.login&&p.login.attention?"":relogIf(a,d,p)}${a.updated_at?html`<p class="ul-age">${P.fmt.ago(a.updated_at)} 확인</p>`:""}</div>`;
+ const acct=(a,d,p)=>html`<div class="ul-acct">${head(a)}${body(a)}${useBtn(a,d)}${rmBtn(a,d)}${p.login&&p.login.attention?"":relogIf(a,d,p)}${a.updated_at?html`<p class="ul-age">${P.fmt.ago(a.updated_at)} 확인</p>`:""}</div>`;
  const badge=d=>{const [t,l]=state(d);return html`<span class="badge" data-tone="${t}">${l}</span>`;};
  function devMeta(d){
   const busy=S.busy.has(d.id),unknown=(d.unavailable||[]).filter(id=>!fresh(d).includes(id));
@@ -134,6 +136,13 @@
   return html`<p class="ul-meta">${d.fetched_at?html`<span>${P.fmt.ago(d.fetched_at)} 수집</span>`:""}${refBtn(d.id,(d.host||d.id)+" 새로고침",busy)}</p>${unknown.length?html`<span class="ul-muted">확인 불가: ${unknown.map(id=>PROVIDER[id]||id).join(" · ")}</span>`:""}${hswapMeta(d.hswap)}`;
  }
  // 게이트웨이가 확인한 hswap 버전. 고정 버전과 다르거나 설치 중·실패면 그 사실을 붙인다
+ // 하네스 갱신: AI 셋업 화면과 같은 harness 모듈(/api/devices/modules)을 읽는다. health degraded 가 갱신 가능이다.
+ // viewers 가 아니면 details 가 없어 대상 이름 없이 보이고, 계획·실행은 서버가 403 으로 막는다
+ const harnessMeta=d=>{
+  const h=S.hn[d.id];if(!h)return "";
+  if(h.running)return html`<span class="ul-muted">하네스 업데이트 중…</span>`;
+  return h.outdated?html`<span class="ul-muted">하네스 갱신 가능${h.list?": "+h.list:""}</span><button type="button" class="seg-action" data-hup="${d.id}" aria-disabled="${String(S.busy.has(d.id))}">하네스 업데이트</button>`:"";
+ };
  const hswapMeta=h=>h?html`<span class="ul-muted">hswap ${h.version||"없음"}${h.version!==h.pinned?` (고정 ${h.pinned})`:""}${h.note?" · "+h.note:""}</span>`:"";
 
  // ---------------------------------------------------------------- 화면
@@ -158,7 +167,7 @@
    const err=list.some(isErr),act=list.some(a=>a.attention),pk=list.map(peak).filter(v=>v!=null),avg=pk.length?pk.reduce((x,y)=>x+y,0)/pk.length:null;
    return html`<td data-label="${c.name}"><button type="button" class="ul-cell" data-cell="${d.id+":"+c.id}" data-tone="${err||act?"crit":tone(avg)}"><b>${err&&avg==null?kind(list.find(isErr))[1]:pct(avg)}</b><span>${pk.length>1?"평균 · ":""}계정 ${list.length}${err&&avg!=null?" · "+kind(list.find(isErr))[1]+" 포함":""}${act?" · 조치 필요":""}</span></button>${L}</td>`;
   };
-  return html`${kpi}${soon}${summary}<div class="tile ul-mx" data-mode="${S.mode}"><table style="${"--n:"+cols.length}"><thead><tr><th scope="col">기기</th>${cols.map(c=>html`<th scope="col">${dot(c.id)}${c.name}</th>`)}</tr></thead><tbody>${rows.map(d=>html`<tr aria-busy="${String(S.busy.has(d.id))}"><th scope="row"><b>${d.host||d.id}</b> ${badge(d)}${devMeta(d)}${state(d)[2]?html`<span class="ul-muted">${state(d)[2]}</span>`:""}</th>${cols.map(c=>cell(d,c))}</tr>`)}</tbody></table></div>`;
+  return html`${kpi}${soon}${summary}<div class="tile ul-mx" data-mode="${S.mode}"><table style="${"--n:"+cols.length}"><thead><tr><th scope="col">기기</th>${cols.map(c=>html`<th scope="col">${dot(c.id)}${c.name}</th>`)}</tr></thead><tbody>${rows.map(d=>html`<tr aria-busy="${String(S.busy.has(d.id))}"><th scope="row"><b>${d.host||d.id}</b> ${badge(d)}${devMeta(d)}${harnessMeta(d)}${state(d)[2]?html`<span class="ul-muted">${state(d)[2]}</span>`:""}</th>${cols.map(c=>cell(d,c))}</tr>`)}</tbody></table></div>`;
  }
  const dlg=$("#ulDlg");
  // 다시 로그인 안내: 경고(붉은 문단)는 위에, 순서가 있는 일은 번호 목록에 둔다. 다시 로그인 방법 대화 상자와 로그인 실패 화면이 함께 쓴다
@@ -237,6 +246,7 @@
    if(!r.ok)throw new Error("HTTP "+r.status);
    const o=await r.json();
    S.devs=o.devices;reveal();
+   if(!S.hnTimer)loadMods();
    const n=S.devs.filter(failed).length;
    note(force?(n?n+"대는 읽지 못했습니다":"사용량을 다시 확인했습니다"):"",force&&n);
   }catch(e){note("불러오지 못했습니다: "+(e.message||e),true);}
@@ -306,6 +316,57 @@
   (cur&&cur.providers||[]).filter(p=>p.id==="claude").forEach(p=>p.accounts.forEach(a=>{a.active=a.slot===slot;}));
   refreshOne(dev,true);
  }
+ async function remove(dev,slot,label){
+  const d=S.devs.find(x=>x.id===dev),name=d&&d.host||dev;
+  if(S.busy.has(dev)||!confirm(name+" 의 hswap 에서 Claude 계정 "+label+" 을(를) 지울까요? 저장한 로그인도 함께 지워져, 다시 쓰려면 계정을 다시 추가해야 합니다."))return;
+  S.busy.add(dev);draw();
+  try{
+   const r=await fetch("/api/devices/"+encodeURIComponent(dev)+"/account/remove?slot="+encodeURIComponent(slot),{method:"POST",cache:"no-store",headers:{"X-Jarvis-Action":"usage-account"}}),o=await r.json();
+   const good=r.ok&&o.removed===true;
+   note(good?name+": Claude 계정 "+label+" 을(를) 지웠습니다":name+": "+(o.error||"HTTP "+r.status),!good);
+  }catch(e){note(e.message||String(e),true);}
+  S.busy.delete(dev);
+  refreshOne(dev,true); // 실패해도 다시 읽는다(hswap 이 지운 뒤 확인 줄만 못 낸 경우)
+ }
+ const HRES={done:"하네스를 갱신했습니다",current:"하네스가 이미 최신입니다",deferred:"세션이 돌고 있어 일부 하네스를 보류했습니다",
+  stale:"그사이 계획이 바뀌어 실행하지 않았습니다. 다시 누르세요",failed:"하네스 갱신에 실패했습니다(AI 셋업 화면에서 단계별 결과를 보세요)",interrupted:"게이트웨이 재시작으로 하네스 갱신이 중단됐습니다"};
+ async function loadMods(){
+  clearTimeout(S.hnTimer);
+  try{
+   const r=await fetch("/api/devices/modules",{cache:"no-store"});
+   if(r.ok)for(const x of (await r.json()).devices||[]){
+    const h=x.status===200&&x.modules&&x.modules.harness,j=x.job||{},running=j.module==="harness"&&j.state==="running";
+    const tools=(((h&&h.details)||{}).tools||[]).filter(t=>t.state==="outdated");
+    S.hn[x.id]={outdated:!!h&&h.ok!==false&&h.health==="degraded",running,list:tools.map(t=>`${t.id} ${t.version||"?"} → ${t.latest}`).join(" · ")};
+    if(S.hnWatch.has(x.id)&&!running&&j.module==="harness"){ // 이 화면에서 시작한 갱신이 끝났다
+     S.hnWatch.delete(x.id);
+     const st=j.state==="interrupted"?"interrupted":j.status||(j.result||{}).status;
+     note((x.host||x.id)+": "+(HRES[st]||(j.result||{}).error||"하네스 갱신이 끝났습니다"),st!=="done"&&st!=="current");
+    }
+   }
+  }catch(e){}
+  if(S.devs)draw();
+  S.hnTimer=setTimeout(loadMods,Object.values(S.hn).some(h=>h.running)?5000:300000); // 게이트웨이 harness 캐시는 1800초다
+ }
+ async function hup(id){
+  if(S.busy.has(id))return;
+  const name=(S.devs.find(x=>x.id===id)||{}).host||id,base="/api/devices/"+encodeURIComponent(id)+"/modules/harness/";
+  S.busy.add(id);draw();note(name+": 하네스 갱신 계획을 세우는 중…");
+  try{
+   let r=await fetch(base+"plan",{cache:"no-store"});const p=await r.json();
+   if(!r.ok)throw new Error(p.error||"HTTP "+r.status);
+   if(!p.steps.length)note(name+": 하네스가 이미 최신입니다");
+   // 확인 창이 승인이다. codex 데몬 재시작(config)은 돌고 있는 Codex 작업을 끊을 수 있어 따로 알린다
+   else if(confirm(name+" 에서 하네스를 갱신합니다.\n"+p.steps.map(x=>"· "+x.summary).join("\n")+(p.steps.some(x=>x.risk!=="update")?"\n데몬 재시작은 돌고 있는 Codex 작업을 끊을 수 있습니다.":"")+"\n계속할까요?")){
+    r=await fetch(base+"apply?plan_id="+encodeURIComponent(p.plan_id),{method:"POST",cache:"no-store",headers:{"X-Jarvis-Action":"module-apply"}});
+    const o=await r.json().catch(()=>({}));
+    if(r.status!==202)throw new Error(o.error||"HTTP "+r.status);
+    S.hnWatch.add(id);S.hn[id]={...S.hn[id],running:true};note(name+": 하네스 업데이트를 시작했습니다. 끝나면 여기에 결과가 나옵니다");
+    clearTimeout(S.hnTimer);S.hnTimer=setTimeout(loadMods,5000);
+   }else note("");
+  }catch(e){note(name+": "+(e.message||e),true);}
+  S.busy.delete(id);draw();
+ }
  dlg.addEventListener("submit",e=>{
   if(!e.target.dataset||!e.target.dataset.paste)return;
   e.preventDefault();
@@ -325,6 +386,8 @@
   }
   if(t.dataset.guide){S.guide=t.dataset.guide;dlgDraw();if(!dlg.open)dlg.showModal();return;}
   if(t.dataset.use){use(t.dataset.use,t.dataset.slot,t.dataset.label);return;}
+  if(t.dataset.hup){hup(t.dataset.hup);return;}
+  if(t.dataset.remove){remove(t.dataset.remove,t.dataset.slot,t.dataset.label);return;}
   if(t.dataset.refresh){if(S.login)dlg.close();refreshOne(t.dataset.refresh);return;}
   if(t.dataset.cell){const [dev,prov]=t.dataset.cell.split(":");S.dlg={dev,prov};dlgDraw();if(!dlg.open)dlg.showModal();return;}
   if(t.hasAttribute("data-close")){dlg.close();return;}

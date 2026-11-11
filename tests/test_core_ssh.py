@@ -294,7 +294,7 @@ class Unsupported(Base):
         with mock.patch.object(core, "_open", side_effect=AssertionError("HTTP 를 보냈다")):
             for call in (lambda: c.usage("kg"), lambda: c.usage("kg", True),
                          lambda: c.usage_login("kg", "claude"), lambda: c.usage_login_status("kg", "claude"),
-                         lambda: c.usage_switch("kg", "1")):
+                         lambda: c.usage_switch("kg", "1"), lambda: c.usage_remove("kg", "1")):
                 self.assertEqual(call(), (501, {"error": core.SSH_ONLY}))
         self.assertEqual(self.calls(), [])
 

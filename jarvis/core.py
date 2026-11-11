@@ -513,6 +513,12 @@ class Core:
                                      data=b"", method="POST", headers={"X-Jarvis-Action": "usage-account"})
         return self._ask(i, req, SWITCH_TIMEOUT_S, "계정 전환을")
 
+    def usage_remove(self, i, slot):
+        """계정 삭제 버튼: 그 게이트웨이 POST /api/usage/account/remove 를 그대로 전달한다(Claude 의 hswap 슬롯)."""
+        req = urllib.request.Request(self.devices[i]["url"] + "/api/usage/account/remove?slot=" + urllib.parse.quote(slot),
+                                     data=b"", method="POST", headers={"X-Jarvis-Action": "usage-account"})
+        return self._ask(i, req, SWITCH_TIMEOUT_S, "계정 삭제를")
+
     def usage_all(self, force=False):
         """모든 기기의 사용량을 동시에 묻는다. 한 대가 느리거나 실패해도 나머지는 그대로 준다."""
         ids = list(self.devices)

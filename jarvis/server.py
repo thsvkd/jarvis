@@ -258,7 +258,7 @@ def make_handler(collector, core=None):
             self._route(head=False)
 
         def do_POST(self):
-            # 쓰기 동작은 jarvis 갱신, CLI 로그인, Claude 계정 전환, 모듈 적용뿐이다.
+            # 쓰기 동작은 jarvis 갱신, CLI 로그인, Claude 계정 전환·삭제, 모듈 적용뿐이다.
             # 본문·네트워크·Host 검사는 _route 가 GET 과 똑같이 먼저 한다.
             self._route(head=False, post=True)
 
@@ -313,6 +313,19 @@ def make_handler(collector, core=None):
                         if not self._trusted(config.VIEWERS, config.PROXIES):
                             return self._json({"error": "계정 전환은 허용된 기기(viewers)에서만 할 수 있습니다"}, head, 403)
                         code, body = core.usage_switch(dev, (parse_qs(u.query).get("slot") or [""])[0])
+                        return self._json(body, head, code)
+                    if path == "/api/usage/account/remove":
+                        if not self._trusted(config.CORE):
+                            return self._json({"error": "core 로 지정한 기기만 부를 수 있습니다"}, head, 403)
+                        code, body = claude_accounts.remove((parse_qs(u.query).get("slot") or [""])[0])
+                        return self._json(body, head, code)
+                    if core and path.startswith("/api/devices/") and path.endswith("/account/remove"):
+                        dev = path.split("/")[3]
+                        if path.count("/") != 5 or not core.has(dev):
+                            return self._json({"error": "not found"}, head, 404)
+                        if not self._trusted(config.VIEWERS, config.PROXIES):
+                            return self._json({"error": "계정 삭제는 허용된 기기(viewers)에서만 할 수 있습니다"}, head, 403)
+                        code, body = core.usage_remove(dev, (parse_qs(u.query).get("slot") or [""])[0])
                         return self._json(body, head, code)
                     if path == "/api/jarvis/update":
                         if not self._trusted(config.CORE):

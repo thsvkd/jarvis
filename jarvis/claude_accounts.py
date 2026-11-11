@@ -1,11 +1,11 @@
 """Claude 계정의 모든 규칙을 한 곳에 둔다: 신선도, 만료 경고, 상태 문구, 사용 중 판정, 창·Fable·버킷 이름, 기기 로그인 상태.
 
-바깥 인터페이스는 read(force)와 switch(slot)이다. 사용량 경로(independent_usage)가 read 를 거친다.
+바깥 인터페이스는 read(force)와 switch(slot)·remove(slot)이다. 사용량 경로(independent_usage)가 read 를 거친다.
 저장값이 지금 로그인에 아직 맞는지는 판정 함수(_judge_shape, _judge_ask, _judge_rows, _judge_login)가 값만 받아 정한다. 새 신선도·유효성 규칙은 그 함수와 표 테스트만 고친다.
 파일과 프로세스를 읽는 순서는 _read 가, 기억(_state)을 고치는 것은 live·switch·login 이 맡는다.
 안에 어댑터가 둘 있다.
 - hswap CLI(live, _json): `hswap claude list --json`(cswap 과 같은 schemaVersion 1)의 실값. 토큰 갱신·사용량 조회 간격은 hswap 이 맡는다.
-  쓰기는 core 의 '이 계정 사용' 버튼이 부르는 `hswap claude switch <슬롯> --json` 하나다(자격 교체는 hswap 이 한다).
+  쓰기는 core 의 '이 계정 사용' 버튼이 부르는 `hswap claude switch <슬롯> --json` 과 '계정 삭제' 버튼이 부르는 `hswap claude remove <슬롯>` 이다(자격 교체·삭제는 hswap 이 한다).
 - 저장소 캐시(_store_read, _keepalive): hswap(Claude 엔진 claude-swap)과 기존 cswap 이 함께 쓰는 저장소의 계정·마지막 사용량·keepalive.json. 대체값이다.
 jarvis 는 자격 증명 파일을 열지 않는다(갱신 토큰을 따로 돌리면 hswap·Claude Code 의 로그인이 풀릴 수 있다). 계정은 이메일·조직 이름·슬롯 번호만 내보낸다.
 이미 깔린 cswap 은 지우지 않는다.
@@ -292,6 +292,34 @@ def switch(slot):
         _state.cache = None  # 실패해도 다음 읽기는 hswap 에 다시 묻는다
         _state.switched += 1  # 묶음을 비운 뒤에 는다: 새 번호를 본 읽기는 옛 묶음을 볼 수 없다
         _lock.release()
+
+
+def remove(slot):
+    """'계정 삭제' 버튼: hswap 슬롯 slot 에 저장한 Claude 계정을 지운다(`hswap claude remove <슬롯>`). (http 상태, 응답).
+    remove 는 --json 이 없고 확인을 표준 입력으로 묻는다: y 를 넘기고, 종료 코드 0 과 'Removed' 줄로 지운 것을 확인한다.
+    실행 중인 그 계정의 세션 등으로 hswap 이 거절하면 그 이유(홈 경로를 지운 마지막 줄)를 409 로 준다."""
+    if not (isinstance(slot, str) and slot.isdigit() and len(slot) <= 4):
+        return 400, {"error": "slot 은 hswap 슬롯 번호여야 합니다"}
+    exe = binary()
+    if not exe:
+        return 404, {"error": "이 기기에는 hswap 이 없습니다"}
+    if not _lock.acquire(timeout=TIMEOUT_S + 5):  # list·switch 와 겹치지 않게
+        return 503, {"error": "hswap 이 응답하지 않습니다"}
+    try:
+        p = subprocess.run([exe, "claude", "remove", slot], input="y\n", capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=SWITCH_TIMEOUT_S, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except subprocess.TimeoutExpired:
+        return 409, {"error": f"hswap 이 {SWITCH_TIMEOUT_S}초 안에 답하지 않았습니다"}
+    except OSError as e:
+        return 409, {"error": f"hswap 을 실행하지 못했습니다({type(e).__name__})"}
+    finally:
+        _state.cache = None
+        _state.switched += 1  # 지우기 전에 시작한 읽기가 지운 계정을 다시 내지 않게 한다
+        _lock.release()
+    if p.returncode == 0 and "Removed" in p.stdout:
+        return 200, {"removed": True}
+    last = re.sub(r"\x1b\[[0-9;]*m", "", (p.stderr.strip().splitlines() or [""])[-1]).removeprefix("Error: ")
+    return 409, {"error": scrub_home(last)[:200] or f"hswap 이 계정을 지우지 않았습니다(종료 코드 {p.returncode})"}
 
 
 def live(force=False, shape=None, deadline=None):
