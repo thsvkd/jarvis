@@ -365,8 +365,9 @@
    const steps=tool?p.steps.filter(stepOf(tool)).slice(0,1):p.steps,pid=tool?steps[0]&&steps[0].plan_id:p.plan_id;
    if(!steps.length)note(name+": "+(tool||"하네스")+" 가 이미 최신입니다");
    else if(!pid)throw new Error("이 기기의 jarvis 는 하네스를 하나씩 올리지 못합니다(jarvis 업데이트 필요)");
-   // 확인 창이 승인이다. codex 데몬 재시작(config)은 돌고 있는 Codex 작업을 끊을 수 있어 따로 알린다
-   else if(confirm(name+" 에서 하네스를 갱신합니다.\n"+steps.map(x=>"· "+x.summary).join("\n")+(steps.some(x=>x.risk!=="update")?"\n데몬 재시작은 돌고 있는 Codex 작업을 끊을 수 있습니다.":"")+"\n계속할까요?")){
+   // update 단계는 확인 없이 올린다(SPEC 기본 정책: read·update 는 자동). codex 데몬 재시작(config)은
+   // 돌고 있는 Codex 작업을 끊을 수 있어 그때만 확인 창이 승인이다
+   else if(!steps.some(x=>x.risk!=="update")||confirm(name+" 에서 하네스를 갱신합니다.\n"+steps.map(x=>"· "+x.summary).join("\n")+"\n데몬 재시작은 돌고 있는 Codex 작업을 끊을 수 있습니다.\n계속할까요?")){
     r=await fetch(base+"apply?plan_id="+encodeURIComponent(pid),{method:"POST",cache:"no-store",headers:{"X-Jarvis-Action":"module-apply"}});
     const o=await r.json().catch(()=>({}));
     if(r.status!==202)throw new Error(o.error||"HTTP "+r.status);

@@ -47,30 +47,29 @@ assert.doesNotMatch(body(), /<code>codex<\/code>/);
 assert.match(body(), /data-tool="claude"/);
 assert.match(body(), /모두 업데이트/);
 
-// 하네스 하나: 그 단계만 확인 창에 보이고 그 단계의 plan_id 로 apply 한다
+// 하네스 하나: 확인 창 없이 그 단계의 plan_id 로 apply 한다
 click({ hup: "m1", tool: "gemini" });
 await flush();
-assert.match(asked[0], /gemini 0\.65\.0 → 0\.66\.0/);
-assert.doesNotMatch(asked[0], /claude/);
+assert.equal(asked.length, 0);
 assert.equal(calls.find(c => c.url.includes("/apply")).url, "/api/devices/m1/modules/harness/apply?plan_id=" + STEP_ID.gemini);
 modules = { ...modules, job: { module: "harness", state: "finished", status: "done" } };
 timers.at(-1)();
 await flush();
-calls.length = 0; asked.length = 0;
+calls.length = 0;
 
-// 확인을 거절하면 apply 를 보내지 않는다
+// codex 데몬 재시작 단계가 있으면 확인 창이 승인이다: 거절하면 apply 를 보내지 않는다
+steps = [...steps, step("codex-daemon", "codex 관리형 데몬 재시작", "config")];
 answer = false;
 click({ hup: "m1" });
 await flush();
 assert.match(asked[0], /claude 2\.1\.0 → 2\.2\.0 \(npm\)/);
+assert.match(asked[0], /Codex 작업을 끊을 수 있습니다/);
 assert.ok(!calls.some(c => c.url.includes("/apply")));
 
-// 데몬 재시작 단계가 있으면 확인 창이 따로 알리고, 승인하면 계획의 plan_id 로 apply 한다
+// 승인하면 계획 전체의 plan_id 로 apply 한다
 answer = true;
-steps = [...steps, step("codex-daemon", "codex 관리형 데몬 재시작", "config")];
 click({ hup: "m1" });
 await flush();
-assert.match(asked[1], /Codex 작업을 끊을 수 있습니다/);
 const apply = calls.find(c => c.url.includes("/apply"));
 assert.equal(apply.url, "/api/devices/m1/modules/harness/apply?plan_id=" + PLAN_ID);
 assert.equal(apply.opt.method, "POST");
