@@ -350,7 +350,9 @@ class IndependentTest(FakeHswapCase):
                                                                               independent_usage.zcode_usage, independent_usage.gemini_usage, independent_usage.minimax_usage)],
                   mock.patch.object(independent_usage.cli_login, "available", return_value=[]),
                   mock.patch.object(independent_usage.cli_login, "fresh", return_value=[]),
-                  mock.patch.object(independent_usage.claude_accounts, "status", return_value=None)):
+                  mock.patch.object(independent_usage.claude_accounts, "status", return_value=None),
+                  # 새로고침 앞의 refresh 는 하네스 CLI 가 있을 때만 돈다: 시험하는 기기에 깔린 codex·grok 에 따라 호출이 달라지지 않게 한다
+                  mock.patch.object(hswap_usage, "which_tool", return_value=None)):
             p.start()
             self.addCleanup(p.stop)
         independent_usage._tasks.clear()
