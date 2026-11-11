@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import signal
 import stat
 import sys
 import tempfile
@@ -355,6 +356,21 @@ class HswapAddTest(unittest.TestCase):
         cli_login.start("codex", add=True)
         cli_login._stop(cli_login._jobs["codex"]["proc"])
         self.assertTrue(os.path.exists(os.path.join(self.dir, "term")))  # SIGKILL 이 아니라 SIGTERM 으로 끝낸다
+
+    @unittest.skipUnless(hasattr(signal, "pthread_sigmask"), "POSIX 시그널 마스크")
+    def test_add_child_can_be_stopped_even_when_the_gateway_masks_sigterm(self):
+        """메뉴 막대 모드 게이트웨이처럼 SIGTERM 을 막은 스레드에서 띄워도 hswap 은 SIGTERM 으로 끝나 정리한다"""
+        with open(self.hswap, "w") as f:
+            f.write("#!/bin/sh\ntrap 'echo stopped > \"$(dirname \"$0\")/term\"; exit 0' TERM\n"
+                    "echo '{\"type\":\"device_code\",\"harness\":\"codex\",\"url\":\"https://a.example/d\",\"userCode\":\"ABCD-EFGH1\"}'\n"
+                    "while :; do sleep 0.1; done\n")
+        old = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+        try:
+            cli_login.start("codex", add=True)
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, old)
+        cli_login._stop(cli_login._jobs["codex"]["proc"])
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "term")))
 
     def test_failed_keepalive_report_is_unsynced(self):
         with open(os.path.join(self.dir, "ka"), "w") as f:

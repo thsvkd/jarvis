@@ -73,6 +73,12 @@ def adds():
     return [k for k in have if k == "claude" or _hswap_add()]
 
 
+def _unmask():
+    """메뉴 막대 모드(JARVIS_TRAY)의 게이트웨이는 SIGTERM·SIGINT 를 막아 둔 채 자식을 띄운다. 자식은 그 마스크를 물려받아
+    _stop 의 SIGTERM 을 받지 못하므로, hswap 이 정리할 수 있게 자식에서 다시 연다(fork 뒤 exec 전, 비동기 시그널 안전 호출 하나)."""
+    signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM, signal.SIGINT})
+
+
 def _stop(proc):
     """hswap 은 SIGTERM 에만 하네스 CLI 와 임시 로그인 홈을 정리한다. 끝나지 않으면 죽인다."""
     if proc.poll() is None:
@@ -325,7 +331,8 @@ def start(provider, add=False):
             proc = subprocess.Popen(cmd, stdin=subprocess.PIPE if provider in PASTE else subprocess.DEVNULL, stdout=subprocess.PIPE,
                                     # 이벤트 모드의 stderr 는 hswap 의 진단 문구라 이벤트 줄과 섞지 않는다
                                     stderr=subprocess.DEVNULL if hswap else subprocess.STDOUT, text=True, errors="replace", cwd=os.path.expanduser("~"),
-                                    env={**_ENV, "NO_COLOR": "1", "TERM": "dumb"}, creationflags=_NO_WINDOW)
+                                    env={**_ENV, "NO_COLOR": "1", "TERM": "dumb"}, creationflags=_NO_WINDOW,
+                                    preexec_fn=_unmask if hswap and hasattr(signal, "pthread_sigmask") else None)
             job = _jobs[provider] = {"proc": proc, "out": "", "url": None, "code": None, "started_at": time.time(),
                                      "paste": provider in PASTE, "rc": None, "unsaved": False, "unsynced": False,
                                      "events": bool(hswap), "add": add, "added": None, "error": None, "provider": provider}
