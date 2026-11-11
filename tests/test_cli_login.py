@@ -308,6 +308,16 @@ class HswapAddTest(unittest.TestCase):
         self.assertEqual(self.wait("codex", "done"), {"state": "done"})
         self.assertEqual(self.args(), ["codex", "add", "--login", "--json"])
 
+    def test_hswap_finds_harness_clis_outside_the_service_path(self):
+        """hswap 은 하네스 CLI 를 PATH 로 찾는다: 서비스의 짧은 PATH 대신 사용자 설치 위치를 붙인 PATH 로 띄운다"""
+        with open(self.hswap, "w") as f:
+            f.write(FAKE_HSWAP_ADD.replace('echo "$@" > "$(dirname "$0")/args"', 'echo "$@" > "$(dirname "$0")/args"; echo "$PATH" > "$(dirname "$0")/path"'))
+        with mock.patch.object(cli_login, "tool_path", return_value="/home/u/.grok/bin:/usr/bin:/bin"):
+            cli_login.start("codex", add=True)
+        self.wait("codex", "done")
+        with open(os.path.join(self.dir, "path")) as f:
+            self.assertEqual(f.read().strip(), "/home/u/.grok/bin:/usr/bin:/bin")
+
     def test_add_needs_a_hswap_that_knows_the_contract(self):
         with mock.patch.object(cli_login.claude_accounts, "_version", "0.2.7"):
             st, o = cli_login.start("codex", add=True)

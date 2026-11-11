@@ -14,7 +14,7 @@ import threading
 import time
 
 from . import caam_usage, claude_accounts
-from .util import _ENV, _NO_WINDOW, run, which_local
+from .util import _ENV, _NO_WINDOW, run, tool_path, which_local
 
 WAIT_S = 30  # URL·코드가 나올 때까지
 STATUS_S = 6  # codex login status 는 보통 0.1초 안에 답한다(늦으면 알 수 없음으로 본다)
@@ -331,7 +331,8 @@ def start(provider, add=False):
             proc = subprocess.Popen(cmd, stdin=subprocess.PIPE if provider in PASTE else subprocess.DEVNULL, stdout=subprocess.PIPE,
                                     # 이벤트 모드의 stderr 는 hswap 의 진단 문구라 이벤트 줄과 섞지 않는다
                                     stderr=subprocess.DEVNULL if hswap else subprocess.STDOUT, text=True, errors="replace", cwd=os.path.expanduser("~"),
-                                    env={**_ENV, "NO_COLOR": "1", "TERM": "dumb"}, creationflags=_NO_WINDOW,
+                                    # hswap 은 하네스 CLI 를 PATH 로 찾는다: 서비스의 짧은 PATH 에는 ~/.grok/bin 등이 없어 "not installed" 로 거절한다
+                                    env={**_ENV, "NO_COLOR": "1", "TERM": "dumb", **({"PATH": tool_path()} if hswap else {})}, creationflags=_NO_WINDOW,
                                     preexec_fn=_unmask if hswap and hasattr(signal, "pthread_sigmask") else None)
             job = _jobs[provider] = {"proc": proc, "out": "", "url": None, "code": None, "started_at": time.time(),
                                      "paste": provider in PASTE, "rc": None, "unsaved": False, "unsynced": False,
