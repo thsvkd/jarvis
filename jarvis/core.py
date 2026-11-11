@@ -395,6 +395,11 @@ class Core:
                                      headers={"X-Jarvis-Action": "jarvis-update"})
         return self._ask(i, req, PULL_TIMEOUT_S, "자체 갱신을")
 
+    def jarvis_update_progress(self, i):
+        """그 게이트웨이 GET /api/jarvis/update: 갱신 단계와 받은 바이트. SSH 기기는 원격 CLI 로 갱신해 진행을 모른다(_ask 의 501)."""
+        req = urllib.request.Request(self.devices[i]["url"] + "/api/jarvis/update")
+        return self._ask(i, req, 5, "갱신 진행을")
+
     def _ssh_update(self, i):
         """SSH 기기: 원격 `update && --version` 뒤, 새 판이면 스냅샷의 게이트웨이 pid 에 SIGTERM 을 보낸다.
         다시 띄우는 것은 서비스 관리자(launchd KeepAlive, systemd Restart=always)다."""

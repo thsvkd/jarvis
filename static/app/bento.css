@@ -1114,6 +1114,12 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
 .dev-acts button.seg-action:disabled { opacity: .45; cursor: not-allowed; }
 .dev-note { color: var(--text-2); font-size: var(--fs-sm); }
 .dev-err, .dev-note.dev-err { color: var(--crit-ink); font-weight: var(--fw-semibold); }
+.dev-prog:empty { display: none; }
+.dev-prog { display: inline-flex; align-items: center; }
+.dev-spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--accent, var(--text)); animation: icon-spin .9s linear infinite; }
+.dev-meter { display: block; width: 72px; height: 6px; border-radius: var(--r-pill); background: var(--line-2); overflow: hidden; }
+.dev-meter > i { display: block; height: 100%; background: var(--accent, var(--text)); transition: width .3s ease; }
+@media (prefers-reduced-motion: reduce) { .dev-spin { animation-duration: 2.4s; } .dev-meter > i { transition: none; } }
 .dev-tile { align-self: start; cursor: pointer; transition: translate .35s var(--ease), box-shadow .35s var(--ease); }
 /* .tile 의 rise 애니메이션(fill both)이 transform 을 잡고 있어 translate 로 띄운다 */
 .dev-tile:hover { translate: 0 -3px; box-shadow: var(--shadow-hover); }
@@ -1209,7 +1215,19 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
 .ul-paste { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
 .ul-paste p { flex-basis: 100%; }
 .ul-paste input { flex: 1 1 14rem; min-width: 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--tile-2); color: var(--text); font: var(--fs-sm) var(--mono); }
-.ul-acct > .seg-action, .ul-summary-account > .seg-action { margin-top: var(--sp-2); }
+.ul-acct > .seg-action, .ul-acct > .ul-acts, .ul-summary-account > .seg-action { margin-top: var(--sp-2); }
+/* 사용량 표·상세의 버튼은 칸의 작은 글자에 맞춘 낮은 컨트롤 하나로 통일한다(높이 32) */
+#usage .seg-action, #ulDlg .seg-action { font-size: var(--fs-sm); line-height: 18px; padding: var(--sp-1_5) var(--sp-3); }
+/* 칸·상세에서 카드 뒤에 오는 버튼(계정 추가 등)은 카드와 띄운다 */
+.ul-full > * + .seg-action, #ulDlgB > * + .seg-action { margin-top: var(--sp-2); }
+/* 하네스 갱신: 이름 · 판 · 버튼을 한 줄에, 줄 사이는 좁게, 묶음 위아래는 기기 메타와 띄운다 */
+.ul-hn { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1_5); margin-top: var(--sp-2); }
+.ul-hn ul { display: grid; grid-template-columns: max-content auto; align-items: center; gap: var(--sp-2) var(--sp-4); margin: 0; padding: 0; list-style: none; }
+/* 이름 위 · 판 아래 칸과 버튼 칸을 행마다 같은 열에 맞춘다 */
+.ul-hn li { display: contents; }
+.ul-hn li > span { display: grid; gap: var(--sp-0_5); }
+.ul-hn code { font-size: var(--fs-sm); }
+p.ul-hn { flex-direction: row; align-items: center; gap: var(--sp-2); }
 .ul-raw { margin-top: var(--sp-1_5); font-size: var(--fs-xs); color: var(--text-3); }
 .ul-raw summary { cursor: pointer; }
 .ul-raw pre { margin-top: var(--sp-1); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow: auto; font-family: var(--mono); }

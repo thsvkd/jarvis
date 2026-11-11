@@ -373,8 +373,18 @@ def make_handler(collector, core=None):
                         return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
                     body = independent_usage.read(force=parse_qs(u.query).get("refresh") == ["1"])
                     return self._json(body, head)
+                if path == "/api/jarvis/update":
+                    if not self._trusted(config.CORE):
+                        return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
+                    return self._json(self_update.status(), head)
                 if core and path == "/api/devices":
                     return self._json(core.list(), head)
+                if core and path.startswith("/api/devices/") and path.endswith("/jarvis/update"):
+                    dev = path.split("/")[3]
+                    if path.count("/") != 5 or not core.has(dev):
+                        return self._json({"error": "not found"}, head, 404)
+                    code, body = core.jarvis_update_progress(dev)
+                    return self._json(body, head, code)
                 if _modules_path(path):
                     return self._modules(path, u, head)
                 if core and path == "/api/devices/usage":

@@ -209,6 +209,15 @@ class RouteTest(unittest.TestCase):
         finally:
             server.client_kind, config.VIEWERS = kind, vw
 
+    def test_update_progress_is_relayed_and_old_gateways_are_501(self):
+        """covers: UI-4. 갱신 진행은 기기의 GET /api/jarvis/update 를 그대로 준다(읽기라 viewers 가 아니어도 된다)"""
+        self.assertEqual(self.get("/api/devices/gw/jarvis/update")[0], 501)  # 그 경로가 없는 옛 게이트웨이
+        Gateway.routes["/api/jarvis/update"] = (200, b'{"busy":true,"version":"1.11.0","stage":"download","got":5,"total":10}', False)
+        self.assertEqual(self.get("/api/devices/gw/jarvis/update"),
+                         (200, {"busy": True, "version": "1.11.0", "stage": "download", "got": 5, "total": 10}))
+        self.assertEqual(self.get("/api/devices/nope/jarvis/update")[0], 404)
+        self.assertEqual(self.get("/api/jarvis/update")[0], 403)  # 게이트웨이 경로는 설정 core 만
+
     def test_usage_routes(self):
         Gateway.routes["/api/usage/independent"] = (200, b'{"mode":"independent","providers":[]}', False)
         self.assertEqual(self.get("/api/devices/gw/usage"), (200, {"mode": "independent", "providers": []}))

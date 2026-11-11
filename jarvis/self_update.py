@@ -29,6 +29,10 @@ MAX_UNPACKED = 256 << 20
 KEEP = 2  # 지금 버전과 되돌아갈 버전
 VER_RE = re.compile(r"^\d{1,4}\.\d{1,4}\.\d{1,4}$")
 _lock = threading.Lock()
+# 지금(또는 마지막) 갱신의 단계. 화면이 GET /api/jarvis/update 로 읽는다:
+# check(manifest) → download(got/total) → install(풀기) → restart·current·error. 재시작하면 새 프로세스에서 비어 있다
+progress = {}
+CHUNK = 64 << 10
 occupancy.register(occupancy.SELF_UPDATE, lambda: _lock.locked())
 
 
@@ -78,7 +82,18 @@ def install(m):
         return
     req = urllib.request.Request(m["url"], headers={"User-Agent": "jarvis-self-update"})
     with release_download.open_url(req, timeout=60) as r:
-        data = r.read(MAX_BYTES + 1)
+        size = getattr(r, "headers", None) and r.headers.get("Content-Length")
+        total = int(size) if size and size.isdigit() else None
+        progress.update(stage="download", got=0, total=total)
+        buf = bytearray()
+        while len(buf) <= MAX_BYTES:
+            chunk = r.read(min(CHUNK, MAX_BYTES + 1 - len(buf)))
+            if not chunk:
+                break
+            buf += chunk
+            progress["got"] = len(buf)
+        data = bytes(buf)
+    progress.update(stage="install")
     if len(data) > MAX_BYTES:
         raise ValueError("릴리스 묶음이 너무 큽니다")
     if hashlib.sha256(data).hexdigest() != m["sha256"]:
@@ -112,24 +127,38 @@ def start(running=__version__):
         return 409, {"error": "모듈 적용이 끝난 뒤에 갱신하세요"}
     if not _lock.acquire(blocking=False):
         return 409, {"error": "이미 갱신하고 있습니다"}
+    progress.clear()
+    progress.update(stage="check", running=running, started_at=time.time())
     try:
-        try:
-            m = latest()
-            if launch.key(m["version"]) <= launch.key(running):
-                return 200, {"running": running, "to": running, "restart": False}
-            if m["version"] == launch.read().get("bad"):  # 고친 릴리스(새 버전)가 나올 때까지 같은 실패를 되풀이하지 않는다
-                return 409, {"error": f"{m['version']} 는 이 기기에서 기동에 실패해 되돌렸습니다. 다음 릴리스를 기다리세요"}
-            install(m)
-        except Exception as e:
-            return 502, {"error": f"릴리스를 받지 못했습니다: {str(e)[:200] or type(e).__name__}"}
-        cur = launch.read()
-        # 되돌아갈 곳: 마지막으로 확정된 버전(없으면 저장소). CLI 는 서비스와 다른 버전에서 돌 수 있어 release() 를 쓰지 않는다
-        prev = cur.get("previous") if cur.get("pending") else cur.get("version")
-        launch.write({"version": m["version"], "previous": prev, "pending": True, "tries": 0})
-        _prune({m["version"], prev, cur.get("version"), launch.release()})  # 서비스가 지금 도는 버전은 지우지 않는다
-        return 200, {"running": running, "to": m["version"], "restart": True}
+        code, body = _start(running)
+        progress.update(stage="restart" if body.get("restart") else "current" if code == 200 else "error",
+                        to=body.get("to"), error=body.get("error"))
+        return code, body
     finally:
         _lock.release()
+
+
+def status():
+    """GET /api/jarvis/update: 진행 중인지, 지금 도는 버전(재시작 뒤 바뀐 것을 화면이 본다), 지금(마지막) 갱신의 단계."""
+    return {"busy": _lock.locked(), "version": __version__, **progress}
+
+
+def _start(running):
+    try:
+        m = latest()
+        if launch.key(m["version"]) <= launch.key(running):
+            return 200, {"running": running, "to": running, "restart": False}
+        if m["version"] == launch.read().get("bad"):  # 고친 릴리스(새 버전)가 나올 때까지 같은 실패를 되풀이하지 않는다
+            return 409, {"error": f"{m['version']} 는 이 기기에서 기동에 실패해 되돌렸습니다. 다음 릴리스를 기다리세요"}
+        install(m)
+    except Exception as e:
+        return 502, {"error": f"릴리스를 받지 못했습니다: {str(e)[:200] or type(e).__name__}"}
+    cur = launch.read()
+    # 되돌아갈 곳: 마지막으로 확정된 버전(없으면 저장소). CLI 는 서비스와 다른 버전에서 돌 수 있어 release() 를 쓰지 않는다
+    prev = cur.get("previous") if cur.get("pending") else cur.get("version")
+    launch.write({"version": m["version"], "previous": prev, "pending": True, "tries": 0})
+    _prune({m["version"], prev, cur.get("version"), launch.release()})  # 서비스가 지금 도는 버전은 지우지 않는다
+    return 200, {"running": running, "to": m["version"], "restart": True}
 
 
 def restart(httpd):

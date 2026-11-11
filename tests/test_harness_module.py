@@ -159,6 +159,20 @@ class HarnessModuleTest(unittest.TestCase):
         self.assertEqual(r["status"], "failed")
         self.assertEqual(r["steps"][0]["result"], "failed")
 
+    def test_a_single_step_plan_id_updates_only_that_target(self):
+        """covers: HARNESS-19"""
+        self.use(installed={"claude": "2.0.0", "gemini": "0.65.0"}, latest={"claude": "2.0.1", "gemini": "0.66.0"})
+        p = harness.plan()
+        ids = {st["id"]: st["plan_id"] for st in p["steps"]}
+        self.assertEqual(len(set(ids.values()) | {p["plan_id"]}), 3)  # 단계마다 다르고 전체와도 다르다
+        r = harness.apply(ids["gemini"])
+        self.assertEqual(r["status"], "done", r)
+        self.assertEqual([s["id"] for s in r["steps"]], ["gemini"])
+        self.assertEqual(self.updates, [(["gemini"], False)])
+        # 남은 claude 의 단계 plan_id 는 그대로라 다시 계획하지 않고 쓸 수 있다. 지난 단계의 plan_id 는 stale 이다
+        self.assertEqual(harness.plan()["steps"][0]["plan_id"], ids["claude"])
+        self.assertEqual(harness.apply(ids["gemini"])["status"], "stale")
+
     def test_the_daemon_restart_runs_alone_with_allow_interrupt(self):
         """covers: HARNESS-2 (AI-56)
         데몬 재시작 승인이 다른 대상의 보류(npm -g·winget 세션)를 풀면 안 된다."""

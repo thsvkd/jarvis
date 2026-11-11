@@ -49,6 +49,26 @@ class Releases(unittest.TestCase):
             return mock.MagicMock(__enter__=lambda s: io.BytesIO(body))
         return mock.patch.object(self_update.release_download, "open_url", fake)
 
+    def test_progress_reports_each_stage_and_the_running_version(self):
+        """covers: UI-4"""
+        data = tgz("1.2.0", {"{p}/jarvis/__init__.py": b'__version__ = "1.2.0"\n'})
+        seen = []
+        real = self_update.install
+
+        def spy(m):
+            seen.append(dict(self_update.progress))  # 받기 전: check
+            real(m)
+            seen.append(dict(self_update.progress))  # 받은 뒤: install, got 은 묶음 크기
+        with self.serve(manifest("1.2.0", data), data), mock.patch.object(self_update, "install", spy):
+            self.assertEqual(self_update.start("1.1.0")[0], 200)
+        self.assertEqual(seen[0]["stage"], "check")
+        self.assertEqual((seen[1]["stage"], seen[1]["got"]), ("install", len(data)))
+        st = self_update.status()
+        self.assertEqual((st["busy"], st["stage"], st["to"], st["version"]), (False, "restart", "1.2.0", self_update.__version__))
+        with self.serve(manifest("1.2.0", data), data):
+            self_update.start("1.2.0")
+        self.assertEqual(self_update.status()["stage"], "current")
+
     def test_update_and_rollback(self):
         data = tgz("1.2.0", {"{p}/jarvis/__init__.py": b'__version__ = "1.2.0"\n', "{p}/static/x.css": b""})
         with self.serve(manifest("1.2.0", data), data):

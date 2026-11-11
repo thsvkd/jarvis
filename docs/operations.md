@@ -13,6 +13,7 @@
 - 갱신: core 홈 기기 목록의 **jarvis 업데이트**(또는 **jarvis 모두 업데이트**, core 자신은 마지막) 또는 그 기기에서 `python3 -m jarvis update`
   (`--check` 는 확인만). 새 버전이면 묶음을 받아 SHA256 을 확인하고 `~/.local/share/jarvis/versions/<버전>`
   (Windows `%LOCALAPPDATA%\jarvis\versions`)에 풀고 `current.json` 을 바꾼 뒤 스스로 끝난다. 자동 갱신은 없다.
+  기기 카드는 갱신 중에 스피너 → 받는 비율의 막대 → 스피너(풀기·재시작) → 바뀐 버전 순으로 진행을 보인다. 단계는 게이트웨이 `GET /api/jarvis/update`(설정 core 만)를 core `GET /api/devices/<id>/jarvis/update` 로 읽는다(UI-4).
 - 기동: 서비스는 그대로 저장소에서 `python3 -m jarvis` 를 띄우고, 런처가 받아 둔 릴리스가 저장소보다 새로우면 그 폴더의 코드로 넘어간다
   (s2 처럼 저장소가 같거나 새로우면 저장소가 돈다). 새 릴리스가 60초를 못 버티고 세 번째로 뜨면 이전 버전(없으면 저장소)으로 되돌리고,
   그 버전은 다음 릴리스가 나올 때까지 다시 받지 않는다. `python3 -m jarvis --version` 이 지금 쓰는 버전을 보인다.

@@ -137,7 +137,11 @@ def _plan(rows):
             continue
         steps.append({"id": r["id"], "summary": f"{r['id']} {r['version'] or '?'} → {r['latest']} ({r['method']})",
                       "risk": "update", "argv": ["update-ai", "--only", r["id"]], "target": r["latest"]})
-    return module.seal({"module": "harness", "device": socket.gethostname(), "action": "update", "steps": steps, "blocked": []})
+    head = {"module": "harness", "device": socket.gethostname(), "action": "update", "blocked": []}
+    # 하네스 하나만 올리는 승인: 단계마다 그 단계만 담은 계획의 plan_id. apply 는 전체 또는 이 값을 받는다
+    for st in steps:
+        st["plan_id"] = module.plan_id({**head, "steps": [st]})
+    return module.seal({**head, "steps": steps})
 
 
 def plan():
@@ -172,26 +176,30 @@ def _update(ids, allow_interrupt, timeout=TIMEOUT):
 
 def apply(plan_id):
     current = plan()
-    if current["plan_id"] != plan_id:
-        return {"status": "stale", "plan_id": current["plan_id"], "steps": []}
-    if not current["steps"]:
+    if current["plan_id"] == plan_id:
+        chosen = current["steps"]
+    else:
+        chosen = [s for s in current["steps"] if s["plan_id"] == plan_id]
+        if not chosen:
+            return {"status": "stale", "plan_id": current["plan_id"], "steps": []}
+    if not chosen:
         return {"status": "current", "steps": []}
     codes, deferred = [], set()
     deadline = time.monotonic() + TIMEOUT  # 두 번 부르더라도 합이 게이트웨이의 apply 제한 안에 들게 한다
     # 승인한 데몬 재시작만 --allow-interrupt 로 따로 돌린다. 이 플래그는 update-ai 실행 전체에 걸리므로
     # 함께 넘기면 세션이 돌 때 보류해야 할 npm -g·winget 대상까지 바꾼다
-    if any(s["id"] == "codex-daemon" for s in current["steps"]):
+    if any(s["id"] == "codex-daemon" for s in chosen):
         code, held = _update(["codex"], True, deadline - time.monotonic())
         codes.append(code)
         deferred |= held
-    rest = [s["id"] for s in current["steps"] if s["id"] != "codex-daemon" and not (s["id"] == "codex" and codes)]
+    rest = [s["id"] for s in chosen if s["id"] != "codex-daemon" and not (s["id"] == "codex" and codes)]
     if rest:
         code, held = _update(rest, False, deadline - time.monotonic())
         codes.append(code)
         deferred |= held
     after = {r["id"]: r for r in _rows()}  # 결과는 다시 읽은 버전으로 판정한다(update-ai 의 표에 기대지 않는다)
     results = []
-    for s in current["steps"]:
+    for s in chosen:
         rows = [after[k] for k in (("codex-daemon", "codex-server") if s["id"] == "codex-daemon" else (s["id"],)) if k in after]
         ok = bool(rows) and all(r["state"] == "current" for r in rows)
         held = not ok and (s["id"] in deferred or (s["id"] == "codex-daemon" and "codex" in deferred))

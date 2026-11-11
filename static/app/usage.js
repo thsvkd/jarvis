@@ -128,7 +128,9 @@
  const loginLine=(d,p)=>!p.login?"":p.login.attention&&SCHED[p.login.state]?html`<div class="ul-st" data-tone="warn"><p class="ul-st-t">${p.login.text}</p><p class="ul-why">${SCHED[p.login.state]} <code>hswap claude keepalive --install-service --ahead 7200</code></p></div>`
   :!p.login.attention?html`<p class="ul-age">${p.login.text}${p.login.note?" · "+p.login.note:""}</p>`
   :html`<div class="ul-st" data-tone="crit"><p class="ul-st-t">${p.login.text}</p>${p.login.note?html`<p class="ul-why">${p.login.note}</p>`:""}<div class="ul-acts">${(d.logins||[]).includes("claude")?relog(d,"claude"):""}<button type="button" class="seg-action" data-guide="${d.id}">다시 로그인 방법</button></div></div>`;
- const acct=(a,d,p)=>html`<div class="ul-acct">${head(a)}${body(a)}${useBtn(a,d)}${rmBtn(a,d)}${p.login&&p.login.attention?"":relogIf(a,d,p)}${a.updated_at?html`<p class="ul-age">${P.fmt.ago(a.updated_at)} 확인</p>`:""}</div>`;
+ // 계정 카드의 버튼은 한 줄 묶음으로(버튼끼리 붙지 않게). 버튼이 없으면 줄도 없다
+ const acts=(...bs)=>bs.some(Boolean)?html`<div class="ul-acts">${bs}</div>`:"";
+ const acct=(a,d,p)=>html`<div class="ul-acct">${head(a)}${body(a)}${acts(useBtn(a,d),rmBtn(a,d),p.login&&p.login.attention?"":relogIf(a,d,p))}${a.updated_at?html`<p class="ul-age">${P.fmt.ago(a.updated_at)} 확인</p>`:""}</div>`;
  const badge=d=>{const [t,l]=state(d);return html`<span class="badge" data-tone="${t}">${l}</span>`;};
  function devMeta(d){
   const busy=S.busy.has(d.id),unknown=(d.unavailable||[]).filter(id=>!fresh(d).includes(id));
@@ -140,8 +142,11 @@
  // viewers 가 아니면 details 가 없어 대상 이름 없이 보이고, 계획·실행은 서버가 403 으로 막는다
  const harnessMeta=d=>{
   const h=S.hn[d.id];if(!h)return "";
-  if(h.running)return html`<span class="ul-muted">하네스 업데이트 중…</span>`;
-  return h.outdated?html`<span class="ul-muted">하네스 갱신 가능${h.list?": "+h.list:""}</span><button type="button" class="seg-action" data-hup="${d.id}" aria-disabled="${String(S.busy.has(d.id))}">하네스 업데이트</button>`:"";
+  if(h.running)return html`<p class="ul-hn" role="status"><span class="dev-spin" aria-hidden="true"></span><span class="ul-muted">하네스 업데이트 중…</span></p>`;
+  if(!h.outdated)return "";
+  const off=String(S.busy.has(d.id)),btn=(tool,label)=>html`<button type="button" class="seg-action" data-hup="${d.id}" data-tool="${tool}" aria-disabled="${off}">${label}</button>`;
+  // 하네스마다 따로 올리고, 둘 이상이면 모두 올리는 버튼을 더한다. viewers 가 아니면 대상을 몰라 모두 올리기만 낸다
+  return html`<div class="ul-hn"><span class="ul-wl">하네스 갱신 가능</span>${h.tools.length?html`<ul>${h.tools.map(t=>html`<li><span><code>${t.id}</code><span class="ul-muted">${t.version||"?"} → ${t.latest}</span></span>${btn(t.id,"업데이트")}</li>`)}</ul>`:""}${h.tools.length!==1?btn("","모두 업데이트"):""}</div>`;
  };
  const hswapMeta=h=>h?html`<span class="ul-muted">hswap ${h.version||"없음"}${h.version!==h.pinned?` (고정 ${h.pinned})`:""}${h.note?" · "+h.note:""}</span>`:"";
 
@@ -337,7 +342,7 @@
    if(r.ok)for(const x of (await r.json()).devices||[]){
     const h=x.status===200&&x.modules&&x.modules.harness,j=x.job||{},running=j.module==="harness"&&j.state==="running";
     const tools=(((h&&h.details)||{}).tools||[]).filter(t=>t.state==="outdated");
-    S.hn[x.id]={outdated:!!h&&h.ok!==false&&h.health==="degraded",running,list:tools.map(t=>`${t.id} ${t.version||"?"} → ${t.latest}`).join(" · ")};
+    S.hn[x.id]={outdated:!!h&&h.ok!==false&&h.health==="degraded",running,tools};
     if(S.hnWatch.has(x.id)&&!running&&j.module==="harness"){ // 이 화면에서 시작한 갱신이 끝났다
      S.hnWatch.delete(x.id);
      const st=j.state==="interrupted"?"interrupted":j.status||(j.result||{}).status;
@@ -348,17 +353,21 @@
   if(S.devs)draw();
   S.hnTimer=setTimeout(loadMods,Object.values(S.hn).some(h=>h.running)?5000:300000); // 게이트웨이 harness 캐시는 1800초다
  }
- async function hup(id){
+ // tool 이 있으면 그 하네스의 단계만(단계의 plan_id), 없으면 계획 전체(plan_id)를 올린다. codex 데몬·서버 행은 codex-daemon 단계다
+ const stepOf=tool=>s=>s.id===tool||(s.id==="codex-daemon"&&(tool==="codex-daemon"||tool==="codex-server"));
+ async function hup(id,tool){
   if(S.busy.has(id))return;
   const name=(S.devs.find(x=>x.id===id)||{}).host||id,base="/api/devices/"+encodeURIComponent(id)+"/modules/harness/";
   S.busy.add(id);draw();note(name+": 하네스 갱신 계획을 세우는 중…");
   try{
    let r=await fetch(base+"plan",{cache:"no-store"});const p=await r.json();
    if(!r.ok)throw new Error(p.error||"HTTP "+r.status);
-   if(!p.steps.length)note(name+": 하네스가 이미 최신입니다");
+   const steps=tool?p.steps.filter(stepOf(tool)).slice(0,1):p.steps,pid=tool?steps[0]&&steps[0].plan_id:p.plan_id;
+   if(!steps.length)note(name+": "+(tool||"하네스")+" 가 이미 최신입니다");
+   else if(!pid)throw new Error("이 기기의 jarvis 는 하네스를 하나씩 올리지 못합니다(jarvis 업데이트 필요)");
    // 확인 창이 승인이다. codex 데몬 재시작(config)은 돌고 있는 Codex 작업을 끊을 수 있어 따로 알린다
-   else if(confirm(name+" 에서 하네스를 갱신합니다.\n"+p.steps.map(x=>"· "+x.summary).join("\n")+(p.steps.some(x=>x.risk!=="update")?"\n데몬 재시작은 돌고 있는 Codex 작업을 끊을 수 있습니다.":"")+"\n계속할까요?")){
-    r=await fetch(base+"apply?plan_id="+encodeURIComponent(p.plan_id),{method:"POST",cache:"no-store",headers:{"X-Jarvis-Action":"module-apply"}});
+   else if(confirm(name+" 에서 하네스를 갱신합니다.\n"+steps.map(x=>"· "+x.summary).join("\n")+(steps.some(x=>x.risk!=="update")?"\n데몬 재시작은 돌고 있는 Codex 작업을 끊을 수 있습니다.":"")+"\n계속할까요?")){
+    r=await fetch(base+"apply?plan_id="+encodeURIComponent(pid),{method:"POST",cache:"no-store",headers:{"X-Jarvis-Action":"module-apply"}});
     const o=await r.json().catch(()=>({}));
     if(r.status!==202)throw new Error(o.error||"HTTP "+r.status);
     S.hnWatch.add(id);S.hn[id]={...S.hn[id],running:true};note(name+": 하네스 업데이트를 시작했습니다. 끝나면 여기에 결과가 나옵니다");
@@ -386,7 +395,7 @@
   }
   if(t.dataset.guide){S.guide=t.dataset.guide;dlgDraw();if(!dlg.open)dlg.showModal();return;}
   if(t.dataset.use){use(t.dataset.use,t.dataset.slot,t.dataset.label);return;}
-  if(t.dataset.hup){hup(t.dataset.hup);return;}
+  if(t.dataset.hup){hup(t.dataset.hup,t.dataset.tool||"");return;}
   if(t.dataset.remove){remove(t.dataset.remove,t.dataset.slot,t.dataset.label);return;}
   if(t.dataset.refresh){if(S.login)dlg.close();refreshOne(t.dataset.refresh);return;}
   if(t.dataset.cell){const [dev,prov]=t.dataset.cell.split(":");S.dlg={dev,prov};dlgDraw();if(!dlg.open)dlg.showModal();return;}

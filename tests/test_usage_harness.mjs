@@ -11,9 +11,12 @@ function element(id) {
 }
 const document = { hidden: false, querySelector: s => element(s.slice(1)), querySelectorAll: () => [], addEventListener() {} };
 const PLAN_ID = "a".repeat(64);
-const tools = [{ id: "claude", state: "outdated", version: "2.1.0", latest: "2.2.0" }, { id: "codex", state: "current", version: "0.9.0", latest: "0.9.0" }];
+const tools = [{ id: "claude", state: "outdated", version: "2.1.0", latest: "2.2.0" }, { id: "gemini", state: "outdated", version: "0.65.0", latest: "0.66.0" },
+  { id: "codex", state: "current", version: "0.9.0", latest: "0.9.0" }];
+const STEP_ID = { claude: "c".repeat(64), gemini: "d".repeat(64), "codex-daemon": "e".repeat(64) };
 let modules = { id: "m1", host: "m1", status: 200, modules: { harness: { health: "degraded", ok: true, details: { tools } } }, job: null };
-let steps = [{ id: "claude", summary: "claude 2.1.0 → 2.2.0 (npm)", risk: "update" }];
+const step = (id, summary, risk = "update") => ({ id, summary, risk, plan_id: STEP_ID[id] });
+let steps = [step("claude", "claude 2.1.0 → 2.2.0 (npm)"), step("gemini", "gemini 0.65.0 → 0.66.0 (npm)")];
 const calls = [], timers = [], asked = [];
 let answer = true;
 const reply = (status, body) => ({ ok: status < 300, status, json: async () => body });
@@ -36,11 +39,24 @@ vm.runInNewContext(readFileSync(new URL("../static/shared/jarvis.js", import.met
 vm.runInNewContext(readFileSync(new URL("../static/app/usage.js", import.meta.url), "utf8"), ctx);
 await flush();
 
-// 갱신 가능한 하네스만 기기 행에 대상·판과 버튼으로 보인다
+// 갱신 가능한 하네스만 기기 행에 하네스마다 판과 버튼으로, 둘 이상이면 모두 업데이트 버튼도 보인다
 assert.ok(calls.some(c => c.url === "/api/devices/modules"));
-assert.match(body(), /하네스 갱신 가능: claude 2\.1\.0 → 2\.2\.0/);
-assert.doesNotMatch(body(), /codex 0\.9\.0/);
-assert.match(body(), /data-hup="m1"/);
+assert.match(body(), /<code>claude<\/code><span class="ul-muted">2\.1\.0 → 2\.2\.0<\/span>/);
+assert.match(body(), /<code>gemini<\/code>/);
+assert.doesNotMatch(body(), /<code>codex<\/code>/);
+assert.match(body(), /data-tool="claude"/);
+assert.match(body(), /모두 업데이트/);
+
+// 하네스 하나: 그 단계만 확인 창에 보이고 그 단계의 plan_id 로 apply 한다
+click({ hup: "m1", tool: "gemini" });
+await flush();
+assert.match(asked[0], /gemini 0\.65\.0 → 0\.66\.0/);
+assert.doesNotMatch(asked[0], /claude/);
+assert.equal(calls.find(c => c.url.includes("/apply")).url, "/api/devices/m1/modules/harness/apply?plan_id=" + STEP_ID.gemini);
+modules = { ...modules, job: { module: "harness", state: "finished", status: "done" } };
+timers.at(-1)();
+await flush();
+calls.length = 0; asked.length = 0;
 
 // 확인을 거절하면 apply 를 보내지 않는다
 answer = false;
@@ -51,7 +67,7 @@ assert.ok(!calls.some(c => c.url.includes("/apply")));
 
 // 데몬 재시작 단계가 있으면 확인 창이 따로 알리고, 승인하면 계획의 plan_id 로 apply 한다
 answer = true;
-steps = [...steps, { id: "codex-daemon", summary: "codex 관리형 데몬 재시작", risk: "config" }];
+steps = [...steps, step("codex-daemon", "codex 관리형 데몬 재시작", "config")];
 click({ hup: "m1" });
 await flush();
 assert.match(asked[1], /Codex 작업을 끊을 수 있습니다/);
@@ -74,4 +90,6 @@ modules = { id: "m1", host: "m1", status: 200, modules: { harness: { health: "de
 timers.at(-1)();
 await flush();
 assert.match(body(), /하네스 갱신 가능<\/span>/);
+assert.doesNotMatch(body(), /<code>/);
+assert.match(body(), /모두 업데이트/);
 console.log("usage harness ok");
