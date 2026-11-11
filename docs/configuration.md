@@ -18,7 +18,7 @@
 `docker_sock`(자동: /var/run/docker.sock → ~/.orbstack/run/docker.sock → ~/.docker/run/docker.sock. Docker 가 없는 기기는 `""`) ·
 `hermes_re`(Hermes 카테고리로 묶을 컨테이너·프로세스 이름, 기본 `hermes`) · `hermes_url`(Hermes 게이트웨이 `/api/status`, 빈 값이면 안 봄) · `ss` · `pm2` · `tailscale` ·
 `core`(이 기기의 사용량·계정·모듈 경로를 부를 core 기기 tailnet IP 목록. 루프백은 받지 않는다) ·
-`devices`(core 역할: 모을 게이트웨이 `[{id, url}, …]`, SSH 로만 닿는 기기는 `{id, ssh}`(아래 "SSH 기기"), 설정 파일 전용·재시작 필요) · `viewers`(core 홈의 조작 버튼(jarvis 갱신·로그인·계정 전환·모듈 적용)을 누를 수 있는 tailnet IP) · `proxies`(viewers 판정에서 X-Forwarded-For 마지막 항목을 믿을 리버스 프록시 tailnet IP. 도메인을 받는 pit5 Caddy) · `cswap_install`(hswap 자동 설치, 기본 true) · `claude_stale_s`(Claude 사용량 저장소 값이 오래됐다고 볼 기준, 기본 900초) · `claude_keepalive_stale_s`(hswap keepalive 확인이 멈췄다고 볼 기준, 기본 1200초). `core`·`viewers` 는 호스트명이 아니라 tailnet IP 로 적는다(루프백·LAN IP 는 적어도 받지 않는다. core 가 자기 자신도 모으면 그 `url` 도 tailnet IP 로 적는다).
+`devices`(core 역할: 모을 게이트웨이 `[{id, url}, …]`, SSH 로만 닿는 기기는 `{id, ssh}`(아래 "SSH 기기"), 설정 파일 전용·재시작 필요) · `viewers`(core 홈의 조작 버튼(jarvis 갱신·로그인·계정 전환·모듈 적용)을 누를 수 있는 tailnet IP) · `proxies`(viewers 판정에서 X-Forwarded-For 마지막 항목을 믿을 리버스 프록시 tailnet IP. 도메인을 받는 pit5 Caddy) · `cswap_install`(hswap 자동 설치와 Claude 자동 갱신 예약, 기본 true) · `claude_stale_s`(Claude 사용량 저장소 값이 오래됐다고 볼 기준, 기본 900초) · `claude_keepalive_stale_s`(hswap keepalive 확인이 멈췄다고 볼 기준, 기본 1200초). `core`·`viewers` 는 호스트명이 아니라 tailnet IP 로 적는다(루프백·LAN IP 는 적어도 받지 않는다. core 가 자기 자신도 모으면 그 `url` 도 tailnet IP 로 적는다).
 core 홈(`/`) 위쪽에 기기 목록이 생기고, `/?device=<id>`·`/map/?device=<id>` 로 그 기기 화면을 연다.
 
 설정 파일은 10초마다 변경 여부를 확인한다. 인그레스 대상·도메인·추가 Host·Hermes·인프라 유닛·기대 서비스는 자동 반영한다.

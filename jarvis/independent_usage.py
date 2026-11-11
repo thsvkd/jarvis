@@ -103,6 +103,9 @@ def read(force=False):
     # 화면의 '다시 로그인' 버튼을 낼 CLI 목록
     if logins := cli_login.available():
         body["logins"] = logins
+    # '계정 추가' 버튼을 낼 프로바이더(이 키가 없는 옛 게이트웨이에는 버튼을 내지 않는다)
+    if login_adds := cli_login.adds():
+        body["login_adds"] = login_adds
     # 저장한 자격가 없어 새로 로그인해도 잃을 게 없는 프로바이더(기기 행의 '로그인' 버튼). 알 수 없으면 넣지 않는다
     if fresh_logins := cli_login.fresh():
         body["fresh_logins"] = fresh_logins

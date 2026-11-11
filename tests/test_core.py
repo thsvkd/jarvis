@@ -280,6 +280,9 @@ class RouteTest(unittest.TestCase):
                          (("/api/usage/login?provider=claude", "usage-login"), "abcd1234#efgh5678"))
         self.core.usage_login("gw", "claude")  # 코드가 없으면 로그인 시작이고 헤더도 없다
         self.assertIsNone(Gateway.posted_code)
+        Gateway.routes["/api/usage/login?provider=codex&mode=add"] = (200, b'{"url":"u"}', False)
+        self.assertEqual(self.core.usage_login("gw", "codex", None, True), (200, {"url": "u"}))  # 계정 추가는 mode=add 로 전달한다
+        self.assertEqual(Gateway.posted, ("/api/usage/login?provider=codex&mode=add", "usage-login"))
 
     def test_gateway_claude_login_code_goes_to_submit_not_start(self):
         """covers: USAGE-10. 게이트웨이는 코드 헤더가 있으면 그 CLI 로 제출하고, 없으면 로그인을 시작한다"""
@@ -292,7 +295,10 @@ class RouteTest(unittest.TestCase):
                 self.assertEqual(json.loads(r.read()), {"url": "u"})
             with urllib.request.urlopen(post({"X-Jarvis-Login-Code": "abcd1234#efgh5678"})) as r:
                 self.assertEqual(json.loads(r.read()), {"submitted": True})
-        start.assert_called_once_with("claude")
+            with urllib.request.urlopen(urllib.request.Request(self.base + "/api/usage/login?provider=codex&mode=add", data=b"", method="POST",
+                                                               headers={"X-Jarvis-Action": "usage-login"})) as r:
+                self.assertEqual(json.loads(r.read()), {"url": "u"})
+        self.assertEqual(start.call_args_list, [mock.call("claude", False), mock.call("codex", True)])  # mode=add 는 계정 추가다
         submit.assert_called_once_with("claude", "abcd1234#efgh5678")
 
     def test_gateway_usage_login_and_account_answer_only_the_configured_core(self):
@@ -314,7 +320,7 @@ class RouteTest(unittest.TestCase):
                 with urllib.request.urlopen(post("/api/usage/account?slot=2", "usage-account")) as r:
                     self.assertEqual(json.loads(r.read()), {"switched": True})
                 self.assertEqual(self.get("/api/usage/login?provider=codex"), (200, {"state": "done"}))
-            start.assert_called_once_with("codex")
+            start.assert_called_once_with("codex", False)
             switch.assert_called_once_with("2")
 
     def test_independent_usage_routes_are_core_only_and_never_fall_back(self):

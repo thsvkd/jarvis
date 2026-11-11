@@ -74,11 +74,12 @@ _state = _State()
 # 자동 설치·올리기: 검증한 버전으로 고정한다(서비스가 최신판을 저절로 받아 실행하지 않게). PyPI 배포본이 그 태그의 소스와 같은지
 # 대조한 뒤 여기 버전을 올려 릴리스하면, 게이트웨이(hswap_usage.maintain)가 이보다 낮은 hswap 을 이 버전으로 올린다
 # ponytail: 버전만 고정한다. 같은 버전에 나중에 더해진 배포 파일은 대조 없이 받을 수 있다. 막으려면 파일 해시로 고정한다
-VERSION = "0.2.7"  # 태그 v0.2.7 = 2f44307
+VERSION = "0.2.8"  # 태그 v0.2.8 = fbc3c25 (PyPI wheel·sdist 를 태그 소스 빌드와 대조함)
 PACKAGE = f"harness-swap=={VERSION}"
 INSTALL_TIMEOUT_S = 600  # 처음이면 uv 가 Python 3.12+ 까지 받는다
 CLIS = ("claude", "codex", "grok", "opencode")  # hswap 이 다루는 하네스. 하나라도 있으면 hswap 을 설치한다
 _version = None  # 마지막으로 확인한 설치 버전("0.2.7"). 화면의 기기 행에 보인다
+service = None  # macOS: hswap claude keepalive --service-status 의 마지막 답(hswap_usage.schedule 이 쓴다). 모르면 None
 
 
 def binary():
@@ -451,6 +452,11 @@ def login_ready():
     return _recent(_state.device, mono) is False and err.get("type") not in blocked and _recent(_state.fatal, mono) not in blocked
 
 
+def _unscheduled(svc):
+    """macOS 에서 hswap 이 keepalive 예약이 없다고 답했다."""
+    return isinstance(svc, dict) and svc.get("platform") == "launchd" and svc.get("installed") is False
+
+
 def _span(s):
     s = max(0, s)
     return f"{s / 86400:.0f}일" if s >= 86400 else f"{s // 3600:.0f}시간" if s >= 3600 else f"{max(1, s // 60):.0f}분"
@@ -460,10 +466,12 @@ def _is_relogin(a):
     return STATUS["relogin_required"][0] in (a.get("note"), a.get("error"))
 
 
-def _judge_login(k, rows, keychain, signed_in, fatal, first_seen, now):
+def _judge_login(k, rows, keychain, signed_in, fatal, first_seen, now, svc=None):
     """로그인 판정: 값만 받아 (기기 단위 로그인 상태 {state, text, note, attention, slot, other, store} 또는 None, 새 first_seen). 알릴 것이 없으면 None(keepalive.json 이 없으면 이 기능을 쓰지 않는 기기다).
     k: keepalive 기록(없으면 {}). first_seen: 파일 저장소에서 갱신을 확인하지 못한 기록을 처음 본 시각. now: time.time().
     순서: 설정 충돌·키체인 항목(있거나 확인 실패) > 사람이 다시 로그인해야 하는 것 > 키체인 > 만료 임박 > 멈춤 > 이전 계정의 기록 > 그 밖의 실패 > 정상.
+    svc: macOS 의 keepalive 서비스 상태(hswap --service-status). 기록이 오래됐거나 없을 때 그 까닭을 가른다: 예약이 없으면 '미설정',
+    hswap 이 만든 예약이 적재되지 않았으면 '중지됨'(GUI 세션이 없으면 다음 로그인 때 시작). 사람이 만든 예약이나 모르는 상태는 '멈춤' 그대로다.
     store: 파일 저장소 기기면 "file", 아니면 None(옛 형식 포함). 파일의 다른 값은 내보내지 않는다. 키체인을 쓰지 않는 기기라 키체인에 닿지 못하는 것은 문제가 아니다.
     rows: 사용 중 계정의 재로그인 판정(저장소의 authDeadStrikes 와 hswap 의 relogin_required 가 같은 문구가 된다)과 사용 중 슬롯.
     keychain: hswap 의 keychainUnavailable. signed_in: 로그인을 읽었다(rows 에 active 가 없으면 저장되지 않은 로그인이다).
@@ -491,10 +499,14 @@ def _judge_login(k, rows, keychain, signed_in, fatal, first_seen, now):
         state, text = "relogin", "재로그인 필요"
     elif not file_store and (kind == "keychain_unavailable" or keychain):
         state, text = "keychain", "키체인 접근 불가: 키체인에 접근할 수 없는 곳에서 실행됨"
-    elif not k:
+    elif not k and not _unscheduled(svc):
         return None, first_seen
     elif not other and expires is not None and expires - now <= LOGIN_WARN_S:
         state, text = "expiring", f"로그인 만료 임박({_span(expires - now)})" if expires > now else "로그인 기한이 지났습니다"
+    elif (checked is None or now - checked > config.CLAUDE_KEEPALIVE_STALE_S) and _unscheduled(svc):
+        state, text = "unscheduled", "자동 갱신 미설정(예약 실행 없음)"
+    elif (checked is None or now - checked > config.CLAUDE_KEEPALIVE_STALE_S) and isinstance(svc, dict) and svc.get("managed") is True and svc.get("loaded") is False:
+        state, text = "stopped", "자동 갱신 중지됨" + ("(GUI 로그인 뒤 시작)" if svc.get("domainAvailable") is False else "")
     elif checked is None or now - checked > config.CLAUDE_KEEPALIVE_STALE_S:
         state, text = "stalled", "자동 갱신 멈춤" + (f"(마지막 {_span(now - checked)} 전)" if checked else "")
     elif other and kind != "no_credentials":  # 자격 부재는 add 로 고칠 수 없어 /login 안내로 이어지는 실패로 둔다
@@ -506,7 +518,8 @@ def _judge_login(k, rows, keychain, signed_in, fatal, first_seen, now):
         state, text = "failed", f"자동 갱신 실패({KEEPALIVE_ERRORS.get(kind, '알 수 없는 오류')})"
     else:
         state, text = "ok", f"로그인됨{' · 파일 저장소' if file_store else ''}, 자동 갱신 {_span(now - checked)} 전"
-    access = None if other or blocked or state == "unconfirmed" else _sec(k.get("accessExpiresAt"))  # 갱신이 멈췄거나 확인되지 않았는데 "자동 갱신"을 말하지 않는다
+    stale = checked is None or now - checked > config.CLAUDE_KEEPALIVE_STALE_S  # 만료 임박처럼 먼저 고른 상태여도 갱신이 돌지 않으면 같다
+    access = None if other or blocked or stale or state == "unconfirmed" else _sec(k.get("accessExpiresAt"))  # 갱신이 멈췄거나 확인되지 않았는데 "자동 갱신"을 말하지 않는다
     return {"state": state, "text": text, "attention": state != "ok" and not quiet, "slot": current if not k or current == recorded else None, "other": other,
             "store": "file" if file_store else None,
             "note": None if access is None else f"접근 토큰 {_span(access - now)} 뒤 만료(자동 갱신)" if access > now else "접근 토큰 만료됨(자동 갱신 대기)"}, first_seen
@@ -514,7 +527,7 @@ def _judge_login(k, rows, keychain, signed_in, fatal, first_seen, now):
 
 def login(rows=(), keychain=False, signed_in=False, fatal=None):
     """지금 keepalive 기록으로 로그인을 판정한다(_judge_login). 파일 읽기와 처음 본 시각의 기억은 판정 밖인 여기서 한다."""
-    state, _state.unconfirmed = _judge_login(_keepalive() or {}, rows, keychain, signed_in, fatal, _state.unconfirmed, time.time())
+    state, _state.unconfirmed = _judge_login(_keepalive() or {}, rows, keychain, signed_in, fatal, _state.unconfirmed, time.time(), service)
     return state
 
 

@@ -281,7 +281,7 @@ Claude 프로바이더(`providers[]`)에 붙는 기기 단위 로그인 상태�
 
 ```js
 login: {
-  state: "ok"|"expiring"|"relogin"|"keychain"|"stalled"|"other_account"|"failed"|"keychain_item_present"|"config_conflict"|"unconfirmed",
+  state: "ok"|"expiring"|"relogin"|"keychain"|"stalled"|"other_account"|"failed"|"keychain_item_present"|"config_conflict"|"unconfirmed"|"unscheduled"|"stopped",
   text: "로그인됨, 자동 갱신 5분 전",            // 화면에 그대로 보이는 한 줄. 고정 문구와 시간만 쓴다(파일의 error.message 는 내보내지 않는다)
   note: "접근 토큰 3시간 뒤 만료(자동 갱신)",   // 없으면 null
   attention: bool,                            // ok 와 시한 안의 unconfirmed 만 false. 화면의 '주의 필요' 수에 기기마다 하나로 센다
@@ -291,7 +291,7 @@ login: {
 }
 ```
 
-여럿에 해당하면 위에서부터 고른다: `config_conflict`·`keychain_item_present`(같은 이름의 `error.type` 또는 hswap 최상위 오류 type, 또는 `store` 가 file 이고 `keychainItemPresent` 가 true. `keychain_item_present` 는 항목이 있을 때와 hswap 이 확인하지 못했을 때 모두 온다. 재로그인보다 먼저 고쳐야 한다) · `relogin`(keepalive `error.type` 이나 hswap 최상위 오류 type 이 relogin_required, 또는 사용 중 계정이 재로그인 필요) · `keychain`(`error.type` keychain_unavailable, 또는 hswap 의 `keychainUnavailable`. `store` 가 file 이면 둘 다 보지 않는다) · `expiring`(`loginExpiresAt` 3일 안이거나 지남) · `stalled`(`checkedAt` 이 없거나 `claude_keepalive_stale_s` 보다 오래됨) · `other_account`(`activeSlot` 이 지금 로그인의 슬롯과 다른 번호. `no_credentials` 는 제외) · `unconfirmed`(`store` 가 file 이고 `ok:false` 인 `error.type` keychain_unavailable. 성공 문구를 쓰지 않고, `claude_keepalive_stale_s` 동안 계속되면 attention 이다) · `failed`(그 밖의 `ok:false`. `error.type` 을 고정 문구로 바꿔 보이고, 모르는 type 은 "알 수 없는 오류"다) · `ok`. `activeSlot` 이 지금 로그인과 다른 번호이면 `relogin`·`expiring`·`failed` 판정과 `note` 에 keepalive 값을 쓰지 않는다(`error.type` 이 relogin_required 여도 그렇다). 다만 `no_credentials` 는 기기의 자격 부재라 `/login` 안내로 이어지는 `failed` 로 둔다. `activeSlot` 이 없거나(null·누락) 지금 로그인을 읽지 못하면 맞는지 알 수 없으므로 판정은 그대로 두고 `slot` 만 null 이다. `cache/keepalive.json` 이 없거나 소유자·권한·크기·심볼릭 링크 검사를 통과하지 못하거나 모르는 `schemaVersion` 이면 파일이 없는 것으로 본다.
+여럿에 해당하면 위에서부터 고른다: `config_conflict`·`keychain_item_present`(같은 이름의 `error.type` 또는 hswap 최상위 오류 type, 또는 `store` 가 file 이고 `keychainItemPresent` 가 true. `keychain_item_present` 는 항목이 있을 때와 hswap 이 확인하지 못했을 때 모두 온다. 재로그인보다 먼저 고쳐야 한다) · `relogin`(keepalive `error.type` 이나 hswap 최상위 오류 type 이 relogin_required, 또는 사용 중 계정이 재로그인 필요) · `keychain`(`error.type` keychain_unavailable, 또는 hswap 의 `keychainUnavailable`. `store` 가 file 이면 둘 다 보지 않는다) · `expiring`(`loginExpiresAt` 3일 안이거나 지남) · `unscheduled`(macOS 에서 `checkedAt` 이 없거나 오래됐고 hswap 이 keepalive 예약이 없다고 답함. 기록 파일이 없어도 붙는다) · `stopped`(같은 조건에서 hswap 이 만든 예약이 적재되지 않음) · `stalled`(`checkedAt` 이 없거나 `claude_keepalive_stale_s` 보다 오래됨. 사람이 만든 예약이거나 예약 상태를 모를 때) · `other_account`(`activeSlot` 이 지금 로그인의 슬롯과 다른 번호. `no_credentials` 는 제외) · `unconfirmed`(`store` 가 file 이고 `ok:false` 인 `error.type` keychain_unavailable. 성공 문구를 쓰지 않고, `claude_keepalive_stale_s` 동안 계속되면 attention 이다) · `failed`(그 밖의 `ok:false`. `error.type` 을 고정 문구로 바꿔 보이고, 모르는 type 은 "알 수 없는 오류"다) · `ok`. `activeSlot` 이 지금 로그인과 다른 번호이면 `relogin`·`expiring`·`failed` 판정과 `note` 에 keepalive 값을 쓰지 않는다(`error.type` 이 relogin_required 여도 그렇다). 다만 `no_credentials` 는 기기의 자격 부재라 `/login` 안내로 이어지는 `failed` 로 둔다. `activeSlot` 이 없거나(null·누락) 지금 로그인을 읽지 못하면 맞는지 알 수 없으므로 판정은 그대로 두고 `slot` 만 null 이다. `cache/keepalive.json` 이 없거나 소유자·권한·크기·심볼릭 링크 검사를 통과하지 못하거나 모르는 `schemaVersion` 이면 파일이 없는 것으로 본다.
 
 ## 화면 URL 계약
 

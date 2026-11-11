@@ -13,11 +13,12 @@ import os
 import re
 import signal
 import subprocess
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout, wait
 
-from . import caam_usage, claude_accounts, provider_usage
+from . import caam_usage, claude_accounts, config, provider_usage
 from .util import _NO_WINDOW, scrub_home, tool_path, which_tool
 
 WAIT_S = 8  # 읽기를 시작한 뒤 hswap 을 기다리는 시간. 기존 수집기가 그보다 오래 걸리면 그동안 함께 기다린다(수집 대기 55초 안)
@@ -28,6 +29,9 @@ KEEP_S = 3600  # 로그인 유지 주기. refresh 는 기한이 된 토큰만 �
 # 로그인 유지(add·refresh) 대상. OpenCode 는 스스로 로그인을 갱신하고(0.2.1 CREDENTIAL_REFRESH unsupported), 네이티브 모드의 add 는
 # 지금 로그인을 등록하지 않고 대화형 `opencode auth login` 을 띄워 뺀다(hswap 이 OpenCode 의 저장 로그인을 목록에서 스스로 등록한다)
 KEEP = ("codex", "grok")
+SERVICE_FROM = "0.2.8"  # `hswap claude keepalive --install-service·--service-status` 를 아는 hswap
+AHEAD_S = 7200  # 만료 2시간 전부터 갱신한다. 한 번 실패해도 고칠 시간이 남는다
+TICK_S = 300  # Linux 에서 게이트웨이가 keepalive 를 직접 부르는 간격(macOS 는 hswap 의 LaunchAgent 가 같은 간격으로 부른다)
 REMOTE = "codex,grok,opencode"  # usage.remote 가 비어 있을 때 정하는 값. Antigravity 는 약관 위험이 커서 넣지 않는다(2026-11-08 사용자 결정)
 # UsageState → (화면 문구, 사람이 손봐야 하는가). detail 원문은 오류 경로가 섞일 수 있어 쓰지 않는다
 STATES = {
@@ -227,15 +231,56 @@ def keep(exe):
     return done
 
 
-def maintain():
-    """게이트웨이가 도는 동안 KEEP_S 마다: hswap 버전을 맞추고(USAGE-5) 로그인을 유지한다(USAGE-9).
-    Claude 는 0.2.1 에 refresh 가 없어, 같은 주기로 hswap claude list 를 묻는 읽기로 hswap 이 토큰을 갱신하게 한다."""
+def schedule():
+    """Claude 로그인 자동 갱신의 예약 실행을 맞춘다(USAGE-11). macOS 는 키체인이 GUI 세션에서만 닿아 hswap 이 설치하는
+    LaunchAgent 에 맡긴다: 예약이 없으면 설치하고, hswap 이 만든 예약이 적재되지 않았으면 그 설정(ahead·thenAuto) 그대로 다시 설치한다.
+    적재된 예약과 hswap 이 만들지 않은 같은 이름의 서비스는 건드리지 않는다(사람이 바꾼 설정을 덮어쓰지 않는다).
+    답한 상태는 로그인 판정(claude_accounts.service)에 쓴다. 할 일이 아니면 None 이고 지난 답도 지운다."""
+    claude_accounts.service = None
+    exe = claude_accounts.binary()
+    v = claude_accounts._version
+    if (sys.platform != "darwin" or not config.CSWAP_INSTALL or not exe or not which_tool("claude") or claude_accounts.installer.state == "running"
+            or not v or claude_accounts._key(v) < claude_accounts._key(SERVICE_FROM) or not claude_accounts._store_read()):
+        return None
+    st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json")[1])
+    if st and st.get("platform") == "launchd" and (st.get("installed") is False or (st.get("managed") is True and st.get("loaded") is False)):
+        ahead = st.get("ahead") if isinstance(st.get("ahead"), (int, float)) and not isinstance(st.get("ahead"), bool) and st.get("ahead") > 0 else AHEAD_S
+        # 0 설치·갱신, 3 GUI 세션이 없어 다음 로그인 때 적재. 어느 쪽이든 다시 물은 상태를 쓴다
+        code, _ = _run(exe, "claude", "keepalive", "--install-service", "--ahead", str(int(ahead)), *(["--then-auto"] if st.get("thenAuto") is True else []), "--json")
+        if code not in (0, 3):
+            print(f"[jarvis] hswap keepalive 예약 설치 실패(종료 코드 {code})", flush=True)
+        st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json")[1]) or st
+    claude_accounts.service = st
+    return st
+
+
+def tick():
+    """Linux: 키체인이 없어 서비스 없이 게이트웨이가 TICK_S 마다 keepalive 를 부른다(결과는 hswap 이 keepalive.json 에 남긴다)."""
     while True:
-        for step in (_check, _keep_once, lambda: which_tool("claude") and claude_accounts.read()):
+        try:
+            exe = claude_accounts.binary()
+            # 저장한 계정이 없으면 유지할 로그인도 없다(로그인하지 않은 기기에 실패 기록을 만들지 않는다)
+            if (config.CSWAP_INSTALL and exe and which_tool("claude") and claude_accounts.installer.state != "running"
+                    and claude_accounts._store_read()):
+                _run(exe, "claude", "keepalive", "--ahead", str(AHEAD_S), "--json")
+        except Exception as e:
+            print(f"[jarvis] hswap keepalive 실패: {scrub_home(str(e))[:200]}", flush=True)
+        time.sleep(TICK_S)
+
+
+def maintain():
+    """게이트웨이가 도는 동안 KEEP_S 마다: hswap 버전을 맞추고(USAGE-5) Claude 자동 갱신 예약을 맞추며(USAGE-11) 로그인을 유지한다(USAGE-9).
+    Claude 는 0.2.1 에 refresh 가 없어, 같은 주기로 hswap claude list 를 묻는 읽기로 hswap 이 토큰을 갱신하게 한다."""
+    ticking = False
+    while True:
+        for step in (_check, schedule, _keep_once, lambda: which_tool("claude") and claude_accounts.read()):
             try:
                 step()
             except Exception as e:
                 print(f"[jarvis] hswap 유지 실패: {scrub_home(str(e))[:200]}", flush=True)
+        if not ticking and sys.platform.startswith("linux"):  # 첫 버전 맞추기(설치) 뒤에 시작한다
+            ticking = True
+            threading.Thread(target=tick, name="jarvis-keepalive", daemon=True).start()
         time.sleep(KEEP_S)
 
 

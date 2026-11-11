@@ -114,12 +114,17 @@
  }
  const head=a=>html`<div class="ul-ah"><b class="ul-email">${a.label}</b>${a.plan?html`<span class="ul-plan">${a.plan}</span>`:""}${a.org?html`<span class="ul-plan">${a.org}</span>`:""}${a.active?html`<span class="badge" data-tone="info">사용 중</span>`:""}${isErr(a)||a.attention?html`<span class="badge" data-tone="crit">${isErr(a)?kind(a)[1]:"조치 필요"}</span>`:""}</div>`;
  const relog=(d,id,again=true)=>html`<button type="button" class="seg-action" data-login="${d.id}" data-lp="${id}">${LOGIN[id]} ${again?"다시 로그인":"로그인"}</button>`;
+ // 계정이 이미 있는 칸에서 다른 계정을 하나 더 저장한다(같은 로그인 경로. 저장은 hswap 이 한다)
+ const addBtn=(d,id)=>(d.login_adds||[]).includes(id)?html`<button type="button" class="seg-action" data-login="${d.id}" data-lp="${id}" data-add="1">${LOGIN[id]} 계정 추가</button>`:"";
  // slot: 게이트웨이 hswap 의 슬롯 번호(Claude). 그 기기의 Claude Code 로그인을 이 계정으로 바꾼다
  const useBtn=(a,d)=>a.slot&&!a.active?html`<button type="button" class="seg-action" data-use="${d.id}" data-slot="${a.slot}" data-label="${a.label}" aria-disabled="${String(S.busy.has(d.id))}">이 계정 사용</button>`:"";
  // 인증 실패·조치 필요 계정에는 그 기기에서 다시 로그인할 버튼을 함께 낸다(요약 카드도 상세와 같다)
  const relogIf=(a,d,p)=>(isErr(a)&&kind(a)[0]==="auth"||a.attention)&&(d.logins||[]).includes(p.id)?relog(d,p.id):"";
  // 기기 단위 로그인 상태 한 줄. 정상이면 작게, 이상이면 주의 색과 로그인(게이트웨이가 낼 수 있는 기기만)·안내 버튼
- const loginLine=(d,p)=>!p.login?"":!p.login.attention?html`<p class="ul-age">${p.login.text}${p.login.note?" · "+p.login.note:""}</p>`
+ // 자동 갱신 예약이 없거나 멈춘 것은 다시 로그인으로 고쳐지지 않는다: 게이트웨이가 한 시간마다 다시 설치하고, 바로 고칠 명령을 보인다
+ const SCHED={unscheduled:"게이트웨이가 한 시간마다 예약 설치를 시도합니다. 계속되면 그 기기의 화면 터미널에서 실행하세요:",stopped:"그 기기에 GUI 로그인하면 시작됩니다. 로그인돼 있는데도 계속되면 화면 터미널에서 실행하세요:"};
+ const loginLine=(d,p)=>!p.login?"":p.login.attention&&SCHED[p.login.state]?html`<div class="ul-st" data-tone="warn"><p class="ul-st-t">${p.login.text}</p><p class="ul-why">${SCHED[p.login.state]} <code>hswap claude keepalive --install-service --ahead 7200</code></p></div>`
+  :!p.login.attention?html`<p class="ul-age">${p.login.text}${p.login.note?" · "+p.login.note:""}</p>`
   :html`<div class="ul-st" data-tone="crit"><p class="ul-st-t">${p.login.text}</p>${p.login.note?html`<p class="ul-why">${p.login.note}</p>`:""}<div class="ul-acts">${(d.logins||[]).includes("claude")?relog(d,"claude"):""}<button type="button" class="seg-action" data-guide="${d.id}">다시 로그인 방법</button></div></div>`;
  const acct=(a,d,p)=>html`<div class="ul-acct">${head(a)}${body(a)}${useBtn(a,d)}${p.login&&p.login.attention?"":relogIf(a,d,p)}${a.updated_at?html`<p class="ul-age">${P.fmt.ago(a.updated_at)} 확인</p>`:""}</div>`;
  const badge=d=>{const [t,l]=state(d);return html`<span class="badge" data-tone="${t}">${l}</span>`;};
@@ -148,7 +153,7 @@
    const p=provs(d).find(p=>p.id===c.id),list=p?shown(d,p):[],L=p&&loginShown(p)?loginLine(d,p):"";
    if(!list.length&&fresh(d).includes(c.id))return html`<td data-label="${c.name}" class="ul-full"><div class="ul-acct"><p class="ul-muted">로그인하지 않았습니다.</p>${relog(d,c.id,false)}</div></td>`;
    if(!list.length)return L?html`<td data-label="${c.name}" class="ul-full">${L}</td>`:!p&&(d.unavailable||[]).includes(c.id)?html`<td data-label="${c.name}" class="ul-unk">확인 불가</td>`:html`<td data-label="${c.name}" class="ul-nil">–</td>`;
-   if(S.mode==="full")return html`<td data-label="${c.name}" class="ul-full">${L}${list.map(a=>acct(a,d,p))}</td>`;
+   if(S.mode==="full")return html`<td data-label="${c.name}" class="ul-full">${L}${list.map(a=>acct(a,d,p))}${addBtn(d,c.id)}</td>`;
    // 칸 값은 계정마다 가장 찬 한도의 평균이다(읽지 못한 계정은 빼고 센다)
    const err=list.some(isErr),act=list.some(a=>a.attention),pk=list.map(peak).filter(v=>v!=null),avg=pk.length?pk.reduce((x,y)=>x+y,0)/pk.length:null;
    return html`<td data-label="${c.name}"><button type="button" class="ul-cell" data-cell="${d.id+":"+c.id}" data-tone="${err||act?"crit":tone(avg)}"><b>${err&&avg==null?kind(list.find(isErr))[1]:pct(avg)}</b><span>${pk.length>1?"평균 · ":""}계정 ${list.length}${err&&avg!=null?" · "+kind(list.find(isErr))[1]+" 포함":""}${act?" · 조치 필요":""}</span></button>${L}</td>`;
@@ -176,15 +181,15 @@
   const steps=L.kind==="unsynced"?html`<ol class="ul-steps"><li>그 기기의 Claude 상태를 확인하세요.</li><li>키체인 모드에서 두 저장소의 로그인이 다르면 화면 터미널에서 최근 로그인·갱신이 저장된 쪽을 확인한 뒤 <code>hswap claude keepalive --adopt file</code> 또는 <code>hswap claude keepalive --adopt keychain</code> 으로 맞추세요.</li></ol>`
    :L.kind!=="unsaved"?"":S.busy.has(L.dev)?html`<p class="ul-muted">그 기기의 로그인 상태를 다시 읽는 중입니다…</p>`
    :lg&&lg.attention?guideSteps(lg):html`<ol class="ul-steps"><li>그 기기에서 <code>hswap claude add</code> 를 직접 실행하세요.</li></ol>`;
-  return html`<div class="ul-login"><div class="ul-st" data-tone="${t}" role="alert"><p class="ul-st-t">${title}</p><p class="ul-why">${L.err}</p></div>${steps?html`<p class="ul-wl">다음에 할 일</p>${steps}`:""}<div class="ul-acts">${changed?html`<button type="button" class="seg-action" data-refresh="${L.dev}" aria-disabled="${String(S.busy.has(L.dev))}">기기 다시 읽기</button>`:html`<button type="button" class="seg-action" data-login="${L.dev}" data-lp="${L.prov}">다시 시도</button>`}</div></div>`;
+  return html`<div class="ul-login"><div class="ul-st" data-tone="${t}" role="alert"><p class="ul-st-t">${title}</p><p class="ul-why">${L.err}</p></div>${steps?html`<p class="ul-wl">다음에 할 일</p>${steps}`:""}<div class="ul-acts">${changed?html`<button type="button" class="seg-action" data-refresh="${L.dev}" aria-disabled="${String(S.busy.has(L.dev))}">기기 다시 읽기</button>`:L.add?html`<button type="button" class="seg-action" data-login="${L.dev}" data-lp="${L.prov}" data-add="1">다시 시도</button>`:html`<button type="button" class="seg-action" data-login="${L.dev}" data-lp="${L.prov}">다시 시도</button>`}</div></div>`;
  };
  function dlgDraw(){
   if(S.login){
    const L=S.login,d=S.devs.find(x=>x.id===L.dev);
-   $("#ulDlgT").textContent=(d?d.host||d.id:L.dev)+" · "+LOGIN[L.prov]+" 로그인";
+   $("#ulDlgT").textContent=(d?d.host||d.id:L.dev)+" · "+LOGIN[L.prov]+(L.add?" 계정 추가":" 로그인");
    P.render($("#ulDlgB"),L.err?failView(L,d):!L.url?html`<p class="ul-muted">로그인 URL 을 받는 중입니다…</p>`
     :L.paste?html`<div class="ul-login"><p>1. 아래 주소를 열어 저장할 계정으로 로그인하고, 표시되는 인증 코드를 복사하세요.</p><p><a href="${L.url}" target="_blank" rel="noopener noreferrer">${L.url}</a></p><form class="ul-paste" data-paste="1"><p>2. 인증 코드를 붙여 넣으세요.</p><input name="code" type="text" required autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="인증 코드" ${L.sent?"disabled":""}><button type="submit" class="seg-action" ${L.sent?"disabled":""}>코드 보내기</button></form>${L.msg?html`<p class="ul-err" role="alert">${L.msg}</p>`:""}<p class="ul-muted">${L.sent?"코드를 보냈습니다. 저장을 마치면 이 창이 저절로 닫힙니다.":"이 기기의 Claude Code 로그인이 그 계정으로 바뀌고 슬롯에 저장됩니다."}</p></div>`
-    :html`<div class="ul-login"><p>아래 주소를 열어 로그인하고 일회용 코드를 넣으세요. 코드는 ${new Date(L.expires_at*1000).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",hour12:false})}까지 유효합니다.</p><p><a href="${L.url}" target="_blank" rel="noopener noreferrer">${L.url}</a></p><p class="ul-code">${L.code}</p><p class="ul-muted">로그인을 마치면 이 창이 저절로 닫히고 사용량을 다시 읽습니다.</p></div>`);
+    :html`<div class="ul-login"><p>아래 주소를 열어 로그인하고 일회용 코드를 넣으세요. 코드는 ${new Date(L.expires_at*1000).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",hour12:false})}까지 유효합니다.</p><p><a href="${L.url}" target="_blank" rel="noopener noreferrer">${L.url}</a></p><p class="ul-code">${L.code}</p><p class="ul-muted">${L.add?"이 기기의 지금 로그인은 그대로 두고 hswap 에 계정을 추가합니다. ":""}로그인을 마치면 이 창이 저절로 닫히고 사용량을 다시 읽습니다.</p></div>`);
    return;
   }
   if(S.guide){ // 안내만 한다: 로그인은 그 기기에서 사람이 한다(파일 저장소는 SSH, 그 밖에는 화면 세션). 문구에 기기 이름·경로를 넣지 않는다
@@ -197,7 +202,7 @@
   const d=S.devs.find(x=>x.id===S.dlg.dev),p=d&&provs(d).find(x=>x.id===S.dlg.prov);
   if(!p){dlg.close();return;}
   $("#ulDlgT").textContent=(d.host||d.id)+" · "+p.name;
-  P.render($("#ulDlgB"),html`${devMeta(d)}${loginLine(d,p)}${shown(d,p).map(a=>acct(a,d,p))}`);
+  P.render($("#ulDlgB"),html`${devMeta(d)}${loginLine(d,p)}${shown(d,p).map(a=>acct(a,d,p))}${addBtn(d,p.id)}`);
  }
  dlg.addEventListener("close",()=>{S.dlg=null;S.login=null;S.guide=null;});
  // 바깥(backdrop)을 누르면 닫는다. backdrop 클릭도 대상이 dialog 라서 좌표가 상자 밖인지로 가린다(안쪽 여백 클릭은 닫지 않게)
@@ -252,10 +257,10 @@
   }catch(e){note((e.message||String(e)),true);}
   S.busy.delete(id);draw();
  }
- async function login(dev,prov){
-  const L=S.login={dev,prov};dlgDraw();if(!dlg.open)dlg.showModal();
+ async function login(dev,prov,add=false){
+  const L=S.login={dev,prov,add};dlgDraw();if(!dlg.open)dlg.showModal();
   try{
-   const r=await fetch("/api/devices/"+encodeURIComponent(dev)+"/login?provider="+prov,{method:"POST",cache:"no-store",headers:{"X-Jarvis-Action":"usage-login"}}),o=await r.json();
+   const r=await fetch("/api/devices/"+encodeURIComponent(dev)+"/login?provider="+prov+(add?"&mode=add":""),{method:"POST",cache:"no-store",headers:{"X-Jarvis-Action":"usage-login"}}),o=await r.json();
    if(r.ok)Object.assign(L,{url:o.url,code:o.code,paste:o.paste===true,expires_at:o.expires_at});else Object.assign(L,{kind:"start",err:o.error||"HTTP "+r.status});
   }catch(e){Object.assign(L,{kind:"start",err:e.message||String(e)});}
   if(S.login!==L)return;
@@ -271,7 +276,7 @@
      Object.assign(L,o.unsynced?{kind:"unsynced",err:"로그인은 바뀌었지만 로그인 저장소의 동기화를 확인하지 못했습니다."}:{kind:"unsaved",err:"로그인은 바뀌었지만 슬롯 저장에 실패했습니다."});
      dlgDraw();refreshOne(dev,true);
     }
-    else if(o.state==="failed"||o.state==="none"){Object.assign(L,{kind:"failed",err:"코드가 틀렸거나 만료되었거나 취소되었습니다."});dlgDraw();}
+    else if(o.state==="failed"||o.state==="none"){Object.assign(L,{kind:"failed",err:o.error?o.error+".":"코드가 틀렸거나 만료되었거나 취소되었습니다."});dlgDraw();}
    }catch(e){} // 일시적인 실패는 다음 차례에 다시 묻는다
   }
  }
@@ -316,7 +321,7 @@
   if(t.dataset.login){
    // Claude 는 로그인한 계정이 그 기기의 Claude Code 로그인이 된다(실행 중인 세션 포함)
    if(t.dataset.lp==="claude"&&!confirm("이 기기의 Claude Code 로그인이 지금 로그인하는 계정으로 바뀝니다. 실행 중인 세션도 그 계정을 쓰게 됩니다. 계속할까요?"))return;
-   login(t.dataset.login,t.dataset.lp);return;
+   login(t.dataset.login,t.dataset.lp,t.dataset.add==="1");return;
   }
   if(t.dataset.guide){S.guide=t.dataset.guide;dlgDraw();if(!dlg.open)dlg.showModal();return;}
   if(t.dataset.use){use(t.dataset.use,t.dataset.slot,t.dataset.label);return;}

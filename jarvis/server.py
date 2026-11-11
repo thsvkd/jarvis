@@ -289,7 +289,8 @@ def make_handler(collector, core=None):
                         if not self._trusted(config.CORE):
                             return self._json({"error": "core 로 지정한 기기만 부를 수 있습니다"}, head, 403)
                         provider, pasted = (parse_qs(u.query).get("provider") or [""])[0], self.headers.get("X-Jarvis-Login-Code")
-                        code, body = cli_login.start(provider) if pasted is None else cli_login.submit(provider, pasted)
+                        add = (parse_qs(u.query).get("mode") or [""])[0] == "add"
+                        code, body = cli_login.start(provider, add) if pasted is None else cli_login.submit(provider, pasted)
                         return self._json(body, head, code)
                     if core and path.startswith("/api/devices/") and path.endswith("/login"):
                         dev = path.split("/")[3]
@@ -298,7 +299,7 @@ def make_handler(collector, core=None):
                         if not self._trusted(config.VIEWERS, config.PROXIES):
                             return self._json({"error": "로그인은 허용된 기기(viewers)에서만 할 수 있습니다"}, head, 403)
                         code, body = core.usage_login(dev, (parse_qs(u.query).get("provider") or [""])[0],
-                                                      self.headers.get("X-Jarvis-Login-Code"))
+                                                      self.headers.get("X-Jarvis-Login-Code"), (parse_qs(u.query).get("mode") or [""])[0] == "add")
                         return self._json(body, head, code)
                     if path == "/api/usage/account":
                         if not self._trusted(config.CORE):

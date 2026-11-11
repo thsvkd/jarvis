@@ -391,9 +391,10 @@ class LoginStateTest(StoreCase):
 
     def test_stalled(self):
         """covers: USAGE-7"""
-        self.keepalive(checkedAt=time.time() - 2 * 3600)
+        self.keepalive(checkedAt=time.time() - 2 * 3600, accessExpiresAt=time.time() + 5 * 3600)
         s = claude_accounts.login()
         self.assertEqual((s["state"], s["attention"], s["text"]), ("stalled", True, "자동 갱신 멈춤(마지막 2시간 전)"))
+        self.assertIsNone(s["note"])  # 갱신이 멈췄는데 "(자동 갱신)"을 약속하지 않는다
         with mock.patch.object(claude_accounts.config, "CLAUDE_KEEPALIVE_STALE_S", 3 * 3600):
             self.assertEqual(claude_accounts.login()["state"], "ok")
         self.keepalive(checkedAt="soon")
@@ -2203,6 +2204,28 @@ class JudgeLoginTest(unittest.TestCase):
                 state, _ = self.judge(k, **kw)
                 self.assertEqual(state and (state["state"], state["attention"], state["slot"], state["other"]), want)
 
+    def test_service_status_names_why_the_record_is_old(self):
+        """covers: USAGE-11. 기록이 오래됐거나 없을 때 hswap 서비스 상태로 까닭을 가른다. 사람이 만든 서비스·모르는 상태는 '멈춤' 그대로다"""
+        old = keepalive_value(checkedAt=NOW - 2 * 3600)
+        svc = lambda **kw: {"platform": "launchd", "installed": True, "managed": True, "loaded": True, **kw}
+        judge = lambda k, s: claude_accounts._judge_login(k, self.ACTIVE, False, True, None, None, NOW, s)[0]
+        cases = ((old, svc(installed=False, managed=None, loaded=False), ("unscheduled", True, "자동 갱신 미설정(예약 실행 없음)")),
+                 ({}, svc(installed=False, managed=None, loaded=False), ("unscheduled", True, "자동 갱신 미설정(예약 실행 없음)")),
+                 (old, svc(loaded=False, domainAvailable=False), ("stopped", True, "자동 갱신 중지됨(GUI 로그인 뒤 시작)")),
+                 (old, svc(loaded=False, domainAvailable=True), ("stopped", True, "자동 갱신 중지됨")),
+                 (old, svc(managed=False), ("stalled", True, "자동 갱신 멈춤(마지막 2시간 전)")),
+                 (old, None, ("stalled", True, "자동 갱신 멈춤(마지막 2시간 전)")),
+                 (keepalive_value(), svc(installed=False, managed=None, loaded=False), ("ok", False, "로그인됨, 자동 갱신 5분 전")))
+        for k, s, want in cases:
+            with self.subTest(want=want, svc=s):
+                got = judge(k, s)
+                self.assertEqual((got["state"], got["attention"], got["text"]), want)
+                if want[0] != "ok":
+                    self.assertIsNone(got["note"])  # 갱신이 돌지 않는데 "(자동 갱신)"을 약속하지 않는다
+        self.assertIsNone(judge({}, None))  # 기록도 예약 정보도 없으면 이 기능을 쓰지 않는 기기다
+        got = judge(keepalive_value(checkedAt=NOW - 2 * 3600, loginExpiresAt=NOW + 2 * 86400), None)
+        self.assertEqual((got["state"], got["note"]), ("expiring", None))  # 먼저 고른 상태가 만료 임박이어도 갱신이 멈췄으면 "(자동 갱신)"을 약속하지 않는다
+
     def test_fixed_text_and_note(self):
         """covers: USAGE-7. 파일의 자유 문구는 나가지 않고, 시각은 받은 now 로 잰다"""
         cases = ((keepalive_value(), "로그인됨, 자동 갱신 5분 전", "접근 토큰 3시간 뒤 만료(자동 갱신)"),
@@ -2211,7 +2234,7 @@ class JudgeLoginTest(unittest.TestCase):
                  (keepalive_value(accessExpiresAt=None), "로그인됨, 자동 갱신 5분 전", None),
                  (keepalive_value(loginExpiresAt=NOW + 2 * 86400), "로그인 만료 임박(2일)", "접근 토큰 3시간 뒤 만료(자동 갱신)"),
                  (keepalive_value(loginExpiresAt=NOW - 60), "로그인 기한이 지났습니다", "접근 토큰 3시간 뒤 만료(자동 갱신)"),
-                 (keepalive_value(checkedAt=None), "자동 갱신 멈춤", "접근 토큰 3시간 뒤 만료(자동 갱신)"),
+                 (keepalive_value(checkedAt=None), "자동 갱신 멈춤", None),
                  (keepalive_value(ok=False, error={"type": "refresh_failed", "message": "비밀"}), "자동 갱신 실패(토큰 갱신 실패)", "접근 토큰 3시간 뒤 만료(자동 갱신)"),
                  (keepalive_value(ok=False, error={"type": "새 종류", "message": "비밀"}), "자동 갱신 실패(알 수 없는 오류)", "접근 토큰 3시간 뒤 만료(자동 갱신)"),
                  (keepalive_value(ok=False, error={"type": "config_conflict"}), "hswap 설정 충돌(파일 저장소와 키체인 필수 모드)", None))

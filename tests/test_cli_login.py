@@ -249,6 +249,121 @@ class ClaudeLoginTest(unittest.TestCase):
             self.assertEqual(cli_login.start("claude")[0], 404)
 
 
+FAKE_HSWAP_ADD = """#!/bin/sh
+# hswap 0.2.8 add --login --json 의 흉내: 인자를 남기고 JSON Lines 이벤트만 stdout 에 낸다
+echo "$@" > "$(dirname "$0")/args"
+if [ "$1" = claude ]; then
+  echo '{"type":"login_url","harness":"claude","url":"https://claude.example.com/oauth","awaitsCode":true}'
+  read line
+  if [ "$line" != "good1234#state5678" ]; then echo '{"type":"error","harness":"claude","error":{"type":"login_failed","message":"secret-detail"}}'; exit 1; fi
+  echo '{"type":"added","harness":"claude","account":{"slot":2},"keepalive":'"$(cat "$(dirname "$0")/ka" 2>/dev/null || echo null)"'}'
+else
+  echo '{"type":"device_code","harness":"'"$1"'","url":"https://auth.example.com/device","userCode":"ABCD-EFGH1","expiresInSeconds":600}'
+  echo '{"type":"added","harness":"'"$1"'","account":{"slot":3},"keepalive":null}'
+fi
+"""
+
+
+class HswapAddTest(unittest.TestCase):
+    """covers: USAGE-10. 계정 추가는 hswap add --login --json 의 이벤트로 진행하고, 지금 로그인을 바꾸지 않는 하네스는 슬롯만 더한다."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.hswap = os.path.join(self.dir, "hswap")
+        with open(self.hswap, "w") as f:
+            f.write(FAKE_HSWAP_ADD)
+        os.chmod(self.hswap, stat.S_IRWXU)
+        self.patches = [mock.patch.dict(cli_login.CLIS, {"codex": lambda: "/bin/false", "claude": lambda: "/bin/false"}),
+                        mock.patch.object(cli_login.claude_accounts, "binary", return_value=self.hswap),
+                        mock.patch.object(cli_login.claude_accounts, "_version", "0.2.8"),
+                        mock.patch.object(cli_login, "_claude_ready", return_value=True)]
+        for p in self.patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+        for k in ("codex", "claude"):
+            job = cli_login._jobs.pop(k, None)
+            if job:
+                job["proc"].kill()
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def args(self):
+        with open(os.path.join(self.dir, "args")) as f:
+            return f.read().split()
+
+    def wait(self, provider, want):
+        for _ in range(100):
+            if cli_login.status(provider)["state"] == want:
+                break
+            time.sleep(0.05)
+        return cli_login.status(provider)
+
+    def test_codex_add_runs_hswap_and_shows_the_device_code(self):
+        st, o = cli_login.start("codex", add=True)
+        self.assertEqual((st, o["url"], o["code"], o["paste"]), (200, "https://auth.example.com/device", "ABCD-EFGH1", False))
+        self.assertLess(o["expires_at"], time.time() + 601)  # hswap 이 알려 준 유효 시간을 쓴다
+        self.assertEqual(self.wait("codex", "done"), {"state": "done"})
+        self.assertEqual(self.args(), ["codex", "add", "--login", "--json"])
+
+    def test_add_needs_a_hswap_that_knows_the_contract(self):
+        with mock.patch.object(cli_login.claude_accounts, "_version", "0.2.7"):
+            st, o = cli_login.start("codex", add=True)
+        self.assertEqual(st, 404)
+        self.assertIn("0.2.8", o["error"])
+
+    def test_claude_goes_through_hswap_and_waits_for_the_pasted_code(self):
+        with open(os.path.join(self.dir, "ka"), "w") as f:
+            f.write('{"schemaVersion":1,"ok":true,"error":null}')
+        st, o = cli_login.start("claude")
+        self.assertEqual((st, o["url"], o["code"], o["paste"]), (200, "https://claude.example.com/oauth", None, True))
+        self.assertEqual(cli_login.submit("claude", "good1234#state5678"), (200, {"submitted": True}))
+        self.assertEqual(self.wait("claude", "done"), {"state": "done"})
+        self.assertEqual(self.args(), ["claude", "add", "--login", "--json"])
+
+    def test_claude_error_type_becomes_fixed_text_without_the_message(self):
+        cli_login.start("claude")
+        cli_login.submit("claude", "wrong123#state5678")
+        got = self.wait("claude", "failed")
+        self.assertEqual(got, {"state": "failed", "error": "로그인이 끝나지 않았습니다"})
+        self.assertNotIn("secret-detail", json.dumps(got))
+
+    def test_macos_claude_without_a_keepalive_report_is_unsynced(self):
+        """hswap 이 동기화에 실패하면 보고가 null 이다: macOS 의 Claude 는 확인되지 않은 동기화를 완료로 보지 않는다"""
+        with mock.patch.object(cli_login.sys, "platform", "darwin"):
+            cli_login.start("claude")
+            cli_login.submit("claude", "good1234#state5678")
+            self.assertEqual(self.wait("claude", "failed"), {"state": "failed", "unsynced": True})
+        with mock.patch.object(cli_login.sys, "platform", "linux"):
+            cli_login._jobs.pop("claude")
+            cli_login.start("claude")
+            cli_login.submit("claude", "good1234#state5678")
+            self.assertEqual(self.wait("claude", "done"), {"state": "done"})
+
+    def test_buttons_follow_what_the_gateway_can_add(self):
+        with mock.patch.object(cli_login, "available", return_value=["codex", "claude"]):
+            self.assertEqual(cli_login.adds(), ["codex", "claude"])
+            with mock.patch.object(cli_login.claude_accounts, "_version", "0.2.7"):
+                self.assertEqual(cli_login.adds(), ["claude"])  # 옛 hswap 은 Codex 를 지금 로그인을 바꾸지 않고 더하지 못한다
+
+    def test_add_stops_hswap_gently_so_it_cleans_up(self):
+        with open(self.hswap, "w") as f:
+            f.write("#!/bin/sh\ntrap 'echo stopped > \"$(dirname \"$0\")/term\"; exit 0' TERM\n"
+                    "echo '{\"type\":\"device_code\",\"harness\":\"codex\",\"url\":\"https://a.example/d\",\"userCode\":\"ABCD-EFGH1\"}'\n"
+                    "while :; do sleep 0.1; done\n")
+        cli_login.start("codex", add=True)
+        cli_login._stop(cli_login._jobs["codex"]["proc"])
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "term")))  # SIGKILL 이 아니라 SIGTERM 으로 끝낸다
+
+    def test_failed_keepalive_report_is_unsynced(self):
+        with open(os.path.join(self.dir, "ka"), "w") as f:
+            f.write('{"ok":false,"error":{"type":"split_brain"}}')
+        cli_login.start("claude")
+        cli_login.submit("claude", "good1234#state5678")
+        self.assertEqual(self.wait("claude", "failed"), {"state": "failed", "unsynced": True})
+
+
 class FreshLoginTest(unittest.TestCase):
     """covers: USAGE-4. fresh(): 저장한 자격가 없을 때만 기기 행의 '로그인' 버튼을 낸다(자격을 잃지 않기 위해)."""
 

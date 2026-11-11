@@ -463,6 +463,69 @@ class KeepTest(FakeHswapCase):
             self.assertEqual(order, want)  # 앞 단계가 실패해도(check 의 예외) 다음 단계를 한다
 
 
+
+
+class ScheduleTest(FakeHswapCase):
+    """covers: USAGE-11. macOS 에서 Claude 자동 갱신 예약이 없으면 hswap 이 설치하게 하고, 적재된 예약과 hswap 이 만들지 않은 같은 이름의 서비스는 건드리지 않는다."""
+
+    script = KeepTest.script
+
+    STATUS = "claude keepalive --service-status --json"
+    INSTALL = "claude keepalive --install-service --ahead 7200 --json"
+
+    def setUp(self):
+        super().setUp()
+        for p in (mock.patch.object(hswap_usage.sys, "platform", "darwin"),
+                  mock.patch.object(hswap_usage, "which_tool", side_effect=lambda n: "/x/" + n),
+                  mock.patch.object(hswap_usage.claude_accounts, "_version", "0.2.8"),
+                  mock.patch.object(hswap_usage.claude_accounts, "_store_read", return_value={"accounts": [{}]}),
+                  mock.patch.object(hswap_usage.claude_accounts, "service", None)):
+            p.start()
+            self.addCleanup(p.stop)
+
+    @staticmethod
+    def st(**kw):
+        return [json.dumps({"schemaVersion": 1, "platform": "launchd", "installed": True, "managed": True, "loaded": True, **kw}), 0]
+
+    def test_installs_when_missing(self):
+        self.script({self.STATUS: self.st(installed=False, managed=None, loaded=False), self.INSTALL: ['{"schemaVersion": 1, "ok": true}', 0]})
+        hswap_usage.schedule()
+        self.assertEqual(self.calls(), [self.STATUS, self.INSTALL, self.STATUS])
+
+    def test_loaded_managed_service_keeps_the_settings_people_chose(self):
+        self.script({self.STATUS: self.st(ahead=3600, thenAuto=True)})
+        self.assertEqual(hswap_usage.schedule()["loaded"], True)
+        self.assertEqual(self.calls(), [self.STATUS])  # 적재돼 있으면 다시 설치하지 않는다(사람이 고른 ahead·then-auto 를 덮지 않는다)
+        self.assertEqual(hswap_usage.claude_accounts.service["managed"], True)
+
+    def test_unloaded_managed_service_is_reinstalled_with_its_own_settings(self):
+        again = "claude keepalive --install-service --ahead 3600 --then-auto --json"
+        self.script({self.STATUS: self.st(loaded=False, ahead=3600, thenAuto=True), again: ['{"schemaVersion": 1, "ok": true}', 3]})
+        hswap_usage.schedule()
+        self.assertEqual(self.calls(), [self.STATUS, again, self.STATUS])
+
+    def test_switch_off_and_stale_answers(self):
+        self.script({self.STATUS: self.st(installed=False)})
+        hswap_usage.claude_accounts.service = {"installed": False}
+        with mock.patch.object(hswap_usage.config, "CSWAP_INSTALL", False):
+            self.assertIsNone(hswap_usage.schedule())
+        self.assertIsNone(hswap_usage.claude_accounts.service)  # 할 일이 아니면 지난 답도 쓰지 않는다
+        self.assertEqual(self.calls(), [])
+
+    def test_foreign_service_is_left_alone(self):
+        self.script({self.STATUS: self.st(managed=False)})
+        hswap_usage.schedule()
+        self.assertEqual(self.calls(), [self.STATUS])
+
+    def test_skips_old_hswap_other_platforms_and_empty_stores(self):
+        self.script({self.STATUS: self.st(installed=False)})
+        for patch in (mock.patch.object(hswap_usage.claude_accounts, "_version", "0.2.7"),
+                      mock.patch.object(hswap_usage.sys, "platform", "linux"),
+                      mock.patch.object(hswap_usage.claude_accounts, "_store_read", return_value=None)):
+            with patch:
+                self.assertIsNone(hswap_usage.schedule())
+        self.assertEqual(self.calls(), [])
+
+
 if __name__ == "__main__":
     unittest.main()
-

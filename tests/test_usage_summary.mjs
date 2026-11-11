@@ -280,6 +280,7 @@ assert.equal(hotNow(), hotBase); // 상태가 없으면(keepalive 를 쓰지 않
 // 로그인 줄의 설명(note)은 상태와 따로 나오고, 같은 칸의 계정 카드는 같은 'Claude 다시 로그인' 버튼을 되풀이하지 않는다
 {
   devices[0].logins = ["claude"];
+  devices[0].login_adds = ["claude"]; // 계정 추가는 게이트웨이가 알린 프로바이더에만 낸다(옛 게이트웨이는 mode=add 를 몰라 로그인을 바꾼다)
   claudeOf(devices[0]).login = { state: "relogin", text: "재로그인 필요", note: "접근 토큰 만료됨", attention: true, slot: "2" };
   const row = claudeOf(devices[0]).accounts[0];
   Object.assign(row, { active: true, attention: true, note: "다시 로그인해야 합니다: 그 계정으로 Claude Code 에서 /login 한 뒤 hswap claude add 를 실행하세요." });
@@ -287,7 +288,11 @@ assert.equal(hotNow(), hotBase); // 상태가 없으면(keepalive 를 쓰지 않
   const cell = rendered().match(/<tr aria-busy="false"><th scope="row"><b>first<\/b>[\s\S]*?<\/tr>/)?.[0] || "";
   assert.match(cell, /<p class="ul-st-t">재로그인 필요<\/p><p class="ul-why">접근 토큰 만료됨<\/p><div class="ul-acts"><button[^>]*data-lp="claude">Claude 다시 로그인<\/button>/);
   assert.match(cell, /<p class="ul-why">다시 로그인해야 합니다/); // 계정 주의 문구는 붉은 상자가 아니라 설명이다
-  assert.equal((cell.match(/data-lp="claude"/g) || []).length, 1);
+  assert.equal((cell.match(/data-lp="claude">Claude 다시 로그인/g) || []).length, 1);
+  assert.equal((cell.match(/data-lp="claude" data-add="1">Claude 계정 추가<\/button>/g) || []).length, 1); // 계정이 있는 칸에도 다른 계정을 더할 버튼이 하나 있다
+  delete devices[0].login_adds;
+  click({ mode: "full" });
+  assert.doesNotMatch(rendered().match(/<tr aria-busy="false"><th scope="row"><b>first<\/b>[\s\S]*?<\/tr>/)?.[0] || "", /계정 추가/);
   Object.assign(row, { active: false, attention: undefined, note: undefined });
   delete devices[0].logins; delete claudeOf(devices[0]).login;
   click({ mode: "brief" });
@@ -405,3 +410,15 @@ for (const c of failCases) {
   }
 }
 console.log("usage summary ok");
+
+// covers: USAGE-11. 자동 갱신 예약이 없으면 다시 로그인이 아니라 예약 설치 명령을 안내한다
+{
+  devices[0].logins = ["claude"];
+  claudeOf(devices[0]).login = { state: "unscheduled", text: "자동 갱신 미설정(예약 실행 없음)", note: null, attention: true, slot: "1" };
+  click({ mode: "full" });
+  const cell = rendered().match(/<tr aria-busy="false"><th scope="row"><b>first<\/b>[\s\S]*?<\/tr>/)?.[0] || "";
+  assert.match(cell, /<p class="ul-st-t">자동 갱신 미설정\(예약 실행 없음\)<\/p><p class="ul-why">[^<]*<code>hswap claude keepalive --install-service --ahead 7200<\/code>/);
+  assert.doesNotMatch(cell, /Claude 다시 로그인|data-guide=/);
+  delete devices[0].logins; delete claudeOf(devices[0]).login;
+  click({ mode: "brief" });
+}
