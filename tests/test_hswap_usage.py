@@ -467,6 +467,29 @@ class KeepTest(FakeHswapCase):
 
 
 
+class TickStartTest(unittest.TestCase):
+    """covers: USAGE-11. macOS 밖(Linux·Windows)에서는 첫 버전 맞추기 뒤에 게이트웨이가 keepalive 를 직접 부르는 스레드를 한 번 띄운다"""
+
+    def test_tick_thread_starts_once_outside_macos(self):
+        class Stop(Exception):
+            pass
+        for platform, want in (("linux", 1), ("win32", 1), ("darwin", 0)):
+            started, rounds = [], []
+
+            def sleep(s):
+                rounds.append(s)
+                if len(rounds) == 2:
+                    raise Stop
+            with mock.patch.object(hswap_usage.sys, "platform", platform), \
+                    mock.patch.object(hswap_usage.threading, "Thread", side_effect=lambda target, **kw: mock.Mock(start=lambda: started.append(target))), \
+                    mock.patch.object(hswap_usage, "_check"), mock.patch.object(hswap_usage, "schedule"), \
+                    mock.patch.object(hswap_usage, "_keep_once"), mock.patch.object(hswap_usage, "which_tool", return_value=None), \
+                    mock.patch.object(hswap_usage.time, "sleep", side_effect=sleep):
+                with self.assertRaises(Stop):
+                    hswap_usage.maintain()
+            self.assertEqual(started, [hswap_usage.tick] * want, platform)
+
+
 class ScheduleTest(FakeHswapCase):
     """covers: USAGE-11. macOS 에서 Claude 자동 갱신 예약이 없으면 hswap 이 설치하게 하고, 적재된 예약과 hswap 이 만들지 않은 같은 이름의 서비스는 건드리지 않는다."""
 

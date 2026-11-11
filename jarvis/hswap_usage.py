@@ -31,7 +31,7 @@ KEEP_S = 3600  # 로그인 유지 주기. refresh 는 기한이 된 토큰만 �
 KEEP = ("codex", "grok")
 SERVICE_FROM = "0.2.8"  # `hswap claude keepalive --install-service·--service-status` 를 아는 hswap
 AHEAD_S = 7200  # 만료 2시간 전부터 갱신한다. 한 번 실패해도 고칠 시간이 남는다
-TICK_S = 300  # Linux 에서 게이트웨이가 keepalive 를 직접 부르는 간격(macOS 는 hswap 의 LaunchAgent 가 같은 간격으로 부른다)
+TICK_S = 300  # macOS 밖에서 게이트웨이가 keepalive 를 직접 부르는 간격(macOS 는 hswap 의 LaunchAgent 가 같은 간격으로 부른다)
 REMOTE = "codex,grok,opencode"  # usage.remote 가 비어 있을 때 정하는 값. Antigravity 는 약관 위험이 커서 넣지 않는다(2026-11-08 사용자 결정)
 # UsageState → (화면 문구, 사람이 손봐야 하는가). detail 원문은 오류 경로가 섞일 수 있어 쓰지 않는다
 STATES = {
@@ -255,7 +255,7 @@ def schedule():
 
 
 def tick():
-    """Linux: 키체인이 없어 서비스 없이 게이트웨이가 TICK_S 마다 keepalive 를 부른다(결과는 hswap 이 keepalive.json 에 남긴다)."""
+    """macOS 밖(Linux·Windows): 키체인이 없어 서비스 없이 게이트웨이가 TICK_S 마다 keepalive 를 부른다(결과는 hswap 이 keepalive.json 에 남긴다)."""
     while True:
         try:
             exe = claude_accounts.binary()
@@ -278,7 +278,7 @@ def maintain():
                 step()
             except Exception as e:
                 print(f"[jarvis] hswap 유지 실패: {scrub_home(str(e))[:200]}", flush=True)
-        if not ticking and sys.platform.startswith("linux"):  # 첫 버전 맞추기(설치) 뒤에 시작한다
+        if not ticking and sys.platform != "darwin":  # 첫 버전 맞추기(설치) 뒤에 시작한다. 키체인이 없는 Linux·Windows 는 파일 저장소라 서비스가 필요 없다
             ticking = True
             threading.Thread(target=tick, name="jarvis-keepalive", daemon=True).start()
         time.sleep(KEEP_S)
