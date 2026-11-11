@@ -529,6 +529,13 @@ class ScheduleTest(FakeHswapCase):
         hswap_usage.schedule()
         self.assertEqual(self.calls(), [self.STATUS, again, self.STATUS])
 
+    def test_outdated_managed_service_is_reinstalled_with_its_own_settings(self):
+        """적재돼 있어도 hswap 이 낡았다고 하면(예: 자격이 바뀌면 바로 깨우는 WatchPaths 가 없다) 사람이 고른 설정 그대로 다시 설치한다"""
+        again = "claude keepalive --install-service --ahead 3600 --json"
+        self.script({self.STATUS: self.st(outdated=True, ahead=3600, thenAuto=False), again: ['{"schemaVersion": 1, "ok": true}', 0]})
+        hswap_usage.schedule()
+        self.assertEqual(self.calls(), [self.STATUS, again, self.STATUS])
+
     def test_switch_off_and_stale_answers(self):
         self.script({self.STATUS: self.st(installed=False)})
         hswap_usage.claude_accounts.service = {"installed": False}

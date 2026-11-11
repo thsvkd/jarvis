@@ -243,7 +243,8 @@ def schedule():
             or not v or claude_accounts._key(v) < claude_accounts._key(SERVICE_FROM) or not claude_accounts._store_read()):
         return None
     st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json")[1])
-    if st and st.get("platform") == "launchd" and (st.get("installed") is False or (st.get("managed") is True and st.get("loaded") is False)):
+    # hswap 이 만든 예약은 적재되지 않았거나 지금 hswap 이 만드는 모양보다 낡았을 때(outdated)만 그 설정 그대로 다시 설치한다
+    if st and st.get("platform") == "launchd" and (st.get("installed") is False or (st.get("managed") is True and (st.get("loaded") is False or st.get("outdated") is True))):
         ahead = st.get("ahead") if isinstance(st.get("ahead"), (int, float)) and not isinstance(st.get("ahead"), bool) and st.get("ahead") > 0 else AHEAD_S
         # 0 설치·갱신, 3 GUI 세션이 없어 다음 로그인 때 적재. 어느 쪽이든 다시 물은 상태를 쓴다
         code, _ = _run(exe, "claude", "keepalive", "--install-service", "--ahead", str(int(ahead)), *(["--then-auto"] if st.get("thenAuto") is True else []), "--json")
