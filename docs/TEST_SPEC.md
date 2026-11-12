@@ -217,6 +217,7 @@ ai-setup 의 update-ai(`res/update/update_ai.py`)를 옮긴 것이다. 아래 HA
 | HARNESS-17 | WHEN brew 로 설치된 대상을 업데이트하면 THE SYSTEM SHALL `HOMEBREW_NO_INSTALL_CLEANUP=1` 을 주고 실행한다 | `test_brew_update_keeps_the_old_version_for_running_sessions` | GREEN (단위; macOS 실측 전) · 원래 AI-62 |
 | HARNESS-18 | WHEN `update-ai` 가 확인한 설치본이 최신 릴리스와 같거나 더 새로우면 THE SYSTEM SHALL `--check` 와 갱신 뒤 검사 모두에서 최신으로 판정한다 | `tests/test_update_ai.py::test_an_install_newer_than_the_latest_release_counts_as_up_to_date` | GREEN (단위) · 원래 AI-65 |
 | HARNESS-19 | WHEN harness 모듈의 plan 을 실행하면 THE SYSTEM SHALL 단계마다 그 단계만 담은 계획의 `plan_id` 를 붙이고, WHEN apply 가 받은 plan_id 가 지금 계획 전체의 것이면 모든 단계를, 지금 계획의 어느 단계의 것이면 그 단계만 올리며(데몬 단계의 `--allow-interrupt` 분리 규칙은 같다), 어느 것도 아니면 stale 이다. 근거: 2026-11-12 사용자 요청·승인(사용량 화면의 하네스별 업데이트). | `tests/test_harness_module.py::test_a_single_step_plan_id_updates_only_that_target` | 단위 검증 (실기기 미검증) |
+| HARNESS-20 | WHEN harness apply 에서 update-ai 가 대상을 올리지 못하면 THE SYSTEM SHALL 결과 표의 실패 줄(`x <id> <판> (<이유>)`)에서 이유를 읽어 단계 결과 `message` 에 `update-ai: <이유>` 로 싣고(이유가 없을 때만 종료 코드), `failed: deferred (in use)` 는 deferred 로, `failed: latest is …`(받았는데 판이 그대로)는 PATH 에서 먼저 잡히는 다른 사본·래퍼를 확인하라고 덧붙이며, 사용량 화면은 실패·보류한 단계의 이 문구를 알림 줄에 보인다. 근거: 2026-11-12 사용자 보고·승인(pit5 codex 의 관리되지 않는 app-server, pi5-server2 grok 의 qemu 래퍼). | `tests/test_harness_module.py::test_failure_reasons_are_read_from_the_update_ai_result_table`, `tests/test_harness_module.py::test_a_failed_step_carries_the_reason_update_ai_gave`, `tests/test_usage_harness.mjs` | 단위 검증 (실기기 미검증) |
 
 ## AGENTS.md
 

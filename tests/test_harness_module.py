@@ -71,7 +71,7 @@ class HarnessModuleTest(unittest.TestCase):
             held = self.held if not allow_interrupt else set()
             for i in held:
                 self.fake.installed[i] = self.before[i]
-            return (1 if held else 0), held
+            return (1 if held else 0), {i: harness.HELD for i in held}
 
         self.patch = mock.patch.object(harness, "_update", side_effect=fake_update)
         self.patch.start()
@@ -153,7 +153,7 @@ class HarnessModuleTest(unittest.TestCase):
         self.fake.latest["gemini"] = "0.67.0"
         p = harness.plan()
         self.patch.stop()
-        with mock.patch.object(harness, "_update", return_value=(0, set())):
+        with mock.patch.object(harness, "_update", return_value=(0, {})):
             r = harness.apply(p["plan_id"])
         self.patch.start()
         self.assertEqual(r["status"], "failed")
@@ -209,13 +209,27 @@ class HarnessModuleTest(unittest.TestCase):
         self.use(installed={"codex": "0.164.0"}, latest={}, daemon=("0.166.0", "0.166.0"))
         self.assertEqual(harness.plan()["steps"], [])  # update-ai 처럼 데몬을 내리지 않는다
 
-    def test_deferred_targets_are_read_from_the_update_ai_result_table(self):
-        """covers: HARNESS-2 (AI-56)"""
+    def test_failure_reasons_are_read_from_the_update_ai_result_table(self):
+        """covers: HARNESS-2 (AI-56), HARNESS-20"""
         table = ("── Results ──\n  v claude     2.1.316  (up to date)\n"
                  "  x gemini     0.65.0  (failed: deferred (in use))\n"
                  "  x a-very-long-name 1.0.0  (failed: deferred (in use))\n"
-                 "  x codex      0.166.0  (partly failed: daemon-deferred)\n")
-        self.assertEqual(set(harness.DEFERRED.findall(table)), {"gemini", "a-very-long-name"})
+                 "  x codex      0.166.0  (failed: unmanaged app-server)\n")
+        self.assertEqual(dict(harness.FAILED.findall(table)), {"gemini": harness.HELD, "a-very-long-name": harness.HELD,
+                                                                "codex": "failed: unmanaged app-server"})
+
+    def test_a_failed_step_carries_the_reason_update_ai_gave(self):
+        """covers: HARNESS-20. 종료 코드만이 아니라 update-ai 가 적은 이유를 단계 결과에 싣는다(pit5·s2 실측)"""
+        self.use(installed={"codex": "0.166.0", "gemini": "0.65.0"}, latest={"codex": "0.167.1", "gemini": "0.66.0"})
+        self.patch.stop()
+        reasons = {"codex": "failed: unmanaged app-server", "gemini": "failed: latest is 0.66.0"}
+        with mock.patch.object(harness, "_update", return_value=(1, reasons)):
+            r = harness.apply(harness.plan()["plan_id"])
+        self.patch.start()
+        msg = {s["id"]: (s["result"], s["message"]) for s in r["steps"]}
+        self.assertEqual(msg["codex"], ("failed", "지금 0.166.0 (update-ai: failed: unmanaged app-server)"))
+        self.assertEqual(msg["gemini"][0], "failed")
+        self.assertIn("PATH 의 실행 파일이 아직 0.65.0", msg["gemini"][1])  # s2 의 grok 래퍼처럼 받았는데 판이 그대로
 
     def test_update_runs_update_ai_in_its_own_group_and_kills_it_on_timeout(self):
         """covers: HARNESS-2"""
@@ -226,7 +240,7 @@ class HarnessModuleTest(unittest.TestCase):
             self.patch.stop()
             try:
                 with mock.patch.object(harness, "UPDATE_AI", str(script)):
-                    self.assertEqual(harness._update(["gemini"], False), (0, {"gemini"}))
+                    self.assertEqual(harness._update(["gemini"], False), (0, {"gemini": harness.HELD}))
                     code, _ = harness._update(["codex"], True, timeout=1)
             finally:
                 self.patch.start()

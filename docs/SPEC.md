@@ -83,7 +83,7 @@ core 홈의 AI 셋업 화면(디자인 랩 05 의 C 안)은 기기마다 모듈 
 ai-setup 의 update-ai(`jarvis/modules/setup/res/update/update_ai.py`)를 감싼다. 계약 층은 `jarvis/modules/harness/contract.py` 다. 설치는 하지 않는다(setup 모듈).
 
 - status·plan: update-ai `--check` 와 같은 함수로 설치된 카탈로그 항목의 설치 방식·설치본·최신 판을 읽는다. 최신이 아닌 것은 `update` 단계(`update-ai --only <id>`, `target` 은 최신 판), 최신을 확인할 수 없으면 보고만 한다. codex 의 최신 판은 Codex 자신의 갱신 확인과 같은 GitHub 최신 릴리스(`rust-v<판>` 태그)로 읽는다. codex 관리형 데몬이나 실행 중 서버가 설치된 CLI 보다 오래되면(더 새로우면 그대로 둔다) `codex-daemon` 단계(`--allow-interrupt`, 돌고 있는 Codex 작업을 끊을 수 있어 `config`)다.
-- apply: 데몬 단계가 있으면 먼저 `update_ai.py --only codex --allow-interrupt` 를 따로 돌린다(이 플래그는 실행 전체에 걸리므로 다른 대상과 함께 넘기지 않는다). 나머지 대상은 플래그 없이 `--only <id,...>` 로 올린다. 결과는 다시 읽은 판으로 단계마다 판정한다(데몬 단계는 데몬·실행 중 서버 행 모두). 세션이 돌아 update-ai 가 보류한 대상은 `deferred` 다. update-ai 는 3000초 안에 끝내고, 넘으면 프로세스 그룹째 끊는다.
+- apply: 데몬 단계가 있으면 먼저 `update_ai.py --only codex --allow-interrupt` 를 따로 돌린다(이 플래그는 실행 전체에 걸리므로 다른 대상과 함께 넘기지 않는다). 나머지 대상은 플래그 없이 `--only <id,...>` 로 올린다. 결과는 다시 읽은 판으로 단계마다 판정한다(데몬 단계는 데몬·실행 중 서버 행 모두). 세션이 돌아 update-ai 가 보류한 대상은 `deferred` 다. 실패한 단계의 `message` 에는 update-ai 결과 표가 적은 이유를 싣는다. update-ai 는 3000초 안에 끝내고, 넘으면 프로세스 그룹째 끊는다.
 - 설치본 판(`--version`)은 doctor 와 같이 홈·설정·캐시를 임시 폴더로 돌린 환경에서 먼저 읽는다(gemini·opencode 는 `--version` 만 불러도 홈에 쓴다). 그 환경에서 판을 내지 못하는 것(래퍼를 거치는 codex, 설정이 필요한 grok)은 update-ai 와 같은 실제 홈으로 다시 읽는다(판정이 update-ai 와 갈리지 않게). 설치본 판을 모르면 계획하지 않는다. 최신 판과 codex 데몬은 실제 홈으로 읽는다.
 - PATH 는 update-ai.sh 와 같이 사용자 bin·nvm 의 node(높은 판 먼저)·Homebrew 를 앞에 둔다(Windows 는 그대로).
 - 하네스 하나만 올리기: plan 은 단계마다 그 단계만 담은 계획의 `plan_id` 를 붙인다. apply 는 지금 계획 전체의 plan_id 면 모든 단계를, 어느 단계의 plan_id 면 그 단계만 올린다(그 밖에는 stale). API·CLI 는 그대로다(plan_id 만 다르다).

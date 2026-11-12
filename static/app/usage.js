@@ -334,7 +334,7 @@
   refreshOne(dev,true); // 실패해도 다시 읽는다(hswap 이 지운 뒤 확인 줄만 못 낸 경우)
  }
  const HRES={done:"하네스를 갱신했습니다",current:"하네스가 이미 최신입니다",deferred:"세션이 돌고 있어 일부 하네스를 보류했습니다",
-  stale:"그사이 계획이 바뀌어 실행하지 않았습니다. 다시 누르세요",failed:"하네스 갱신에 실패했습니다(AI 셋업 화면에서 단계별 결과를 보세요)",interrupted:"게이트웨이 재시작으로 하네스 갱신이 중단됐습니다"};
+  stale:"그사이 계획이 바뀌어 실행하지 않았습니다. 다시 누르세요",failed:"하네스 갱신에 실패했습니다",interrupted:"게이트웨이 재시작으로 하네스 갱신이 중단됐습니다"};
  async function loadMods(){
   clearTimeout(S.hnTimer);
   try{
@@ -346,7 +346,9 @@
     if(S.hnWatch.has(x.id)&&!running&&j.module==="harness"){ // 이 화면에서 시작한 갱신이 끝났다
      S.hnWatch.delete(x.id);
      const st=j.state==="interrupted"?"interrupted":j.status||(j.result||{}).status;
-     note((x.host||x.id)+": "+(HRES[st]||(j.result||{}).error||"하네스 갱신이 끝났습니다"),st!=="done"&&st!=="current");
+     // 실패·보류한 단계는 모듈이 적은 이유(update-ai 의 결과)를 함께 보인다. viewers 가 아니면 결과 본문이 없어 종류만 보인다
+     const bad=((j.result||{}).steps||[]).filter(s=>s.result!=="ok").map(s=>s.id+" "+s.message).join(" · ");
+     note((x.host||x.id)+": "+(HRES[st]||(j.result||{}).error||"하네스 갱신이 끝났습니다")+(bad?" — "+bad:""),st!=="done"&&st!=="current");
     }
    }
   }catch(e){}

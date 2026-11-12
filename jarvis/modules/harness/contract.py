@@ -148,11 +148,13 @@ def plan():
     return _plan(_rows())
 
 
-DEFERRED = re.compile(r"^\s*x\s+(\S+)\s.*\(failed: deferred \(in use\)\)", re.M)
+# update-ai 결과 표의 실패 줄: "  x <id>  <판>  (<이유>)". 이유는 화면에 그대로 보인다(종료 코드만으로는 왜 실패했는지 모른다)
+FAILED = re.compile(r"^\s*x\s+(\S+)\s+\S+\s+\((.+)\)\s*$", re.M)
+HELD = "failed: deferred (in use)"
 
 
 def _update(ids, allow_interrupt, timeout=TIMEOUT):
-    """update_ai.py --only ids. (종료 코드, 세션이 돌아 보류한 대상). 출력은 진행 로그라 표준 오류로 옮긴다.
+    """update_ai.py --only ids. (종료 코드, {실패한 대상: update-ai 가 적은 이유}). 출력은 진행 로그라 표준 오류로 옮긴다.
     시간이 넘으면 프로세스 그룹째 끊는다(남은 update-ai 가 잠금을 쥐고 다음 실행을 막지 않게)."""
     argv = [sys.executable, "-X", "utf8", UPDATE_AI, "--only", ",".join(ids)] + (["--allow-interrupt"] if allow_interrupt else [])
     env = dict(os.environ, PATH=user_path(os.environ.get("PATH", "")))
@@ -171,7 +173,14 @@ def _update(ids, allow_interrupt, timeout=TIMEOUT):
         out.seek(0)
         text = out.read().decode("utf-8", "replace")
     sys.stderr.write(text)
-    return code, set(DEFERRED.findall(text))
+    return code, dict(FAILED.findall(text))
+
+
+def _explain(reason, have):
+    """update-ai 의 실패 이유. 받았는데 판이 그대로면(latest is …) PATH 에서 먼저 잡히는 다른 사본·래퍼를 의심하게 한다."""
+    if reason.startswith("failed: latest is"):
+        return f"갱신은 끝났지만 PATH 의 실행 파일이 아직 {have or '?'} 입니다. 먼저 잡히는 다른 사본이나 래퍼를 확인하세요 · update-ai: {reason}"
+    return f"update-ai: {reason}"
 
 
 def apply(plan_id):
@@ -184,28 +193,30 @@ def apply(plan_id):
             return {"status": "stale", "plan_id": current["plan_id"], "steps": []}
     if not chosen:
         return {"status": "current", "steps": []}
-    codes, deferred = [], set()
+    codes, why = [], {}
     deadline = time.monotonic() + TIMEOUT  # 두 번 부르더라도 합이 게이트웨이의 apply 제한 안에 들게 한다
     # 승인한 데몬 재시작만 --allow-interrupt 로 따로 돌린다. 이 플래그는 update-ai 실행 전체에 걸리므로
     # 함께 넘기면 세션이 돌 때 보류해야 할 npm -g·winget 대상까지 바꾼다
     if any(s["id"] == "codex-daemon" for s in chosen):
-        code, held = _update(["codex"], True, deadline - time.monotonic())
+        code, failed = _update(["codex"], True, deadline - time.monotonic())
         codes.append(code)
-        deferred |= held
+        why.update(failed)
     rest = [s["id"] for s in chosen if s["id"] != "codex-daemon" and not (s["id"] == "codex" and codes)]
     if rest:
-        code, held = _update(rest, False, deadline - time.monotonic())
+        code, failed = _update(rest, False, deadline - time.monotonic())
         codes.append(code)
-        deferred |= held
+        why.update(failed)
     after = {r["id"]: r for r in _rows()}  # 결과는 다시 읽은 버전으로 판정한다(update-ai 의 표에 기대지 않는다)
     results = []
     for s in chosen:
         rows = [after[k] for k in (("codex-daemon", "codex-server") if s["id"] == "codex-daemon" else (s["id"],)) if k in after]
         ok = bool(rows) and all(r["state"] == "current" for r in rows)
-        held = not ok and (s["id"] in deferred or (s["id"] == "codex-daemon" and "codex" in deferred))
+        reason = why.get("codex" if s["id"] == "codex-daemon" else s["id"])
+        held = not ok and reason == HELD
         have = rows[0].get("version") if rows else None
         results.append({"id": s["id"], "result": "ok" if ok else "deferred" if held else "failed",
                         "message": f"지금 {have or '?'}" + ("" if ok else " (세션이 돌고 있어 보류)" if held
+                                                           else f" ({_explain(reason, have)})" if reason
                                                            else f" (update-ai 종료 코드 {', '.join(map(str, codes))})")})
     kinds = {r["result"] for r in results}
     return {"status": "failed" if "failed" in kinds else "deferred" if "deferred" in kinds else "done", "steps": results}

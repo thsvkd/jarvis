@@ -84,6 +84,19 @@ await flush();
 assert.match(element("ulNote").textContent, /m1: 하네스를 갱신했습니다/);
 assert.doesNotMatch(body(), /data-hup/);
 
+// 실패하면 단계마다 모듈이 적은 이유를 알림 줄에 보인다
+steps = [step("claude", "claude 2.1.0 → 2.2.0 (npm)")];
+modules = { ...modules, modules: { harness: { health: "degraded", ok: true, details: { tools } } }, job: null };
+timers.at(-1)();
+await flush();
+click({ hup: "m1", tool: "claude" });
+await flush();
+modules = { ...modules, job: { module: "harness", state: "finished", status: "failed",
+  result: { status: "failed", steps: [{ id: "claude", result: "failed", message: "지금 2.1.0 (update-ai: failed: unmanaged app-server)" }] } } };
+timers.at(-1)();
+await flush();
+assert.match(element("ulNote").textContent, /m1: 하네스 갱신에 실패했습니다 — claude 지금 2\.1\.0 \(update-ai: failed: unmanaged app-server\)/);
+
 // viewers 가 아니면 details 가 없어 대상 이름 없이 알린다
 modules = { id: "m1", host: "m1", status: 200, modules: { harness: { health: "degraded", ok: true } }, job: null };
 timers.at(-1)();
