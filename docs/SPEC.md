@@ -82,7 +82,7 @@ core 홈의 AI 셋업 화면(디자인 랩 05 의 C 안)은 기기마다 모듈 
 
 ai-setup 의 update-ai(`jarvis/modules/setup/res/update/update_ai.py`)를 감싼다. 계약 층은 `jarvis/modules/harness/contract.py` 다. 설치는 하지 않는다(setup 모듈).
 
-- status·plan: update-ai `--check` 와 같은 함수로 설치된 카탈로그 항목의 설치 방식·설치본·최신 판을 읽는다. 최신이 아닌 것은 `update` 단계(`update-ai --only <id>`, `target` 은 최신 판), 최신을 확인할 수 없으면 보고만 한다. codex 의 최신 판은 Codex 자신의 갱신 확인과 같은 GitHub 최신 릴리스(`rust-v<판>` 태그)로 읽는다. codex 관리형 데몬이나 실행 중 서버가 설치된 CLI 보다 오래되면(더 새로우면 그대로 둔다) `codex-daemon` 단계(`--allow-interrupt`, 돌고 있는 Codex 작업을 끊을 수 있어 `config`)다.
+- status·plan: update-ai `--check` 와 같은 함수로 설치된 카탈로그 항목의 설치 방식·설치본·최신 판을 읽는다. 최신이 아닌 것은 `update` 단계(`update-ai --only <id>`, `target` 은 최신 판), 최신을 확인할 수 없으면 보고만 한다. codex 의 최신 판은 Codex 자신의 갱신 확인과 같은 GitHub 최신 릴리스(`rust-v<판>` 태그)로 읽는다. codex 관리형 데몬이나 실행 중 서버가 설치된 CLI 보다 오래되면(더 새로우면 그대로 둔다) `codex-daemon` 단계(`--allow-interrupt`, 돌고 있는 Codex 작업을 끊을 수 있어 `config`)다. 관리형 데몬이 아닌 `codex app-server --listen`(SSH 세션이 띄우고 고아로 남은 것 등)이 돌면 codex 갱신이 막히므로, codex 단계 대신 그 서버를 멈추고 관리형 데몬을 띄운 뒤 codex 와 데몬을 올리는 같은 `codex-daemon` 단계로 계획한다(update-ai 는 `--allow-interrupt` 일 때만 그 서버를 멈춘다).
 - apply: 데몬 단계가 있으면 먼저 `update_ai.py --only codex --allow-interrupt` 를 따로 돌린다(이 플래그는 실행 전체에 걸리므로 다른 대상과 함께 넘기지 않는다). 나머지 대상은 플래그 없이 `--only <id,...>` 로 올린다. 결과는 다시 읽은 판으로 단계마다 판정한다(데몬 단계는 데몬·실행 중 서버 행 모두). 세션이 돌아 update-ai 가 보류한 대상은 `deferred` 다. 실패한 단계의 `message` 에는 update-ai 결과 표가 적은 이유를 싣는다. update-ai 는 3000초 안에 끝내고, 넘으면 프로세스 그룹째 끊는다.
 - 설치본 판(`--version`)은 doctor 와 같이 홈·설정·캐시를 임시 폴더로 돌린 환경에서 먼저 읽는다(gemini·opencode 는 `--version` 만 불러도 홈에 쓴다). 그 환경에서 판을 내지 못하는 것(래퍼를 거치는 codex, 설정이 필요한 grok)은 update-ai 와 같은 실제 홈으로 다시 읽는다(판정이 update-ai 와 갈리지 않게). 설치본 판을 모르면 계획하지 않는다. 최신 판과 codex 데몬은 실제 홈으로 읽는다.
 - PATH 는 update-ai.sh 와 같이 사용자 bin·nvm 의 node(높은 판 먼저)·Homebrew 를 앞에 둔다(Windows 는 그대로).
@@ -264,15 +264,29 @@ tailnet 으로는 닿지 않고 SSH 로만 닿는 기기(예: 다른 tailnet 의
 - 쓰기 동작(apply·update)은 원격 표준 오류를 버린다. 대상 디스크에도 남기지 않는다.
 - 명령줄과 응답 본문은 오류 문구와 로그에 넣지 않는다.
 
+### 조작: 원격 bridge (사용량·로그인·계정, Windows 의 모듈·갱신)
+
+사용량, 로그인 상태·시작, 계정 전환·삭제는 그 기기 게이트웨이가 하는 일을 그대로 전달한다. Windows SSH 기기는 POSIX 셸이 없으므로 AI 셋업 모듈(status·plan·apply)과 jarvis 갱신·갱신 진행도 원격 CLI 대신 이 통로로 그 게이트웨이의 `/api/modules…`·`/api/jarvis/update` 에 전달한다(HTTP 기기와 같은 응답·작업 상태·자체 재시작). 근거: 2026-11-14 사용자 승인·지시. herdr 의 `remote-client-bridge` 와 같은 방식이다(kgolf-win 실측: 파이프 DACL 이 SYSTEM 과 소유자뿐).
+
+    ssh … -o ControlMaster=no -o ControlPath=none -a -x -o ClearAllForwardings=yes -T -- <별칭> <bridge>
+
+- `<bridge>` 는 상수다. POSIX 는 `sh -c '<PRE>exec "$P" -m jarvis bridge'`(런처를 거쳐 받아 둔 릴리스의 코드로 돈다. `PRE` 의 저장소는 다시 pull 하지 않는다), Windows(스냅샷 `system.host.os` 가 `Windows` 로 시작)는 `cmd /c "%LOCALAPPDATA%\jarvis\bridge.cmd"` 다. `bridge.cmd` 는 Windows 게이트웨이가 기동할 때 자기 코드 위치와 `python.exe` 로 쓴다.
+- core 는 HTTP/1.0 요청 하나(`Host: 127.0.0.1:9300`, `Content-Length: 0`, 원래 요청의 메서드·경로·헤더)를 ssh 표준 입력으로 쓰고 닫는다. 메서드·경로·헤더에 CR·LF·NUL 이 있으면 ssh 를 실행하지 않는다. 로그인 코드는 이 요청의 헤더로만 가고 원격 명령줄에 넣지 않는다.
+- 요청마다 새 연결이다(연결 공유 없음). 사용량 화면의 60초 새로고침과 로그인 창의 3초 확인도 매번 접속한다. 조작이 연결을 공유하면 다른 호출의 시간 초과가 그 연결을 끊는다(원격 CLI 와 같은 이유).
+- bridge(`jarvis/ipc.py`)는 입력이 닫힐 때까지 요청을 읽어(64 KiB 상한) 같은 사용자의 게이트웨이 IPC 로 보내고, 응답을 표준 출력으로 돌려준다. IPC 에 닿지 못하면 종료 코드 92 다.
+- 게이트웨이 IPC:
+  - POSIX: `<릴리스 ROOT>/ipc/gateway.sock`. 디렉터리 0700, 소켓 0600. 9300 을 잡은 뒤 지난 소켓을 지우고 연다.
+  - Windows: named pipe `\\.\pipe\<릴리스 ROOT>\gateway.sock`. 보안 기술자는 `O:<사용자 SID>D:P(A;;GA;;;SY)(A;;GA;;;<사용자 SID>)`, 첫 인스턴스는 `FILE_FLAG_FIRST_PIPE_INSTANCE`, 원격 클라이언트는 거절한다. bridge 는 파이프 소유자가 자기 SID 가 아니면 보내지 않는다.
+  - IPC 로 온 요청은 `/api/usage/*`·`/api/modules`·`/api/modules/*`·`/api/jarvis/update` 만 받고(그 밖은 404), 설정 `core` 목록이 요구되는 경로에서 core 로 본다(설정 `core` 가 비어 있어도 그렇다: SSH 로만 닿는 기기는 core IP 를 적지 않는다). Host·맞춤 헤더 검사는 TCP 와 같고, 접속 IP 검사는 없다.
+  - Windows 서버는 다음 인스턴스를 만든 뒤에야 지금 인스턴스를 넘기고, 연결 오류는 같은 인스턴스를 비워 다시 쓴다(이름이 비는 틈이 없다). bridge 는 `SECURITY_IDENTIFICATION` 으로 열어 서버가 자기로 가장하지 못하게 한다.
+  - 루프백 TCP(9300)는 바뀌지 않는다. 신뢰 경로는 여전히 403 이다.
+- ssh 를 실행하기 전에 스냅샷 판이 1.13.0 이상인지 본다. 낮으면 501, 스냅샷이 없으면 502 다(게이트와 같은 문구).
+- 응답 해석은 HTTP 기기와 같다. 404 는 옛 게이트웨이(501 `갱신 필요`)다. 그 밖의 상태와 JSON 본문은 그대로 준다. ssh·bridge 실패는 502 `"<id> 에 닿지 못했습니다: <ssh 표준 오류 마지막 줄>"` 이다.
+- 시간 상한은 HTTP 기기의 같은 조작 상한에 접속 10초를 더한다.
+
 ### 지원하지 않는 조작
 
-다음 요청은 ssh 도 HTTP 도 보내지 않고 501 `{error: "SSH 로 닿는 기기는 이 조작을 지원하지 않습니다(그 기기에서 직접)"}` 를 준다.
-
-- 사용량
-- 로그인 상태·시작
-- 계정 전환
-
-이유는 둘이다. 이 조작들은 CLI 가 없다. 그리고 로그인 코드·계정 이메일이 SSH 경로를 지나지 않게 하기 위해서다.
+POSIX SSH 기기의 `GET /api/devices/<id>/jarvis/update`(갱신 진행)는 ssh 도 HTTP 도 보내지 않고 501 `{error: "SSH 로 닿는 기기는 이 조작을 지원하지 않습니다(그 기기에서 직접)"}` 를 준다. POSIX SSH 기기의 갱신은 원격 CLI 로 하므로 게이트웨이에 진행 상태가 없다. Windows SSH 기기는 위 bridge 로 전달한다.
 
 ### 일괄 동작의 순서
 
@@ -290,6 +304,7 @@ tailnet 으로는 닿지 않고 SSH 로만 닿는 기기(예: 다른 tailnet 의
   - core 서비스 세션에서 BatchMode 로(passphrase 입력 없이) 쓸 수 있는 키가 있어야 한다.
 - 대상 기기
   - sshd 가 명령 실행과 TCP 포워딩(`direct-tcpip`)을 허용한다.
+  - ssh 로그인 사용자가 게이트웨이를 돌리는 사용자와 같다(bridge 는 그 사용자만 열 수 있는 IPC 에 닿는다). Windows 는 OpenSSH 서버를 쓴다.
   - 게이트웨이가 루프백 9300 에서 받는다.
   - install.sh 배치다.
   - 재시작 버튼은 서비스 정의가 `KeepAlive=true`(launchd) 또는 `Restart=always`(systemd)이고 스냅샷 `monitor.pid` 가 서비스 관리자가 띄운 pid 일 때만 쓴다. 아니면 kill 뒤 게이트웨이가 꺼진 채 남는다.

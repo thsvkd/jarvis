@@ -8,7 +8,7 @@
 | `GET /api/history?range=1h` | 5초 간격 720점 | |
 | `GET /api/history?range=24h` | 1분 간격 1440점 (재시작해도 `~/.local/state/jarvis` 에 보존) | |
 | `GET /api/health` | `{ok, version}` | |
-| `GET /api/devices` | core 전용(설정 `devices`). 기기별 요약 `{generated_at, devices:[{id, url, reachable, ok_at, error, fails, host, version, status, alerts, services, model, cpu_pct, mem_pct, disk_pct}]}` | 10초마다 각 게이트웨이 `/api/snapshot` 을 pull. 게이트웨이(core 가 아닌 jarvis)는 404. SSH 기기(설정 `{id, ssh}`)는 `url` 이 `ssh://<별칭>` 이고 `ssh -W` 로 받는다 |
+| `GET /api/devices` | core 전용(설정 `devices`). 기기별 요약 `{generated_at, devices:[{id, url, reachable, ok_at, error, fails, host, version, status, alerts, services, model, os, cpu_pct, mem_pct, disk_pct}]}` | 10초마다 각 게이트웨이 `/api/snapshot` 을 pull. 게이트웨이(core 가 아닌 jarvis)는 404. SSH 기기(설정 `{id, ssh}`)는 `url` 이 `ssh://<별칭>` 이고 `ssh -W` 로 받는다 |
 | `GET /api/devices/<id>/inbound` | core 전용. 다른 기기의 Caddy 라우트가 SSH 터널(그 기기 `ssh_tunnels`) 또는 tailnet 주소로 이 기기 포트에 닿는 길 `{generated_at, device, paths:[{from, host, public, via: "ssh"|"tailnet", port(ssh 일 때 출발 기기의 로컬 포트), to_port, service_id, guess, status}]}`. 기기는 각 스냅샷의 tailnet 이름·IP·설정 id·ssh 별칭으로 맞춘다. `guess`: 포트 주인이 OrbStack 같은 대리 프로세스라 주소 첫 칸과 이름이 맞는 컨테이너로 추정했다 | 스냅샷과 같다. 캐시 없음(요청마다 core 가 들고 있는 스냅샷을 맞댄다) |
 | `GET /api/devices/<id>/snapshot` · `/history?range=` · `/changes` | core 전용. 그 기기 응답 그대로. snapshot 은 마지막 성공본(없으면 503), 나머지는 요청 시 전달(실패 502) | |
 | `GET /api/usage/independent` | 이 기기 AI 구독 사용량 `{mode: "independent", providers: [{id, name, accounts, login}], unavailable, fetched_at}`. `login` 은 Claude 프로바이더에만 붙는다(아래 "사용량의 login"). 조직 UUID 가 있는 Claude 행에는 `org_key`(조직 UUID 해시)와 `org_at`(hswap 슬롯 등록 시각)이 붙고, core 가 같은 조직의 이름을 가장 늦은 것으로 맞춘 뒤 지운다 | 설정 `core`. core 는 `GET /api/devices/usage` 로 모은다 |

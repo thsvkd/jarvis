@@ -224,7 +224,7 @@ class CoreModules:
                 host = (self.core.state[i]["summary"] or {}).get("host")
             if err:  # 꺼진 기기는 묻지 않는다(기다리면 화면 전체가 늦는다)
                 code, body = 502, {"error": f"{i} 에 닿지 못했습니다: {err}"}
-            elif i in self._ssh:
+            elif i in self._ssh and not self.core.win_ssh(i):  # Windows SSH 기기는 아래 _ask 가 bridge 로 보낸다
                 code, body = self.core.ssh_gate(i) or self._ssh_status(i, force)
             else:
                 req = urllib.request.Request(self._url(i, "/api/modules" + ("?refresh=1" if force else "")),
@@ -265,7 +265,7 @@ class CoreModules:
             c["bg"].release()
 
     def plan(self, i, name):
-        if i in self._ssh:
+        if i in self._ssh and not self.core.win_ssh(i):
             if name not in module.MODULES:
                 return 404, {"error": "not found"}
             bad = self.core.ssh_gate(i)
@@ -313,7 +313,7 @@ class CoreModules:
         return 202, snapshot
 
     def apply(self, i, name, plan_id):
-        if i in self._ssh:
+        if i in self._ssh and not self.core.win_ssh(i):
             return self._ssh_apply(i, name, plan_id)
         req = urllib.request.Request(
             self._url(i, f"/api/modules/{urllib.parse.quote(name)}/apply?plan_id={urllib.parse.quote(plan_id)}"),

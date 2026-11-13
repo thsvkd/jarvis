@@ -1,7 +1,7 @@
 """SSH 기기(docs/SPEC.md 의 "SSH 기기"): core.SSH_BIN 자리에 가짜 ssh 를 넣는다.
 
-가짜 ssh 는 argv·표준 입력을 기록하고, -W 면 통조림 HTTP 응답을 내거나(또는 테스트가 띄운 게이트웨이로 잇는다),
-아니면 마지막 인자(원격 명령)를 임시 HOME 으로 실제 /bin/sh 에서 돌린다. 그 HOME 의 venv python 도 가짜다.
+가짜 ssh 는 argv·표준 입력을 기록하고, -W 나 원격 bridge(`-m jarvis bridge`·bridge.cmd)면 통조림 HTTP 응답을 내거나(-W 는 테스트가
+띄운 게이트웨이로 잇기도 한다), 아니면 마지막 인자(원격 명령)를 임시 HOME 으로 실제 /bin/sh 에서 돌린다. 그 HOME 의 venv python 도 가짜다.
 실제 ssh·실제 홈·실제 기기·실제 서비스는 쓰지 않는다.
 """
 import contextlib
@@ -40,9 +40,9 @@ if mode == "hang":  # 표준 출력·오류를 쥔 손자를 남기고 멈춘다
     with open(os.path.join(d, "grandchild"), "w") as f:
         f.write(str(g.pid))
     time.sleep(60)
-if "-W" in argv:
+if "-W" in argv or "jarvis bridge" in argv[-1] or "bridge.cmd" in argv[-1]:
     port = os.environ.get("FAKE_SSH_PORT")
-    if port:  # 테스트가 띄운 게이트웨이로 잇는다
+    if port and "-W" in argv:  # 테스트가 띄운 게이트웨이로 잇는다
         s = socket.create_connection(("127.0.0.1", int(port)))
         def up():
             while b := os.read(0, 65536):
@@ -169,9 +169,10 @@ class Base(unittest.TestCase):
         except FileNotFoundError:
             return []
 
-    def polled(self, version="1.7.8", pid=None, i="kg"):
+    def polled(self, version="1.7.8", pid=None, i="kg", os_name="Darwin 25.0"):
         """폴링이 성공한 상태로 둔다(스냅샷 판·monitor.pid)."""
-        snap = {"meta": {"host": "kg-host", "version": version}, "monitor": {"pid": pid}}
+        snap = {"meta": {"host": "kg-host", "version": version}, "monitor": {"pid": pid},
+                "system": {"host": {"os": os_name}}}
         raw = json.dumps(snap).encode()
         with self.core.lock:
             self.core.state[i].update(ok_at=time.time(), error=None, fails=0, summary=core._summary(snap),
@@ -286,26 +287,99 @@ class FetchFailures(Base):
         self.assertTrue(wait_until(lambda: gone(pid)))
 
 
-class Unsupported(Base):
-    def test_secret_paths_are_501_without_ssh_or_http(self):
+class Bridge(Base):
+    def requests(self):
+        with open(os.path.join(self.dir, "request"), "rb") as f:
+            return f.read().split(b"\r\n\r\n")[:-1]
+
+    def test_usage_ops_go_through_the_remote_bridge(self):
         """covers: SSH-4"""
-        self.polled()
+        self.polled(core.BRIDGE_MIN)
         c = self.core
+        self.response(http(b'{"ok": 1}'))
         with mock.patch.object(core, "_open", side_effect=AssertionError("HTTP 를 보냈다")):
-            for call in (lambda: c.usage("kg"), lambda: c.usage("kg", True),
-                         lambda: c.usage_login("kg", "claude"), lambda: c.usage_login_status("kg", "claude"),
-                         lambda: c.usage_switch("kg", "1"), lambda: c.usage_remove("kg", "1")):
-                self.assertEqual(call(), (501, {"error": core.SSH_ONLY}))
+            for call in (lambda: c.usage("kg", True), lambda: c.usage_login("kg", "claude", "abcdefgh12"),
+                         lambda: c.usage_login_status("kg", "claude"), lambda: c.usage_switch("kg", "1"),
+                         lambda: c.usage_remove("kg", "1")):
+                self.assertEqual(call(), (200, {"ok": 1}))
+        reqs = self.requests()
+        self.assertEqual([r.split(b"\r\n")[0] for r in reqs],
+                         [b"GET /api/usage/independent?refresh=1 HTTP/1.0", b"POST /api/usage/login?provider=claude HTTP/1.0",
+                          b"GET /api/usage/login?provider=claude HTTP/1.0", b"POST /api/usage/account?slot=1 HTTP/1.0",
+                          b"POST /api/usage/account/remove?slot=1 HTTP/1.0"])
+        self.assertIn(b"X-jarvis-login-code: abcdefgh12", reqs[1])  # 코드는 원격 명령줄이 아니라 bridge 의 표준 입력으로
+        calls = self.calls()
+        self.assertEqual(len(calls), 5)
+        for x in calls:
+            self.assertEqual(x["argv"][-1], core.BRIDGE)
+            self.assertNotIn("abcdefgh12", " ".join(x["argv"]))
+            self.assertIn("ControlMaster=no", x["argv"])
+            self.assertIn("-T", x["argv"])
+            self.assertFalse(x["stdin_null"])
+
+    def test_windows_uses_the_gateway_written_launcher(self):
+        """covers: SSH-4"""
+        self.polled(core.BRIDGE_MIN, os_name="Windows 11")
+        self.response(http(b'{"ok": 1}'))
+        self.assertEqual(self.core.usage("kg"), (200, {"ok": 1}))
+        self.assertEqual(self.calls()[0]["argv"][-1], 'cmd /c "%LOCALAPPDATA%\\jarvis\\bridge.cmd"')
+
+    def test_windows_modules_and_update_go_through_the_bridge(self):
+        """covers: SSH-4 (Windows 는 POSIX 셸이 없어 모듈·갱신도 게이트웨이 API 로)"""
+        self.polled(core.BRIDGE_MIN, os_name="Windows 11")
+        self.response(http(b'{"ok": 1}'))
+        name = next(iter(modules_api.module.MODULES))
+        for call in (lambda: self.mods.all(full=True)["devices"][0]["status"], lambda: self.mods.plan("kg", name)[0],
+                     lambda: self.mods.apply("kg", name, "a" * 64)[0], lambda: self.core.jarvis_update("kg")[0],
+                     lambda: self.core.jarvis_update_progress("kg")[0]):
+            self.assertEqual(call(), 200)
+        self.assertEqual([r.split(b"\r\n")[0] for r in self.requests()],
+                         [b"GET /api/modules HTTP/1.0", f"GET /api/modules/{name}/plan HTTP/1.0".encode(),
+                          f"POST /api/modules/{name}/apply?plan_id={'a' * 64} HTTP/1.0".encode(),
+                          b"POST /api/jarvis/update HTTP/1.0", b"GET /api/jarvis/update HTTP/1.0"])
+        self.assertEqual({c["argv"][-1] for c in self.calls()}, {core.BRIDGE_WIN})
+        self.assertEqual(self.py_calls(), [])  # 원격 셸 명령(sh -c)은 없다
+
+    def test_gateway_answers_are_relayed(self):
+        """covers: SSH-4"""
+        self.polled(core.BRIDGE_MIN)
+        self.response(http(b'{"error": "busy"}', status="409 Conflict"))
+        self.assertEqual(self.core.usage_switch("kg", "1"), (409, {"error": "busy"}))
+        self.response(http(b'{"error": "not found"}', status="404 Not Found"))
+        self.assertEqual(self.core.usage("kg")[0], 501)  # bridge 가 없는 옛 게이트웨이
+        self.mode("255")
+        code, body = self.core.usage("kg")
+        self.assertEqual(code, 502)
+        self.assertIn("Permission denied (publickey).", body["error"])
+
+    def test_line_breaks_never_reach_ssh(self):
+        """covers: SSH-4"""
+        self.polled(core.BRIDGE_MIN)
+        req = core.urllib.request.Request("http://x/api/usage/login?provider=a%0d%0ab", headers={"X-A": "1\r\nX-B: 2"})
+        code, body = self.core._ask("kg", req, 5, "")
+        self.assertEqual(code, 502)
+        self.assertEqual(self.calls(), [])
+
+    def test_old_gateways_and_update_progress_are_501_without_ssh(self):
+        """covers: SSH-4"""
+        self.polled("1.12.2")
+        code, body = self.core.usage("kg")
+        self.assertEqual(code, 501)
+        self.assertIn("1.12.2", body["error"])
+        self.polled(core.BRIDGE_MIN)
+        self.assertEqual(self.core.jarvis_update_progress("kg"), (501, {"error": core.SSH_ONLY}))
         self.assertEqual(self.calls(), [])
 
     def test_bulk_order(self):
         """covers: SSH-4"""
-        c = core.Core(core.devices_from([{"id": "ok", "ssh": "a"}, {"id": "down", "ssh": "b"},
+        c = core.Core(core.devices_from([{"id": "old", "ssh": "a"}, {"id": "down", "ssh": "b"},
                                          {"id": "web", "url": "http://127.0.0.1:1"}]))
+        self.core = c
+        self.polled("1.12.2", i="old")
         with c.lock:
             c.state["down"].update(fails=2, error="Permission denied (publickey).")
         rows = {r["id"]: r for r in c.usage_all()["devices"]}
-        self.assertEqual((rows["ok"]["status"], rows["ok"]["error"]), (501, core.SSH_ONLY))
+        self.assertEqual(rows["old"]["status"], 501)
         self.assertEqual(rows["down"]["status"], 502)
         self.assertEqual(rows["web"]["status"], 502)  # HTTP 기기는 지금처럼 부른다(닿지 않는 주소)
         self.assertIn("닿지 못했습니다", rows["web"]["error"])

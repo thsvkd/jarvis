@@ -45,7 +45,7 @@ ssh = "kgolf-macmini-m1"   # core 사용자 ~/.ssh/config 의 Host 별칭
 ```
 
 - 항목은 `{id, url}` 또는 `{id, ssh}` 중 하나다. 별칭은 영숫자로 시작하는 `[A-Za-z0-9._-]` 64자 이하만 받는다. `/api/devices` 의 `url` 은 `ssh://<별칭>` 이고, 카드에 'SSH 경유' 가 붙는다.
-- 조회(스냅샷·history·changes)는 `ssh -W 127.0.0.1:9300` 으로 그 기기 게이트웨이의 루프백에 GET 한다. 조작은 AI 셋업 모듈(status·plan·apply)과 jarvis 업데이트만 원격 `python -m jarvis …` 로 한다. 사용량·로그인·계정 전환은 501 이다.
+- 조회(스냅샷·history·changes)는 `ssh -W 127.0.0.1:9300` 으로 그 기기 게이트웨이의 루프백에 GET 한다. 조작은 AI 셋업 모듈(status·plan·apply)과 jarvis 업데이트를 원격 `python -m jarvis …` 로 하고, 사용량·로그인·계정 전환·삭제는 원격 bridge 로 그 기기 게이트웨이에 전달한다. Windows 기기는 모듈·업데이트도 bridge 로 전달한다(그 기기 jarvis 1.13.0 이상).
 - jarvis 업데이트는 원격 `update` 로 받은 뒤 새 판이면 스냅샷의 게이트웨이 pid 에 `kill -TERM` 을 보낸다(그 pid 의 명령줄이 `-m jarvis` 로 끝날 때만). 다시 띄우는 것은 서비스 관리자다.
 
 전제(사용자가 준비한다. jarvis 는 ssh 설정을 읽거나 쓰지 않는다):
@@ -58,7 +58,8 @@ ssh = "kgolf-macmini-m1"   # core 사용자 ~/.ssh/config 의 Host 별칭
 - 대상 기기
   - sshd 가 명령 실행과 TCP 포워딩을 허용한다. 키를 `permitopen` 전용으로 좁히면 조작이 안 된다.
   - install.sh 배치다: 저장소 `~/.local/share/jarvis/app`(없으면 옛 배치·개발 체크아웃 `~/Workspace/jarvis`), python `~/.local/share/jarvis/venv/bin/python`. 손으로 설치한 기기는 조작이 502(배치 아님)로 끝난다. 대상은 macOS·Linux 이고 jarvis 1.7.8 이상이다(낮으면 501, 그 기기에서 직접 갱신).
-  - **jarvis 업데이트 버튼은** 서비스 정의가 `KeepAlive=true`(launchd) 또는 `Restart=always`(systemd)이고, 스냅샷의 `monitor.pid` 가 서비스 관리자가 띄운 pid 일 때만 쓴다. 아니면 kill 뒤 게이트웨이가 꺼진 채 남는다. install.sh 는 이미 있는 plist 를 덮어쓰지 않으므로 그 기기에서 확인한다.
+  - 사용량·로그인·계정 조작은 ssh 로그인 사용자가 게이트웨이를 돌리는 사용자와 같아야 한다(bridge 는 그 사용자만 열 수 있는 IPC 에 닿는다). Windows(OpenSSH 서버) 기기는 모든 조작이 bridge 를 거치므로 게이트웨이가 한 번 기동해 `%LOCALAPPDATA%\jarvis\bridge.cmd` 를 써 두어야 한다. jarvis 업데이트 뒤 재시작은 그 게이트웨이가 스스로 한다(HTTP 기기와 같다).
+  - **jarvis 업데이트 버튼은**(POSIX 기기) 서비스 정의가 `KeepAlive=true`(launchd) 또는 `Restart=always`(systemd)이고, 스냅샷의 `monitor.pid` 가 서비스 관리자가 띄운 pid 일 때만 쓴다. 아니면 kill 뒤 게이트웨이가 꺼진 채 남는다. install.sh 는 이미 있는 plist 를 덮어쓰지 않으므로 그 기기에서 확인한다.
 
         plutil -extract KeepAlive raw -o - ~/Library/LaunchAgents/dev.jarvis.plist     # true
         launchctl print gui/$(id -u)/dev.jarvis | grep -m1 'pid ='                      # 스냅샷 monitor.pid 와 같은지
@@ -69,6 +70,6 @@ ssh = "kgolf-macmini-m1"   # core 사용자 ~/.ssh/config 의 Host 별칭
 1. core 기기 대화형 셸에서 `/usr/bin/ssh -T -o BatchMode=yes -- <별칭> true` 가 되는지 본다.
 2. core 설정에 `{id, ssh}` 를 넣고 core 서비스를 재시작한다(`devices` 는 재시작 키다).
 3. `/api/devices` 의 그 행이 `reachable` 이고 `error` 가 비어 있으며 `fails` 가 0 인지 본다. `Permission denied` 면 서비스 세션의 키 문제다.
-4. AI 셋업 화면에서 그 기기의 모듈 상태가 보이는지, 사용량 버튼이 'SSH 로 닿는 기기는 …' 사유를 보이는지 본다.
+4. AI 셋업 화면에서 그 기기의 모듈 상태가 보이는지, 사용량 섹션에 그 기기의 사용량이 보이는지 본다(사용량·로그인·계정 조작은 원격 bridge 로 간다. 그 기기의 jarvis 가 1.13.0 이상이어야 한다).
 
 위험: 원격과 core 사이에 프로세스 잠금이 없다(그 기기 화면에서 시작한 작업과 겹칠 수 있다). apply 중 연결이 끊기면 core 는 `interrupted` 로 두지만 원격은 계속 돌 수 있다. core 가 재시작하면 SSH 작업 기록은 사라진다. 그 기기 스냅샷(피어 목록·명령줄)과 ssh 오류 마지막 줄이 core 의 tailnet 에 보인다.

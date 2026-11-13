@@ -1,6 +1,6 @@
 """python3 -m jarvis · python3 -m jarvis update [--check] · python3 -m jarvis module <이름> <동작> --json
 · python3 -m jarvis agentsmd · python3 -m jarvis core-trust <plan|apply> · python3 -m jarvis relocate [--dry-run] [--json]
-· python3 -m jarvis --version"""
+· python3 -m jarvis bridge · python3 -m jarvis --version"""
 
 import os
 import signal
@@ -11,6 +11,10 @@ import time
 from . import __version__, launch
 
 launch.run(__version__)  # 받아 둔 새 릴리스가 있으면 그쪽으로 넘어가고 여기로 돌아오지 않는다
+
+if sys.argv[1:] == ["bridge"]:  # core 의 SSH bridge(jarvis/ipc.py): 표준 출력은 HTTP 응답이므로 설정·수집기를 읽기 전에 끝낸다
+    from .ipc import bridge
+    sys.exit(bridge())
 
 from . import config, hswap_usage, relocate, self_update, tray  # noqa: E402
 from .util import hide_child_consoles  # noqa: E402

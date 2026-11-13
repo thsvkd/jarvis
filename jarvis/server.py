@@ -20,7 +20,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from . import __version__, claude_accounts, cli_login, config, fleet, independent_usage, modules_api, self_update
+from . import __version__, claude_accounts, cli_login, config, fleet, independent_usage, ipc, modules_api, self_update
 from .core import why
 from .util import client_kind
 
@@ -77,6 +77,7 @@ def make_handler(collector, core=None):
         sys_version = ""
         protocol_version = "HTTP/1.1"
         timeout = 15  # 느린 클라이언트가 스레드를 붙잡지 못하게
+        ipc = False  # SSH bridge(jarvis.ipc)로 온 연결: 같은 사용자만 열 수 있다
 
         def log_message(self, fmt, *args):  # API 폴링으로 저널이 넘치지 않게 오류만 남긴다
             pass
@@ -116,6 +117,8 @@ def make_handler(collector, core=None):
             return "gzip" in (self.headers.get("Accept-Encoding") or "")
 
         def _peer_ok(self):
+            if self.ipc:
+                return True
             peer = self.client_address[0]
             if not allowed(peer):
                 return False
@@ -136,6 +139,8 @@ def make_handler(collector, core=None):
             예외는 proxies(설정, 예: 도메인을 받는 pit5 Caddy 의 tailnet IP)뿐이다: 그 프록시가 붙인 X-Forwarded-For 의
             마지막 항목을 원래 접속 IP 로 본다(Caddy 는 마지막 항목에 자기가 본 접속 IP 를 둔다). 그 기기의 다른 컨테이너도
             같은 출발지 IP 로 나가므로 Caddy 만 아는 proxy_key 헤더(X-Jarvis-Proxy-Key)도 맞아야 한다."""
+            if self.ipc:  # SSH 키와 IPC 권한이 인증한 core 의 요청이다. 게이트웨이 경로(설정 core 목록)에만 쓴다
+                return ips is config.CORE
             peer = self.client_address[0]  # 서버는 IPv4 로만 bind 한다
             if client_kind(peer) != "tailnet":
                 return False
@@ -280,6 +285,9 @@ def make_handler(collector, core=None):
                 return self._json({"error": "X-Jarvis-Action 헤더가 필요합니다"}, head, 403)
             u = urlsplit(self.path)
             path = unquote(u.path)
+            # bridge 는 core 전용 조작(사용량·로그인·계정, Windows SSH 기기의 모듈·jarvis 갱신)만 나른다
+            if self.ipc and not (path.startswith(("/api/usage/", "/api/modules/")) or path in ("/api/modules", "/api/jarvis/update")):
+                return self._json({"error": "not found"}, head, 404)
             # core 는 다른 망의 기기까지 모아 준다: LAN 에 그 기기들의 명령줄·포트·피어를 넘기지 않는다
             if core and path.startswith("/api/devices") and client_kind(self.client_address[0]) not in ("tailnet", "local"):
                 return self._json({"error": "기기 목록은 tailnet 에서만 볼 수 있습니다"}, head, 403)
@@ -482,7 +490,9 @@ class Server(ThreadingHTTPServer):
 
 
 def serve(collector, core=None):
-    httpd = Server((config.BIND, config.PORT), make_handler(collector, core))
+    handler = make_handler(collector, core)
+    httpd = Server((config.BIND, config.PORT), handler)
+    ipc.serve(type("IpcHandler", (handler,), {"ipc": True}), httpd)  # 9300 을 잡은 뒤에 연다(지난 기동의 소켓만 지운다)
     print(f"[jarvis] {config.BIND}:{config.PORT} 에서 대기 (static={config.STATIC_DIR}, "
           f"설정={config.CONFIG_PATH or '없음(기본값)'})", flush=True)
     return httpd

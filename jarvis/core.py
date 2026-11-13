@@ -4,8 +4,8 @@
 - history·changes 는 크기가 커서 모아 두지 않고 요청이 올 때 전달한다.
 - 사용량·계정 동작은 이메일·로그인 코드가 있어 모아 두지 않고 누를 때 그 기기 하나만 전달한다.
 - 게이트웨이는 기기마다 pull 시점이 달라 버전이 섞인다: 모르는 필드는 무시하고, 없는 API(404)는 '미지원'으로 본다.
-- SSH 로만 닿는 기기(devices 의 ssh)는 `ssh -W` 로 조회하고, AI 셋업 모듈과 jarvis 갱신만 원격 CLI 로 조작한다
-  (docs/SPEC.md 의 "SSH 기기"). 그 밖의 조작은 501 이다.
+- SSH 로만 닿는 기기(devices 의 ssh)는 `ssh -W` 로 조회하고, AI 셋업 모듈과 jarvis 갱신은 원격 CLI 로, 사용량·로그인·계정
+  조작은 원격 bridge(jarvis.ipc)로 그 게이트웨이에 전달한다(docs/SPEC.md 의 "SSH 기기"). 갱신 진행 조회만 501 이다.
 """
 
 import gzip
@@ -54,6 +54,7 @@ SSH_PATH_RE = re.compile(r"/api/(snapshot|changes|history\?range=(1h|24h))")
 ALIAS_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 TOKEN_RE = re.compile(r"[A-Za-z0-9._-]+")
 SSH_MIN = "1.7.8"  # 시험한 최저 판
+BRIDGE_MIN = "1.13.0"  # 게이트웨이가 jarvis.ipc 를 여는 첫 판
 SSH_ONLY = "SSH 로 닿는 기기는 이 조작을 지원하지 않습니다(그 기기에서 직접)"
 NO_RESTART = "받았지만 재시작하지 못했습니다(그 기기에서 재시작하세요)"
 SSH_EXIT = {90: "install.sh 배치(~/.local/share/jarvis/app 또는 ~/Workspace/jarvis, ~/.local/share/jarvis/venv)가 아닙니다",
@@ -64,6 +65,10 @@ PRE = ('D="$HOME/.local/share/jarvis/app"; [ -f "$D/jarvis/__init__.py" ] || D="
        '[ -f "$D/jarvis/__init__.py" ] && cd "$D" && P="$HOME/.local/share/jarvis/venv/bin/python" && [ -x "$P" ] || exit 90\n'
        'PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"; export PATH\n'  # deploy/jarvis.plist
        'PYTHONIOENCODING=utf-8; export PYTHONIOENCODING\n')
+# 사용량·로그인·계정 조작을 그 기기 게이트웨이의 IPC 로 나르는 원격 명령(jarvis/ipc.py). Windows 는 게이트웨이가 쓴 bridge.cmd
+# POSIX 는 런처를 거친다: PRE 의 저장소는 다시 pull 하지 않으므로 받아 둔 릴리스의 코드로 넘어가야 한다
+BRIDGE = "sh -c " + shlex.quote(PRE + 'exec "$P" -m jarvis bridge')
+BRIDGE_WIN = 'cmd /c "%LOCALAPPDATA%\\jarvis\\bridge.cmd"'
 VERSION_RE = re.compile(r"^jarvis (\d+\.\d+\.\d+)", re.M)
 
 
@@ -160,25 +165,43 @@ def ssh_fetch(alias, path):
     실패하면 예외이고, 메시지는 ssh 표준 오류 마지막 줄이다. 원격 셸 명령은 없다."""
     if not SSH_PATH_RE.fullmatch(path):
         raise ValueError("SSH 로 보내지 않는 경로입니다")
-    end = time.monotonic() + SSH_DEADLINE_S
+    req = (f"GET {path} HTTP/1.0\r\nHost: 127.0.0.1:9300\r\nAccept-Encoding: gzip\r\n"
+           "Connection: close\r\n\r\n").encode()
+    status, headers, raw, gz = _ssh_http([*SSH_MUX, "-W", "127.0.0.1:9300", "--", alias], req, SSH_DEADLINE_S)
+    if status != 200:
+        raise urllib.error.HTTPError(path, status, "", headers, None)
+    return raw, gz
+
+
+def ssh_bridge(alias, remote, method, selector, headers, timeout):
+    """조작: 원격 bridge(remote)의 표준 입력으로 HTTP 요청 하나. (상태, 본문 bytes). 연결을 공유하지 않는다.
+    헤더 값은 호출자가 모양을 검사한 것만 넣는다(로그인 코드는 PASTE_RE). 실패는 ssh_fetch 와 같은 예외다."""
+    if any(c in x for x in (method, selector, *(str(v) for h in headers for v in h)) for c in "\r\n\0"):
+        raise ValueError("요청에 줄바꿈이 있습니다")  # IPC 는 core 로 믿으므로 헤더·요청을 끼워 넣지 못하게
+    head = "".join(f"{k}: {v}\r\n" for k, v in headers)
+    req = (f"{method} {selector} HTTP/1.0\r\nHost: 127.0.0.1:9300\r\nContent-Length: 0\r\n{head}"
+           "Connection: close\r\n\r\n").encode()
+    status, _, raw, _ = _ssh_http([*SSH_NOMUX, "-T", "--", alias, remote], req, timeout + 10)  # 10초는 접속
+    return status, raw
+
+
+def _ssh_http(args, request, deadline_s):
+    """ssh <args> 의 표준 입력으로 request 를 쓰고 HTTP 응답을 읽는다. (상태, 헤더, json bytes, gzip bytes 또는 None)."""
+    end = time.monotonic() + deadline_s
     with tempfile.TemporaryFile() as err:
-        p = subprocess.Popen([SSH_BIN, *SSH_OPTS, *SSH_MUX, "-W", "127.0.0.1:9300", "--", alias], stdin=subprocess.PIPE,
+        p = subprocess.Popen([SSH_BIN, *SSH_OPTS, *args], stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, stderr=err, start_new_session=True)
-        timer = threading.Timer(SSH_DEADLINE_S, _kill, (p,))
+        timer = threading.Timer(deadline_s, _kill, (p,))
         timer.start()
         r = None
         try:
             # 요청을 쓰자마자 입력을 닫는다(열어 두면 채널이 닫히지 않아 응답 끝을 기다리게 된다)
-            p.stdin.write(f"GET {path} HTTP/1.0\r\nHost: 127.0.0.1:9300\r\nAccept-Encoding: gzip\r\n"
-                          "Connection: close\r\n\r\n".encode())
+            p.stdin.write(request)
             p.stdin.close()
             r = http.client.HTTPResponse(_Pipe(p.stdout))
             r.begin()
-            if r.status != 200:
-                raise urllib.error.HTTPError(path, r.status, r.reason, r.headers, None)
-            return _read(r, end)  # 게이트웨이는 늘 Content-Length 를 붙이므로 그만큼만 읽는다
-        except urllib.error.HTTPError:
-            raise
+            raw, gz = _read(r, end)  # 게이트웨이는 늘 Content-Length 를 붙이므로 그만큼만 읽는다
+            return r.status, r.headers, raw, gz
         except Exception as e:
             _reap(p, 1)
             if time.monotonic() > end:
@@ -245,7 +268,7 @@ def _summary(s):
     root = next((d for m in ("/", "/System/Volumes/Data", "C:\\")  # macOS 는 사용자 데이터가 Data 볼륨, Windows 는 C:
                  for d in sysm.get("disks") or [] if isinstance(d, dict) and d.get("mount") == m), {})
     return {"host": meta.get("host"), "version": meta.get("version"), "commit": (s.get("monitor") or {}).get("commit"),
-            "generated_at": meta.get("generated_at"),
+            "generated_at": meta.get("generated_at"), "os": (sysm.get("host") or {}).get("os"),
             "status": summ.get("status"), "alerts": summ.get("alerts"), "services": summ.get("services"),
             "model": (sysm.get("host") or {}).get("model"), "cpu_pct": (sysm.get("cpu") or {}).get("usage_pct"),
             "mem_pct": (sysm.get("memory") or {}).get("usage_pct"), "disk_pct": root.get("usage_pct")}
@@ -334,14 +357,14 @@ class Core:
         finally:
             sem.release()
 
-    def ssh_gate(self, i):
+    def ssh_gate(self, i, least=SSH_MIN):
         """SSH 조작 전에 스냅샷 판을 본다. (http 상태, 오류) 또는 None(통과). ssh 는 실행하지 않는다."""
         with self.lock:
             s = self.state[i]["summary"]
         if not s:
             return 502, {"error": f"{i} 의 스냅샷이 아직 없습니다"}
         k = launch.key(s.get("version"))
-        if k is None or k < launch.key(SSH_MIN):
+        if k is None or k < launch.key(least):
             return 501, {"error": f"이 기기의 jarvis {s.get('version')} 는 SSH 조작을 지원하지 않습니다(그 기기에서 직접 갱신)"}
         return None
 
@@ -370,33 +393,49 @@ class Core:
             return {"error": f"{i} 에 닿지 못했습니다: {err[:200]}"}
         return {"error": SSH_EXIT[code]} if code in SSH_EXIT else None
 
+    def win_ssh(self, i):
+        """Windows SSH 기기: POSIX 셸이 없어 모듈·갱신 조작도 원격 명령 대신 bridge 로 게이트웨이 API 에 보낸다."""
+        with self.lock:
+            return bool(self.devices[i].get("ssh")) and \
+                str((self.state[i]["summary"] or {}).get("os") or "").startswith("Windows")
+
     def _ask(self, i, req, timeout, unsupported):
-        """그 게이트웨이의 동작 하나를 그대로 전달한다. (http 상태, 응답). 404 는 갱신 전 게이트웨이(501)."""
-        if self.devices[i].get("ssh"):  # CLI 가 없고 비밀(로그인 코드·이메일)이 SSH 경로를 지나지 않게
-            return 501, {"error": SSH_ONLY}
+        """그 게이트웨이의 동작 하나를 그대로 전달한다. (http 상태, 응답). 404 는 갱신 전 게이트웨이(501).
+        SSH 기기는 원격 bridge 로 그 게이트웨이의 IPC 에 보낸다(비밀이 루프백 TCP·원격 명령줄을 지나지 않는다)."""
+        d = self.devices[i]
         try:
-            with _open(req, timeout=timeout) as r:
-                return r.status, json.loads(r.read(1 << 20))
+            if d.get("ssh"):
+                bad = self.ssh_gate(i, BRIDGE_MIN)
+                if bad:
+                    return bad
+                status, raw = ssh_bridge(d["ssh"], BRIDGE_WIN if self.win_ssh(i) else BRIDGE, req.get_method(), req.selector,
+                                         req.header_items(), timeout)
+            else:
+                with _open(req, timeout=timeout) as r:
+                    return r.status, json.loads(r.read(1 << 20))
         except urllib.error.HTTPError as e:
-            if e.code == 404:
-                return 501, {"error": f"이 기기의 jarvis 는 {unsupported} 지원하지 않습니다(갱신 필요)"}
-            try:
-                return e.code, json.loads(e.read(1 << 16))
-            except ValueError:
-                return e.code, {"error": f"HTTP {e.code}"}
+            status, raw = e.code, e.read(1 << 16)
         except Exception as e:
             return 502, {"error": f"{i} 에 닿지 못했습니다: {why(e)}"}
+        if status == 404:
+            return 501, {"error": f"이 기기의 jarvis 는 {unsupported} 지원하지 않습니다(갱신 필요)"}
+        try:
+            return status, json.loads(raw)
+        except ValueError:
+            return (502, {"error": f"{i} 에 닿지 못했습니다: 응답이 JSON 이 아닙니다"}) if status < 400 else (status, {"error": f"HTTP {status}"})
 
     def jarvis_update(self, i):
         """jarvis 업데이트 버튼: 그 게이트웨이 POST /api/jarvis/update. 받은 코드가 다르면 게이트웨이가 스스로 재시작한다."""
-        if self.devices[i].get("ssh"):
+        if self.devices[i].get("ssh") and not self.win_ssh(i):
             return self._ssh_update(i)
         req = urllib.request.Request(self.devices[i]["url"] + "/api/jarvis/update", data=b"", method="POST",
                                      headers={"X-Jarvis-Action": "jarvis-update"})
         return self._ask(i, req, PULL_TIMEOUT_S, "자체 갱신을")
 
     def jarvis_update_progress(self, i):
-        """그 게이트웨이 GET /api/jarvis/update: 갱신 단계와 받은 바이트. SSH 기기는 원격 CLI 로 갱신해 진행을 모른다(_ask 의 501)."""
+        """그 게이트웨이 GET /api/jarvis/update: 갱신 단계와 받은 바이트. POSIX SSH 기기는 원격 CLI 로 갱신해 진행을 모른다(501)."""
+        if self.devices[i].get("ssh") and not self.win_ssh(i):
+            return 501, {"error": SSH_ONLY}
         req = urllib.request.Request(self.devices[i]["url"] + "/api/jarvis/update")
         return self._ask(i, req, 5, "갱신 진행을")
 
