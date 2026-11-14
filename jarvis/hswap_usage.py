@@ -271,27 +271,53 @@ def schedule():
     LaunchAgent 에 맡긴다: 예약이 없으면 설치하고, hswap 이 만든 예약이 적재되지 않았으면 그 설정(ahead·thenAuto) 그대로 다시 설치한다.
     적재된 예약과 hswap 이 만들지 않은 같은 이름의 서비스는 건드리지 않는다(사람이 바꾼 설정을 덮어쓰지 않는다).
     답한 상태는 로그인 판정(claude_accounts.service)에 쓴다. 할 일이 아니면 None 이고 지난 답도 지운다."""
-    claude_accounts.service = None
+    claude_accounts.service = claude_accounts.service_note = None
     exe = claude_accounts.binary()
     v = claude_accounts._version
     if (sys.platform != "darwin" or not config.CSWAP_INSTALL or not exe or not which_tool("claude") or claude_accounts.installer.state == "running"
             or not v or claude_accounts._key(v) < claude_accounts._key(SERVICE_FROM) or not claude_accounts._store_read()):
         return None
-    if (claude_accounts.doctor or {}).get("keepalive_domain") == "system":  # 데몬 keepalive(--system) 옆에 gui 예약을 두지 않는다(hswap 0.3.0)
-        return None
     st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json")[1])
-    # hswap 이 만든 예약은 적재되지 않았거나 지금 hswap 이 만드는 모양보다 낡았을 때(outdated)만 그 설정 그대로 다시 설치한다
-    if st and st.get("platform") == "launchd" and (st.get("installed") is False or (st.get("managed") is True and (st.get("loaded") is False or st.get("outdated") is True))):
+    want, note = _service_plan(st)
+    if (claude_accounts.doctor or {}).get("keepalive_domain") == "system":  # 데몬 keepalive(--system) 옆에 gui 예약을 두지 않는다(hswap 0.3.0)
+        want = False
+    if note == "needs_sudo":
+        _say("service", note, "keepalive 예약(LaunchDaemon)이 낡았거나 적재되지 않았습니다. 그 기기에서 실행하세요: sudo hswap claude keepalive --install-service --system")
+    if want:
         ahead = _ahead(st)
         # 0 설치·갱신, 3 GUI 세션이 없어 다음 로그인 때 적재. 어느 쪽이든 다시 물은 상태를 쓴다
         # 예약이 없을 때 사람이 자동 전환을 켜 두었으면(순서 전략, USAGE-14) 그것도 다시 붙인다
         then = st.get("thenAuto") is True or (st.get("installed") is False and _settings(exe).get("autoswitch.strategy") == ROTATION)
-        code, _ = _run(exe, "claude", "keepalive", "--install-service", "--ahead", str(int(ahead)), *(["--then-auto"] if then else []), "--json")
-        if code not in (0, 3):
+        code, out = _run(exe, "claude", "keepalive", "--install-service", "--ahead", str(int(ahead)), *(["--then-auto"] if then else []), "--json")
+        if code == 1 and _error_type(out) == "service_busy":  # hswap 0.3.1: 실행 중인 keepalive·reconcile 이 잠금을 쥐었다. 바꾼 것이 없고 다음 주기에 다시 한다
+            _say("service", "busy", "keepalive 예약 다시 설치를 미뤘습니다(service_busy). 다음 주기에 다시 합니다")
+        elif code not in (0, 3):
             print(f"[jarvis] hswap keepalive 예약 설치 실패(종료 코드 {code})", flush=True)
         st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json")[1]) or st
-    claude_accounts.service = st
+    claude_accounts.service, claude_accounts.service_note = st, note
     return st
+
+
+def _service_plan(st):
+    """keepalive 예약 상태(--service-status) → (다시 설치할까, 안내 코드 None·caller_env_only·needs_sudo). 값만 받는다.
+    예약이 없으면 설치한다. hswap 이 만든 예약은 적재되지 않았거나 낡았을 때 그 설정 그대로 다시 설치한다. hswap 0.3.1 의 이유를 따른다:
+    caller_env_only(0.3.1 전 plist 라 HSWAP_CALLER 만 다르다)는 동작이 같아 다시 깔지 않고, reinstallNeedsSudo(LaunchDaemon)는 사람에게 맡긴다.
+    두 필드가 없는 옛 hswap 은 지금까지처럼 낡았으면 다시 설치한다."""
+    if not st or st.get("platform") != "launchd":
+        return False, None
+    if st.get("installed") is False:
+        return True, None
+    if st.get("managed") is not True:
+        return False, None
+    outdated, reason = st.get("outdated") is True, st.get("outdatedReason")
+    if st.get("loaded") is False or (outdated and reason != "caller_env_only"):
+        return (False, "needs_sudo") if st.get("reinstallNeedsSudo") is True else (True, None)
+    return False, "caller_env_only" if outdated else None
+
+
+def _error_type(out):
+    err = (_json(out) or {}).get("error")
+    return err.get("type") if isinstance(err, dict) else None
 
 
 def inspect():
@@ -397,8 +423,10 @@ def set_rotation(on, order, threshold):
         steps.append((("claude", "keepalive", "--install-service", "--ahead", str(int(ahead)), *(["--then-auto"] if on == "1" else []), "--json"), "예약 다시 설치"))
     with _rot_lock:
         for args, what in steps:
-            rc, _ = _run(exe, *args, caller=UI)
+            rc, out = _run(exe, *args, caller=UI)
             if rc not in ((0, 3) if "--install-service" in args else (0,)):  # 예약 설치의 3 은 GUI 세션이 없어 다음 로그인 때 적재된다는 뜻이다
+                if _error_type(out) == "service_busy":
+                    return 409, {"error": claude_accounts.HSWAP_ERRORS["service_busy"]}
                 return 409, {"error": f"hswap 이 {what}에 실패했습니다(종료 코드 {rc})"}
     return rotation()
 

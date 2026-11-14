@@ -173,6 +173,7 @@ bash deploy/macos-daemon.sh uninstall           # LaunchDaemon → LaunchAgent
 - 시스템 도메인의 `dev.jarvis` 는 기기에 하나다. 기존 daemon plist 의 `UserName` 이 지금 사용자와 다르면 스크립트는 아무것도 바꾸지 않고 거절하고, `install.sh` 는 안내만 하고 LaunchAgent 로 설치한다(`--daemon` 을 줘도 같다). `system/dev.jarvis` 가 로드돼 있는데 plist 가 없거나 `launchctl print` 의 `path` 가 그 plist 가 아니면 소유를 알 수 없으므로 스크립트가 거절한다. `install.sh` 는 plist 만 보므로, 플래그 없이는 LaunchAgent 로 설치하고 `--daemon` 이면 스크립트의 거절로 실패한다.
 - 이 사용자의 daemon 으로 등록된 기기에서 `install.sh` 를 플래그 없이 다시 실행해도 LaunchAgent 를 만들지 않는다. [실행본 이전](#실행본-이전-180)은 root 소유 등록을 고칠 수 없어 `noop` 과 안내로 끝난다.
 - **메뉴 막대 아이콘이 없다.** GUI 세션이 없으면 AppKit 이 프로세스를 죽일 수 있어 `JARVIS_TRAY` 를 뺀다.
+- **로그 크기:** macOS 게이트웨이는 시작할 때와 10분마다 로그(LaunchAgent `~/Library/Logs/jarvis.log`, LaunchDaemon 은 plist 의 `JARVIS_LOG`)를 확인해 10 MiB 를 넘으면 `.1` 로 복사한 뒤 비우고(`.1`→`.2`→`.3`, 3개까지) 모두 0600 으로 둔다. launchd 와 wrapper 의 `>>` 가 연 파일이라 이름을 바꾸지 않고 복사 뒤 비운다(둘 다 덧붙이기로 열어 비운 뒤의 줄은 앞에서부터 쌓인다). 복사와 비우기 사이의 몇 줄은 잃을 수 있다. Linux(journal)·Windows 는 그대로다.
 - **로그:** `~/Library/Logs/jarvis.log`(LaunchAgent 와 같은 파일). launchd 는 `StandardOutPath` 를 root 로 열 수 있어 둘 다 `/dev/null` 로 두고, 사용자 권한으로 바뀐 뒤 셸이 이 파일에 덧붙인 다음 `<python> -m jarvis` 로 exec 한다.
 - **SSH(core 로 쓸 때):** ssh-agent·키체인이 없다. passphrase 없는 키 파일만 쓸 수 있다.
 - **키체인에 의존하는 도구는 안 될 수 있다.** 파일 저장소를 쓰는 도구는 그대로 돈다. Claude 는 hswap 파일 저장 방식이면 게이트웨이가 keepalive·자동 전환을 직접 부른다(위 macOS 절).
@@ -220,6 +221,8 @@ Claude·Codex·Grok 계정 일(사용량 조회, 로그인 유지, 전환)은 �
 - `tick …`: 5분 tick 이 keepalive 를 불렀는지, 건너뛰었다면 그 이유다. `in_session`(로그인 세션 안이라 hswap 예약이 돈다), `store_not_file`(키체인 저장 방식), `service_loaded`(적재된 keepalive 예약이 돈다), `doctor_unknown`(doctor 답을 아직 못 받음), `hswap_old`(hswap 0.3.0 미만), `not_ready`(hswap·Claude Code·저장한 계정이 없거나 설치 중이거나 `cswap_install` 이 꺼짐) 중 하나다. 같은 결정은 한 시간에 한 번만 적고, 결정이 바뀌면 바로 적는다. 세션 안의 macOS 에서는 tick 을 띄우지 않으므로 이 줄이 없다.
 - `<명령> 종료 <코드> <ms> [오류 type]`: hswap 을 부른 결과다. 명령은 하위 명령과 플래그 이름만 적고, 값·이메일·슬롯 번호·경로는 적지 않는다. 오류는 hswap 의 `error.type` 을 영문자·밑줄만 남겨 적는다. 같은 명령의 같은 결과는 한 시간에 한 번, 바뀌면 바로 적는다. 종료 코드가 `없음` 이면 실행하지 못했거나 시간을 넘겼다.
 - `doctor …`: macOS 에서 hswap doctor 의 저장 방식·문제 코드·세션 여부가 바뀔 때만 적는다.
+- `keepalive 예약(LaunchDaemon)이 낡았거나 적재되지 않았습니다 … sudo hswap claude keepalive --install-service --system`: hswap 0.3.1 이 그 예약을 다시 설치하려면 sudo 가 필요하다고 답했다(`reinstallNeedsSudo`). jarvis 는 sudo 를 쓰지 않으므로 한 시간에 한 번 이 줄을 남기고 기기 행에도 보인다.
+- `keepalive 예약 다시 설치를 미뤘습니다(service_busy)`: 다시 설치하는 동안 실행 중인 keepalive·reconcile 이 잠금을 30초 넘게 쥐었다. 바뀐 것은 없고 다음 주기(1시간)에 다시 한다. 0.3.1 전에 깐 예약이 HSWAP_CALLER 만 달라 낡았다고 나오면(`caller_env_only`) 동작이 같아 다시 깔지 않고 기기 행에 "keepalive 예약: 다음 설치 때 갱신"만 보인다.
 - 토큰, 경로, hswap 의 stdout·stderr 원문은 남기지 않는다.
 
 **hswap 기록(hswap 0.3.1 이상).** hswap 은 실행마다 `<backup root>/logs/events.jsonl` 에 한 줄을 남긴다(macOS·Windows `~/.claude-swap-backup`, Linux `~/.local/share/claude-swap`). jarvis 는 hswap 을 부를 때 `HSWAP_CALLER` 로 자기를 알린다: 게이트웨이 스스로는 `jarvis-gateway`, 사람이 화면에서 누른 버튼(계정 전환·삭제, 전환 순서, 로그인·계정 추가, 로그 조회)은 `jarvis-ui` 다. 설치기(`deploy/macos-daemon.sh`)가 부르는 doctor·reconcile 도 `jarvis-gateway` 다.

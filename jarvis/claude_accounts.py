@@ -41,6 +41,8 @@ HSWAP_ERRORS = {**KEEPALIVE_ERRORS, "stores_disagree": KEEPALIVE_ERRORS["split_b
                 "ClaudeCodeLockTimeout": KEEPALIVE_ERRORS["locked"], "SwitchError": "계정 전환 실패",
                 # hswap 0.3.0(파일 저장 방식의 세션 밖 동작·reconcile). CredentialReadError 는 키체인을 읽지 못한 예외 클래스 이름이다
                 "CredentialReadError": "hswap 이 자격 증명을 읽지 못했습니다",
+                # hswap 0.3.1: 예약을 다시 읽어 들이는 동안 실행 중인 keepalive·reconcile 이 잠금을 30초 넘게 쥐었다. 바꾼 것이 없다
+                "service_busy": "keepalive·reconcile 실행이 잠금을 쥐고 있어 예약을 다시 설치하지 않았습니다(바뀐 것 없음). 잠시 뒤 다시 시도하세요",
                 "keychain_item_present_locked": "키체인에 Claude 로그인이 있는데 키체인이 잠겨 정리하지 못했습니다. 로그인 세션에서 reconcile 이 정리합니다",
                 # 처음 파일 방식으로 옮길 때(MIGRATE, --keep keychain)와 달리 어느 쪽이 맞는지 정해져 있지 않다
                 "reconcile_ambiguous": "키체인과 파일 중 어느 쪽이 새 로그인인지 알 수 없어 정리하지 않았습니다. 그 기기의 로그인 세션에서 "
@@ -89,6 +91,9 @@ INSTALL_TIMEOUT_S = 600  # 처음이면 uv 가 Python 3.12+ 까지 받는다
 CLIS = ("claude", "codex", "grok", "opencode")  # hswap 이 다루는 하네스. 하나라도 있으면 hswap 을 설치한다
 _version = None  # 마지막으로 확인한 설치 버전("0.2.7"). 화면의 기기 행에 보인다
 service = None  # macOS: hswap claude keepalive --service-status 의 마지막 답(hswap_usage.schedule 이 쓴다). 모르면 None
+service_note = None  # 그 답의 안내 코드(hswap_usage._service_plan): caller_env_only·needs_sudo. 없으면 None
+SERVICE_NOTES = {"caller_env_only": "keepalive 예약: 다음 설치 때 갱신",
+                 "needs_sudo": "keepalive 예약(LaunchDaemon)을 다시 설치해야 합니다: sudo hswap claude keepalive --install-service --system"}
 doctor = None  # macOS: hswap claude doctor 의 요약(macos_daemon.summary, hswap_usage.inspect 가 쓴다). 모르면 None
 _aqua = None  # macOS: 로그인 세션(Aqua) 안에서 도는가. 한 번 답을 받으면 다시 묻지 않는다
 _aqua_failed = None  # 마지막으로 묻지 못한 때(monotonic). AQUA_RETRY_S 동안은 다시 묻지 않는다
@@ -249,6 +254,8 @@ def status():
     behind = _version is None or _key(_version) < _key(VERSION)  # 맞은 뒤에는 지난 실패 문구를 보이지 않는다
     note = {"running": "설치하는 중", "failed": installer.error}.get(installer.state) if behind else None
     out = {"version": _version, "pinned": VERSION, "note": note}
+    if service_note in SERVICE_NOTES:
+        out["service_note"] = SERVICE_NOTES[service_note]
     if doctor and doctor.get("last_events"):  # hswap 0.3.1 doctor 의 최근 기록(macos_daemon.summary 가 거른 것) 중 3개
         out["events"] = doctor["last_events"][-3:]
     if doctor:  # macOS: 저장 방식(file·auto)과 hswap doctor 의 문제. 모르는 문제 코드는 코드 그대로(소문자·밑줄만) 보인다

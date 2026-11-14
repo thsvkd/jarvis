@@ -506,7 +506,9 @@ class ScheduleTest(FakeHswapCase):
                   mock.patch.object(hswap_usage, "which_tool", side_effect=lambda n: "/x/" + n),
                   mock.patch.object(hswap_usage.claude_accounts, "_version", "0.2.8"),
                   mock.patch.object(hswap_usage.claude_accounts, "_store_read", return_value={"accounts": [{}]}),
-                  mock.patch.object(hswap_usage.claude_accounts, "service", None)):
+                  mock.patch.object(hswap_usage.claude_accounts, "service", None),
+                  mock.patch.object(hswap_usage.claude_accounts, "service_note", None),
+                  mock.patch.object(hswap_usage.claude_accounts, "doctor", None)):
             p.start()
             self.addCleanup(p.stop)
 
@@ -554,6 +556,59 @@ class ScheduleTest(FakeHswapCase):
         os.remove(os.path.join(self.dir, "argv"))
         hswap_usage.schedule()
         self.assertIn("claude keepalive --install-service --ahead 601 --json", self.calls())  # 그보다 길면 사람이 고른 값을 지킨다
+
+    def test_the_reinstall_plan_follows_hswap_0_3_1_reasons(self):
+        """covers: USAGE-11. outdatedReason·reinstallNeedsSudo(hswap 0.3.1): 동작이 같은 예약은 다시 깔지 않고, 데몬은 사람에게 맡긴다. 필드가 없으면 지금처럼"""
+        base = {"platform": "launchd", "installed": True, "managed": True, "loaded": True}
+        cases = (({"installed": False, "managed": None, "loaded": False}, (True, None)),
+                 ({}, (False, None)),
+                 ({"managed": False, "loaded": False}, (False, None)),
+                 ({"loaded": False}, (True, None)),  # 옛 hswap: 적재되지 않은 예약
+                 ({"outdated": True}, (True, None)),  # 옛 hswap: 낡은 예약
+                 ({"outdated": True, "outdatedReason": "caller_env_only", "reinstallNeedsSudo": False}, (False, "caller_env_only")),
+                 ({"outdated": True, "outdatedReason": "job_changed", "reinstallNeedsSudo": False}, (True, None)),
+                 ({"outdated": True, "outdatedReason": "job_changed", "reinstallNeedsSudo": True}, (False, "needs_sudo")),
+                 ({"loaded": False, "reinstallNeedsSudo": True}, (False, "needs_sudo")),
+                 ({"outdated": True, "outdatedReason": "caller_env_only", "reinstallNeedsSudo": True}, (False, "caller_env_only")),
+                 ({"platform": "unsupported"}, (False, None)))
+        for over, want in cases:
+            self.assertEqual(hswap_usage._service_plan({**base, **over}), want, over)
+        self.assertEqual(hswap_usage._service_plan(None), (False, None))
+
+    def test_a_caller_only_difference_is_not_reinstalled_and_says_next_install(self):
+        self.script({self.STATUS: self.st(outdated=True, outdatedReason="caller_env_only", reinstallNeedsSudo=False, ahead=3600)})
+        hswap_usage.schedule()
+        self.assertEqual(self.calls(), [self.STATUS])
+        self.assertEqual(hswap_usage.claude_accounts.service_note, "caller_env_only")
+        with mock.patch.object(hswap_usage.claude_accounts, "_version", hswap_usage.claude_accounts.VERSION):
+            self.assertEqual(hswap_usage.claude_accounts.status()["service_note"], "keepalive 예약: 다음 설치 때 갱신")
+
+    def test_a_daemon_that_needs_sudo_is_left_to_a_person_and_logged_once_an_hour(self):
+        self.script({self.STATUS: self.st(outdated=True, outdatedReason="job_changed", reinstallNeedsSudo=True, domain="system", ahead=3600)})
+        said = {}
+        with mock.patch.object(hswap_usage, "_said", said), mock.patch.object(hswap_usage, "print", create=True) as log:
+            hswap_usage.schedule()
+            hswap_usage.schedule()  # 한 시간 안: 다시 남기지 않는다
+            said["service"] = (said["service"][0], said["service"][1] - hswap_usage.claude_accounts.LOG_AGAIN_S - 1)
+            hswap_usage.schedule()
+        self.assertFalse([c for c in self.calls() if "--install-service" in c])
+        lines = [c.args[0] for c in log.call_args_list if "sudo" in c.args[0]]
+        self.assertEqual(len(lines), 2, lines)
+        self.assertIn("sudo hswap claude keepalive --install-service --system", lines[0])
+        with mock.patch.object(hswap_usage.claude_accounts, "_version", hswap_usage.claude_accounts.VERSION):
+            self.assertIn("sudo hswap claude keepalive --install-service --system", hswap_usage.claude_accounts.status()["service_note"])
+
+    def test_a_busy_store_postpones_the_reinstall_without_a_failure(self):
+        """covers: USAGE-11. service_busy(exit 1): keepalive·reconcile 실행이 잠금을 쥐었다. 실패로 세지 않고 다음 주기(KEEP_S)에 다시 한다"""
+        again = "claude keepalive --install-service --ahead 3600 --json"
+        busy = json.dumps({"schemaVersion": 1, "error": {"type": "service_busy", "message": "A keepalive or reconcile run held the store lock"}})
+        self.script({self.STATUS: self.st(outdated=True, outdatedReason="job_changed", reinstallNeedsSudo=False, ahead=3600), again: [busy, 1]})
+        with mock.patch.object(hswap_usage, "_said", {}), mock.patch.object(hswap_usage, "print", create=True) as log:
+            hswap_usage.schedule()
+        printed = [c.args[0] for c in log.call_args_list]
+        self.assertFalse([x for x in printed if "설치 실패" in x], printed)
+        self.assertTrue([x for x in printed if x.startswith("[jarvis] hswap:") and "service_busy" in x and "다음 주기" in x], printed)
+        self.assertIn("service_busy", hswap_usage.claude_accounts.HSWAP_ERRORS)
 
     def test_outdated_managed_service_is_reinstalled_with_its_own_settings(self):
         """적재돼 있어도 hswap 이 낡았다고 하면(예: 자격이 바뀌면 바로 깨우는 WatchPaths 가 없다) 사람이 고른 설정 그대로 다시 설치한다"""
@@ -717,7 +772,8 @@ class MacSessionTest(FakeHswapCase):
             self.assertEqual(code, 409, body)
             self.assertIn("sudo hswap claude keepalive --install-service --system --then-auto", body["error"])
             self.assertFalse([c for c in self.calls() if " set " in c or "--install-service" in c or c.startswith("claude priority ")])
-            self.assertIsNone(hswap_usage.schedule())  # 데몬 예약 옆에 gui 예약을 만들지 않는다
+            hswap_usage.schedule()
+            self.assertFalse([c for c in self.calls() if "--install-service" in c])  # 데몬 예약 옆에 gui 예약을 만들지 않는다
 
 
 class DebugLogTest(FakeHswapCase):
@@ -930,6 +986,15 @@ class RotationTest(FakeHswapCase):
             code, _ = hswap_usage.set_rotation("1", "2", "90")
         self.assertEqual(code, 200)
         self.assertIn(again, self.calls())
+
+    def test_a_busy_reinstall_during_rotation_says_so_in_korean(self):
+        st = json.dumps({"schemaVersion": 1, "platform": "launchd", "installed": True, "managed": True, "loaded": True, "ahead": 3600, "thenAuto": False})
+        again = "claude keepalive --install-service --ahead 3600 --then-auto --json"
+        busy = json.dumps({"schemaVersion": 1, "error": {"type": "service_busy", "message": "m"}})
+        self.answers(**{self.STATUS: [st, 0], again: [busy, 1]})
+        with mock.patch.object(hswap_usage.sys, "platform", "darwin"), mock.patch.object(hswap_usage.claude_accounts, "doctor", None):
+            code, body = hswap_usage.set_rotation("1", "2", "90")
+        self.assertEqual((code, body["error"]), (409, hswap_usage.claude_accounts.HSWAP_ERRORS["service_busy"]))
 
     def test_macos_human_made_service_is_not_changed(self):
         st = json.dumps({"schemaVersion": 1, "platform": "launchd", "installed": True, "managed": False, "loaded": True})

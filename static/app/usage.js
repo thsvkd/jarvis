@@ -154,7 +154,7 @@
  // macOS 는 hswap doctor 가 답한 Claude 저장 방식(file·auto)과 문제를 붙인다(USAGE-15)
  const STORE={file:"파일",auto:"키체인(auto)",keychain:"키체인(필수)"};
  const MIGRATE="hswap claude migrate-store --to file --keep keychain"; // jarvis/macos_daemon.py MIGRATE 와 같다(tests/test_claude_accounts.py 가 본다). hswap 은 --keep 없이 거절한다
- const hswapMeta=h=>h?html`<span class="ul-muted">hswap ${h.version||"없음"}${h.version!==h.pinned?` (고정 ${h.pinned})`:""}${h.note?" · "+h.note:""}${h.store?" · 저장 방식 "+(STORE[h.store]||h.store):""}${h.keychain_backups?" · 키체인 백업 "+h.keychain_backups+"개":""}${h.keepalive?" · "+h.keepalive:""}</span>${(h.problems||[]).length?html`<span class="ul-muted">hswap doctor: ${h.problems.join(" · ")}</span>`:""}${(h.events||[]).length?html`<span class="ul-muted">최근 hswap: ${h.events.map(evText).join(" / ")}</span>`:""}`:"";
+ const hswapMeta=h=>h?html`<span class="ul-muted">hswap ${h.version||"없음"}${h.version!==h.pinned?` (고정 ${h.pinned})`:""}${h.note?" · "+h.note:""}${h.store?" · 저장 방식 "+(STORE[h.store]||h.store):""}${h.keychain_backups?" · 키체인 백업 "+h.keychain_backups+"개":""}${h.keepalive?" · "+h.keepalive:""}${h.service_note?" · "+h.service_note:""}</span>${(h.problems||[]).length?html`<span class="ul-muted">hswap doctor: ${h.problems.join(" · ")}</span>`:""}${(h.events||[]).length?html`<span class="ul-muted">최근 hswap: ${h.events.map(evText).join(" / ")}</span>`:""}`:"";
  // hswap 0.3.1 의 기록(USAGE-16). 시각은 ISO 문자열이나 epoch 초로 온다. 값은 모두 html`` 이 이스케이프한다
  const hm=ts=>{const t=typeof ts==="number"?ts*1000:Date.parse(ts);return isFinite(t)?new Date(t).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",hour12:false}):"";};
  const evText=e=>(hm(e.ts)+" "+[e.cmd,e.caller,e.outcome].filter(x=>x!=null&&x!=="").join(" · ")).trim();

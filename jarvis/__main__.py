@@ -16,7 +16,7 @@ if sys.argv[1:] == ["bridge"]:  # core 의 SSH bridge(jarvis/ipc.py): 표준 출
     from .ipc import bridge
     sys.exit(bridge())
 
-from . import config, hswap_usage, relocate, self_update, tray  # noqa: E402
+from . import config, hswap_usage, logrotate, relocate, self_update, tray  # noqa: E402
 from .util import hide_child_consoles  # noqa: E402
 from .collector import Collector  # noqa: E402
 from .core import Core, devices_from  # noqa: E402
@@ -88,6 +88,7 @@ def main():
     icon = tray.make_icon()
     if masked and not icon:  # 아이콘이 없으면 평소처럼 메인 스레드의 처리기로
         signal.pthread_sigmask(signal.SIG_UNBLOCK, sigs)
+    logrotate.start()
     col = Collector()
     col.start()
     threading.Thread(target=hswap_usage.maintain, name="jarvis-hswap", daemon=True).start()
