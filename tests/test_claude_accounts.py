@@ -2393,12 +2393,13 @@ class HeadlessTest(unittest.TestCase):
         self.assertIn("hswap claude keepalive --install-service", st["problems"][0])
 
     def test_the_last_reconcile_hint_comes_with_the_ambiguous_problem(self):
-        hint = "Nothing records who refreshed. Keep the newer login with hswap claude migrate-store --to file --keep keychain."
+        hint = ("Nothing records which login is newer. Check which store was written last and keep it with hswap claude migrate-store --to file "
+                "--keep file|keychain. For reference only, nothing decides by it: the Keychain item's access token expires at 2026-11-14T20:10:00Z, <b>")
         claude_accounts.doctor = {"store": "file", "problems": ["keychain_item_present", "reconcile_ambiguous"], "last_reconcile_hint": hint}
         claude_accounts._aqua = True
         with mock.patch.object(claude_accounts, "_version", claude_accounts.VERSION):
             problems = claude_accounts.status()["problems"]
-        self.assertTrue(problems[1].endswith(f"(reconcile_ambiguous): {hint}"), problems)
+        self.assertTrue(problems[1].endswith(f"(reconcile_ambiguous): {hint}"), problems)  # 그대로 둔다. 이스케이프는 화면이 한다
         self.assertTrue(claude_accounts.item_text().endswith(hint))
         claude_accounts.doctor = {**claude_accounts.doctor, "problems": ["keychain_item_present"]}
         self.assertNotIn(hint, claude_accounts.item_text())  # 판정 불가가 아니면 붙이지 않는다
@@ -2428,7 +2429,8 @@ class HeadlessTest(unittest.TestCase):
         claude_accounts.doctor = {"store": "file", "problems": ["keychain_item_present", "reconcile_ambiguous"], "reconcile_installed": True, "reconcile_loaded": True}
         text = claude_accounts.item_text()
         self.assertIn("어느 쪽이 새 로그인인지", text)  # 사람이 골라야 한다
-        self.assertIn(claude_accounts.macos_daemon.MIGRATE, text)
+        self.assertIn("어느 쪽이 최근에 쓰였는지 확인하고 hswap claude migrate-store --to file --keep file|keychain", text)
+        self.assertNotIn("--keep keychain", text)  # 처음 옮길 때와 달리 어느 쪽이 맞는지 정해져 있지 않다
         k = keepalive_value(store="file", ok=False, error={"type": "keychain_item_present"})
         with mock.patch.object(claude_accounts, "_keepalive", return_value=k), mock.patch.object(claude_accounts.sys, "platform", "linux"):
             s = claude_accounts.login()

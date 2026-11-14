@@ -42,7 +42,9 @@ HSWAP_ERRORS = {**KEEPALIVE_ERRORS, "stores_disagree": KEEPALIVE_ERRORS["split_b
                 # hswap 0.3.0(파일 저장 방식의 세션 밖 동작·reconcile). CredentialReadError 는 키체인을 읽지 못한 예외 클래스 이름이다
                 "CredentialReadError": "hswap 이 자격 증명을 읽지 못했습니다",
                 "keychain_item_present_locked": "키체인에 Claude 로그인이 있는데 키체인이 잠겨 정리하지 못했습니다. 로그인 세션에서 reconcile 이 정리합니다",
-                "reconcile_ambiguous": f"키체인과 파일 중 어느 쪽이 새 로그인인지 알 수 없어 정리하지 않았습니다. 그 기기의 로그인 세션에서 한쪽을 고르세요({macos_daemon.MIGRATE} 또는 --keep file)"}
+                # 처음 파일 방식으로 옮길 때(MIGRATE, --keep keychain)와 달리 어느 쪽이 맞는지 정해져 있지 않다
+                "reconcile_ambiguous": "키체인과 파일 중 어느 쪽이 새 로그인인지 알 수 없어 정리하지 않았습니다. 그 기기의 로그인 세션에서 "
+                                       "어느 쪽이 최근에 쓰였는지 확인하고 hswap claude migrate-store --to file --keep file|keychain 로 고르세요"}
 FATAL_ERRORS = ("config_conflict", "keychain_item_present", "relogin_required")  # keepalive 기록이 옛것이어도 기기 상태에 바로 보이는 type
 LOGIN_WARN_S = 3 * 86400  # 로그인(갱신 토큰) 만료 3일 전부터 '주의 필요'. 새 /login 만이 기한을 늘린다
 CACHE_S = 30  # hswap 자체가 캐시하므로 짧게만 묶는다(요청마다 프로세스를 띄우지 않게)

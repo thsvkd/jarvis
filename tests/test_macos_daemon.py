@@ -1102,13 +1102,23 @@ class Doctor(unittest.TestCase):
     def test_full_answer(self):
         self.assertEqual(macos_daemon.summary(FULL_DOCTOR), {"store": "file", "problems": ["reconcile_service_missing"], "keychain_item_present": False,
                                                               "keepalive_loaded": False, "keepalive_domain": "gui", "reconcile_installed": False,
-                                                              "reconcile_loaded": False, "keychain_backups": None, "last_reconcile_hint": None})
+                                                              "reconcile_loaded": False, "keychain_backups": None, "last_reconcile_hint": None,
+                                                              "keepalive_ahead": None})
         later = {**FULL_DOCTOR, "keychainBackups": 3, "problems": ["keychain_item_present", "reconcile_ambiguous"]}  # hswap 0.3.0 의 뒤 수정
         self.assertEqual((macos_daemon.summary(later)["keychain_backups"], macos_daemon.summary(later)["problems"]), (3, ["keychain_item_present", "reconcile_ambiguous"]))
         for odd in (-1, True, "3", 1.5):
             self.assertIsNone(macos_daemon.summary({**FULL_DOCTOR, "keychainBackups": odd})["keychain_backups"], odd)
         self.assertIn("migrate-store", macos_daemon.PROBLEMS["reconcile_ambiguous"])
         self.assertIn("keepalive 예약이 없습니다", macos_daemon.PROBLEMS["keepalive_service_missing"])
+        self.assertEqual(macos_daemon.PROBLEMS["keepalive_ahead_too_short"], "keepalive 예약의 갱신 여유가 너무 짧습니다. 다시 설치하세요(hswap claude keepalive --install-service)")
+        self.assertIn("--keep file|keychain", macos_daemon.PROBLEMS["reconcile_ambiguous"])
+        self.assertNotIn("--keep keychain", macos_daemon.PROBLEMS["reconcile_ambiguous"])
+
+    def test_the_keepalive_ahead_is_read_when_present(self):
+        svc = lambda **kw: {**FULL_DOCTOR, "keepaliveService": {**FULL_DOCTOR["keepaliveService"], **kw}}
+        self.assertEqual(macos_daemon.summary(svc(ahead=3600.0))["keepalive_ahead"], 3600.0)
+        for odd in ({}, {"ahead": None}, {"ahead": True}, {"ahead": "3600"}, {"ahead": -1}):
+            self.assertIsNone(macos_daemon.summary(svc(**odd))["keepalive_ahead"], odd)
 
     def test_the_last_reconcile_hint_is_text_cut_and_cleaned(self):
         hint = "Nothing records who refreshed.\x1b[31m\nKeep it." + "x" * 400
@@ -1121,7 +1131,8 @@ class Doctor(unittest.TestCase):
     def test_missing_or_odd_fields_are_unknown(self):
         self.assertEqual(macos_daemon.summary({"schemaVersion": 1}), {"store": None, "problems": [], "keychain_item_present": None,
                                                                        "keepalive_loaded": None, "keepalive_domain": None, "reconcile_installed": None,
-                                                                       "reconcile_loaded": None, "keychain_backups": None, "last_reconcile_hint": None})
+                                                                       "reconcile_loaded": None, "keychain_backups": None, "last_reconcile_hint": None,
+                                                                       "keepalive_ahead": None})
         odd = {"schemaVersion": 1, "store": "File Store!", "problems": "not_file_store", "keychainItemPresent": "yes",
                "keepaliveService": [], "reconcileService": {"installed": "true"}}
         self.assertEqual(macos_daemon.summary(odd), macos_daemon.summary({"schemaVersion": 1}))

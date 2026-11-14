@@ -31,6 +31,9 @@ KEEP_S = 3600  # 로그인 유지 주기. refresh 는 기한이 된 토큰만 �
 KEEP = ("codex", "grok")
 SERVICE_FROM = "0.2.8"  # `hswap claude keepalive --install-service·--service-status` 를 아는 hswap
 AHEAD_S = 7200  # 만료 2시간 전부터 갱신한다. 한 번 실패해도 고칠 시간이 남는다
+# hswap 0.3.0 은 --ahead 가 이 값 이하인 예약 설치를 거절한다(ahead_too_short: Claude Code 의 300초 창 + 예약 간격 300초).
+# 다시 설치할 때 이보다 짧은 옛 예약의 ahead 는 이어받지 않고 AHEAD_S 를 쓴다
+MIN_AHEAD_S = 600
 TICK_S = 300  # 게이트웨이가 keepalive 를 직접 부르는 간격(macOS 의 로그인 세션에서는 hswap 의 LaunchAgent 가 같은 간격으로 부른다)
 ROTATION = "priority-consume-first"  # 계정 priority 높은 것부터, 전환 기준 아래인 계정만 쓴다. 높은 계정이 풀리면 돌아간다(USAGE-14)
 ROTATION_FROM = "0.2.9"  # 이 전략과 `hswap claude priority` 를 확인한 hswap
@@ -251,7 +254,7 @@ def schedule():
     st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json")[1])
     # hswap 이 만든 예약은 적재되지 않았거나 지금 hswap 이 만드는 모양보다 낡았을 때(outdated)만 그 설정 그대로 다시 설치한다
     if st and st.get("platform") == "launchd" and (st.get("installed") is False or (st.get("managed") is True and (st.get("loaded") is False or st.get("outdated") is True))):
-        ahead = st.get("ahead") if isinstance(st.get("ahead"), (int, float)) and not isinstance(st.get("ahead"), bool) and st.get("ahead") > 0 else AHEAD_S
+        ahead = _ahead(st)
         # 0 설치·갱신, 3 GUI 세션이 없어 다음 로그인 때 적재. 어느 쪽이든 다시 물은 상태를 쓴다
         # 예약이 없을 때 사람이 자동 전환을 켜 두었으면(순서 전략, USAGE-14) 그것도 다시 붙인다
         then = st.get("thenAuto") is True or (st.get("installed") is False and _settings(exe).get("autoswitch.strategy") == ROTATION)
@@ -277,6 +280,12 @@ def inspect():
     body = _json(_run(exe, "claude", "doctor", "--json")[1]) if new else None  # 문제가 있으면 0 이 아닌 코드로 끝나도 JSON 은 정상이다
     claude_accounts.doctor = macos_daemon.summary(body, None if macos_daemon.answered(body) else _settings(exe))
     return claude_accounts.doctor
+
+
+def _ahead(st):
+    """다시 설치할 keepalive 예약의 ahead: 지금 예약의 값(사람이 고른 것)이 MIN_AHEAD_S 보다 길면 그것, 아니면 AHEAD_S."""
+    v = _num(st.get("ahead"))
+    return v if v is not None and v > MIN_AHEAD_S else AHEAD_S
 
 
 def _settings(exe):
@@ -352,7 +361,7 @@ def set_rotation(on, order, threshold):
     # 데몬 keepalive 는 gui 예약으로 바꿀 수 없다(hswap 이 ServiceConflict 로 거절한다). 적재되지 않아 tick 이 도는 동안은 전략만으로 켜고 끈다
     if sys.platform == "darwin" and (on == "1") != now["on"] and (claude_accounts.doctor or {}).get("keepalive_domain") != "system":
         st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json")[1]) or {}
-        ahead = st.get("ahead") if _num(st.get("ahead")) and st.get("ahead") > 0 else AHEAD_S
+        ahead = _ahead(st)
         steps.append((("claude", "keepalive", "--install-service", "--ahead", str(int(ahead)), *(["--then-auto"] if on == "1" else []), "--json"), "예약 다시 설치"))
     with _rot_lock:
         for args, what in steps:

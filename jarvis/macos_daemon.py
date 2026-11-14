@@ -43,7 +43,9 @@ PROBLEMS = {"not_file_store": "저장 방식이 파일이 아닙니다", "keycha
             "slot_without_backup": "백업이 없는 슬롯이 있습니다", "session_profiles": "세션 프로필(sessions/)이 남아 있습니다",
             "profile_env": "CLAUDE_CONFIG_DIR 같은 프로필 환경 변수가 있습니다", "reconcile_service_missing": "reconcile 예약이 없습니다",
             # 사람이 골라야 한다: reconcile 은 증거로만 정하고 시각으로 고르지 않는다
-            "reconcile_ambiguous": "키체인과 파일 중 어느 쪽이 새 로그인인지 알 수 없습니다. 로그인 세션에서 migrate-store --keep 으로 직접 고르세요",
+            "reconcile_ambiguous": "키체인과 파일 중 어느 쪽이 새 로그인인지 알 수 없습니다. 로그인 세션에서 어느 쪽이 최근에 쓰였는지 확인하고 "
+                                   "hswap claude migrate-store --to file --keep file|keychain 로 직접 고르세요",
+            "keepalive_ahead_too_short": "keepalive 예약의 갱신 여유가 너무 짧습니다. 다시 설치하세요(hswap claude keepalive --install-service)",
             # hswap 은 jarvis tick 을 보지 못한다. tick 이 대신 도는 기기에서는 claude_accounts.status 가 이 문제를 빼고 그 사실을 보인다
             "keepalive_service_missing": "keepalive 예약이 없습니다. Claude Code 가 스스로 토큰을 갱신하면 키체인과 갈라질 수 있습니다"
                                          "(설치: hswap claude keepalive --install-service --ahead 7200)"}
@@ -136,7 +138,7 @@ def port(data, home):
 
 def summary(body, settings=None):
     """hswap claude doctor --json(schemaVersion 1) → {store, problems, keychain_item_present, keepalive_loaded, keepalive_domain, reconcile_installed,
-    reconcile_loaded, keychain_backups·last_reconcile_hint(0.3.0 의 뒤 수정에서 생긴 필드. 없으면 None)}.
+    reconcile_loaded, keychain_backups·last_reconcile_hint·keepalive_ahead(0.3.0 의 뒤 수정에서 생긴 필드. 없으면 None)}.
     없는 필드·다른 모양은 모름(None·[])으로 둔다. doctor 를 모르는 옛 hswap 은 settings({키: 값}, hswap claude config --json)의
     credentials.store 만 쓴다(값이 없으면 hswap 기본값 auto). doctor 가 오류로 답했어도(error 봉투) 같다. 둘 다 없으면 None."""
     if not answered(body):
@@ -145,7 +147,7 @@ def summary(body, settings=None):
         store = settings.get("credentials.store")
         return {"store": store if store in ("auto", "file") else "auto", "problems": [], "keychain_item_present": None,
                 "keepalive_loaded": None, "keepalive_domain": None, "reconcile_installed": None, "reconcile_loaded": None, "keychain_backups": None,
-                "last_reconcile_hint": None}
+                "last_reconcile_hint": None, "keepalive_ahead": None}
     flag = lambda d, k: d.get(k) if isinstance(d.get(k), bool) else None
     obj = lambda k: body.get(k) if isinstance(body.get(k), dict) else {}
     word = lambda v, pat: v if isinstance(v, str) and re.fullmatch(pat, v) else None
@@ -158,7 +160,8 @@ def summary(body, settings=None):
             "keychain_backups": n if isinstance(n := body.get("keychainBackups"), int) and not isinstance(n, bool) and n >= 0 else None,
             # 사람용 문자열: 제어 문자를 빼고 한 줄로 잘라 둔다(화면은 이스케이프해 보인다)
             "last_reconcile_hint": " ".join(re.sub(r"[\x00-\x1f\x7f]", " ", h).split())[:HINT_MAX] or None
-            if isinstance(h := body.get("lastReconcileHint"), str) else None}
+            if isinstance(h := body.get("lastReconcileHint"), str) else None,
+            "keepalive_ahead": a if isinstance(a := obj("keepaliveService").get("ahead"), (int, float)) and not isinstance(a, bool) and a > 0 else None}
 
 
 def answered(body):

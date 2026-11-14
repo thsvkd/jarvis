@@ -539,6 +539,22 @@ class ScheduleTest(FakeHswapCase):
         hswap_usage.schedule()
         self.assertEqual(self.calls(), [self.STATUS, again, self.STATUS])
 
+    def test_jarvis_never_installs_keepalive_with_an_ahead_hswap_refuses(self):
+        """covers: USAGE-15. hswap 0.3.0 은 --ahead 600초 이하를 거절한다(ahead_too_short). 옛 예약의 짧은 ahead 는 이어받지 않는다"""
+        self.assertGreater(hswap_usage.AHEAD_S, hswap_usage.MIN_AHEAD_S)
+        self.assertEqual(hswap_usage.MIN_AHEAD_S, 600)
+        for old in (600, 300):
+            again = f"claude keepalive --install-service --ahead {hswap_usage.AHEAD_S} --json"
+            self.script({self.STATUS: self.st(loaded=False, ahead=old, thenAuto=False), again: ['{"schemaVersion": 1, "ok": true}', 0]})
+            if os.path.exists(os.path.join(self.dir, "argv")):
+                os.remove(os.path.join(self.dir, "argv"))
+            hswap_usage.schedule()
+            self.assertIn(again, self.calls(), old)
+        self.script({self.STATUS: self.st(loaded=False, ahead=601, thenAuto=False)})
+        os.remove(os.path.join(self.dir, "argv"))
+        hswap_usage.schedule()
+        self.assertIn("claude keepalive --install-service --ahead 601 --json", self.calls())  # 그보다 길면 사람이 고른 값을 지킨다
+
     def test_outdated_managed_service_is_reinstalled_with_its_own_settings(self):
         """적재돼 있어도 hswap 이 낡았다고 하면(예: 자격이 바뀌면 바로 깨우는 WatchPaths 가 없다) 사람이 고른 설정 그대로 다시 설치한다"""
         again = "claude keepalive --install-service --ahead 3600 --json"
@@ -755,6 +771,15 @@ class RotationTest(FakeHswapCase):
         again = "claude keepalive --install-service --ahead 3600 --then-auto --json"
         self.answers(**{self.STATUS: [st, 0], again: ['{"schemaVersion": 1}', 0]})
         with mock.patch.object(hswap_usage.sys, "platform", "darwin"):
+            code, _ = hswap_usage.set_rotation("1", "2", "90")
+        self.assertEqual(code, 200)
+        self.assertIn(again, self.calls())
+
+    def test_macos_rotation_does_not_carry_a_too_short_ahead(self):
+        st = json.dumps({"schemaVersion": 1, "platform": "launchd", "installed": True, "managed": True, "loaded": True, "ahead": 300, "thenAuto": False})
+        again = f"claude keepalive --install-service --ahead {hswap_usage.AHEAD_S} --then-auto --json"
+        self.answers(**{self.STATUS: [st, 0], again: ['{"schemaVersion": 1}', 0]})
+        with mock.patch.object(hswap_usage.sys, "platform", "darwin"), mock.patch.object(hswap_usage.claude_accounts, "doctor", None):
             code, _ = hswap_usage.set_rotation("1", "2", "90")
         self.assertEqual(code, 200)
         self.assertIn(again, self.calls())
