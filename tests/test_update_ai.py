@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -471,17 +472,48 @@ def test_unmanaged_app_server_blocks_the_codex_update(tmp_path):
         time.sleep(1)
         os.environ["CODEX_STATE"] = str(state_path)
         try:
-            result = run_update(tmp_path / "home", [bin_dir], log, "--only", "codex", "--allow-interrupt")
+            result = run_update(tmp_path / "home", [bin_dir], log, "--only", "codex")  # 승인(--allow-interrupt) 없이
         finally:
             del os.environ["CODEX_STATE"]
         assert result.returncode == 1, result.stdout
         assert "codex update" not in updates(log)
-        assert "unmanaged" in result.stdout
+        assert "unmanaged" in result.stdout and server.poll() is None
         assert str(server.pid) in result.stdout
     finally:
         server.kill()
         server.wait()
     assert stub.exists()
+
+
+def test_allow_interrupt_replaces_an_unmanaged_app_server_with_the_managed_daemon(tmp_path):
+    """covers: HARNESS-21"""
+    bin_dir = tmp_path / "bin"
+    state_path = tmp_path / "codex-state.json"
+    make_codex(bin_dir, state_path)
+    log = tmp_path / "calls.log"
+    env = env_for(tmp_path / "home", [bin_dir], log)
+    env["CODEX_STATE"] = str(state_path)
+    server = subprocess.Popen([sys.executable, str(bin_dir / "codex.py"), "--sleep-listen", "app-server", "--listen", "unix://"],
+                              env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    reaper = threading.Thread(target=server.wait)  # 이 테스트의 자식이라 거두지 않으면 좀비로 살아 있게 보인다
+    reaper.start()
+    try:
+        time.sleep(1)
+        os.environ["CODEX_STATE"] = str(state_path)
+        try:
+            result = run_update(tmp_path / "home", [bin_dir], log, "--only", "codex", "--allow-interrupt")
+        finally:
+            del os.environ["CODEX_STATE"]
+        assert result.returncode == 0, result.stdout
+        assert server.poll() is not None
+        done = updates(log)
+        assert done.index("codex app-server daemon start") < done.index("codex update"), done
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert state["cli"] == "2.0.0" and state["managed"] == "2.0.0" and state["status"] == "running"
+    finally:
+        if server.poll() is None:
+            server.kill()
+        reaper.join()
 
 
 def test_check_reports_the_daemon_rows(tmp_path):

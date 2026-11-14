@@ -42,6 +42,11 @@ class FakeUpdateAi:
     def process_table(self):
         return []
 
+    unmanaged = []  # 관리되지 않는 app-server 의 PID
+
+    def codex_unmanaged_servers(self, entry, table):
+        return list(self.unmanaged)
+
     def codex_check_rows(self, path, target, table):
         if not self.daemon:
             return []
@@ -65,6 +70,8 @@ class HarnessModuleTest(unittest.TestCase):
             for i in ids:  # 올렸다고 치고 설치본을 최신으로
                 if i in self.fake.latest:
                     self.fake.installed[i] = self.fake.latest[i]
+            if allow_interrupt:
+                self.fake.unmanaged = []  # 승인된 재시작은 관리되지 않는 app-server 를 관리형 데몬으로 바꾼다
             if allow_interrupt and self.fake.daemon:
                 managed = self.fake.daemon[0] and self.fake.installed["codex"]
                 self.fake.daemon = (managed, self.fake.installed["codex"])
@@ -202,6 +209,20 @@ class HarnessModuleTest(unittest.TestCase):
         # 관리형 설치가 없으면 실행 중 서버는 다른 것이 띄운 것이라 update-ai 가 맞출 수 없다(pit5 실측). 보고만 한다
         rows = {r["id"]: r["state"] for r in harness.status()["details"]["tools"]}
         self.assertEqual(rows["codex-server"], "unknown")
+        self.assertEqual(harness.plan()["steps"], [])
+
+    def test_an_unmanaged_app_server_is_replaced_by_the_approved_daemon_restart(self):
+        """covers: HARNESS-21
+        pi5-server2 실측: SSH 세션이 띄우고 고아로 남은 app-server 가 제어 소켓을 잡아 데몬 행은 맞아 보이고 codex 갱신만 매번 막혔다."""
+        self.use(installed={"codex": "0.166.0"}, latest={"codex": "0.169.0"}, daemon=("0.166.0", "0.166.0"))
+        self.fake.unmanaged = [2962]
+        p = harness.plan()
+        self.assertEqual([(st["id"], st["risk"], st["argv"]) for st in p["steps"]],
+                         [("codex-daemon", "config", ["update-ai", "--only", "codex", "--allow-interrupt"])])
+        self.assertIn("2962", p["steps"][0]["summary"])
+        r = harness.apply(p["plan_id"])
+        self.assertEqual(r["status"], "done", r)
+        self.assertEqual(self.updates, [(["codex"], True)])
         self.assertEqual(harness.plan()["steps"], [])
 
     def test_a_daemon_newer_than_the_cli_is_left_alone(self):

@@ -19,6 +19,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -370,6 +371,30 @@ def codex_unmanaged_servers(entry, table):
     return pids
 
 
+def codex_replace_unmanaged(path, pids):
+    """관리되지 않는 app-server 를 멈추고 관리형 데몬을 띄운다(승인된 재시작, --allow-interrupt 일 때만). 데몬이 돌면 True.
+
+    SSH 세션이 띄운 서버는 세션이 끝나도 고아로 남아 갱신을 계속 막는다(2026-11-14 pi5-server2, 11월 2일부터).
+    """
+    for pid in pids:
+        try:
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
+            else:
+                os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    for _ in range(20):
+        if not any(pid_alive(pid) for pid in pids):
+            break
+        time.sleep(0.5)
+    else:
+        say("  {:<14}  the unmanaged app-server did not stop".format("stop"))
+        return False
+    run_step("daemon-start", [path, "app-server", "daemon", "start"])
+    return (codex_daemon_state(path) or {}).get("status") == "running"
+
+
 def codex_daemon_sync(path, allow_interrupt):
     """관리형 app-server 데몬을 CLI 버전에 맞춘다. (필수 실패, 선택 실패).
 
@@ -571,9 +596,14 @@ def run_all(catalog, only, args):
         say("── {}  {}  ({}) ──".format(entry["id"], before or "version unknown", method))
         if entry["id"] == "codex":
             servers = codex_unmanaged_servers(entry, table())
+            if servers and args.allow_interrupt:
+                say("  {:<14}  stopping the unmanaged codex app-server (PID {}) for the managed daemon".format(
+                    "replace", " ".join(map(str, servers))))
+                if codex_replace_unmanaged(path, servers):
+                    servers = []
             if servers:
                 say("  {:<14}  an unmanaged codex app-server is running (PID {}); not updated".format("blocked", " ".join(map(str, servers))))
-                say("  {:<14}  stop it, start the managed daemon with: codex app-server daemon start, then run again".format(""))
+                say("  {:<14}  run again with --allow-interrupt to replace it with the managed daemon".format(""))
                 results.append((entry["id"], "failed: unmanaged app-server", before, before))
                 failed += 1
                 continue

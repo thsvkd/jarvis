@@ -94,6 +94,13 @@ def _rows():
                     # 뒤처져도 데몬 재시작이 계획에 끼어든다
                     daemon_rows = u.codex_check_rows(path, before or latest, table)
                     managed = any(name == "codex-daemon" for name, *_ in daemon_rows)
+                    unmanaged = u.codex_unmanaged_servers(entry, table)
+                    if unmanaged:
+                        # 고아로 남은 관리되지 않는 app-server 는 codex 갱신을 막는다. 승인된 재시작이 그것을 멈추고 관리형 데몬으로
+                        # 바꾼다(update-ai --allow-interrupt). 그 서버가 제어 소켓을 잡고 있으면 데몬 행은 그 서버의 판이라 뺀다
+                        daemon_rows = [r for r in daemon_rows if r[0] != "codex-server"]
+                        rows.append({"id": "codex-server", "method": "codex daemon", "version": None, "latest": before or latest,
+                                     "state": "outdated", "unmanaged": unmanaged})
                     for name, st, have, want in daemon_rows:
                         # update-ai 처럼 데몬이 CLI 보다 새로우면 그대로 둔다(내리지 않는다). 관리형 설치가 없으면
                         # 실행 중 서버는 다른 것이 띄운 것이라 update-ai 가 맞출 수 없다: 보고만 한다
@@ -125,8 +132,17 @@ def status():
 
 def _plan(rows):
     steps = []
+    unmanaged = next((r["unmanaged"] for r in rows if r.get("unmanaged")), None)
     for r in rows:
         if r["state"] != "outdated":
+            continue
+        if r["id"] == "codex" and unmanaged:
+            continue  # 혼자서는 관리되지 않는 app-server 에 막힌다. 아래 데몬 단계가 codex 도 함께 올린다
+        if unmanaged and r["id"] in ("codex-daemon", "codex-server"):
+            if not any(s["id"] == "codex-daemon" for s in steps):
+                steps.append({"id": "codex-daemon", "risk": "config", "target": r["latest"],
+                              "summary": f"관리되지 않는 codex app-server(PID {' '.join(map(str, unmanaged))})를 멈추고 관리형 데몬으로 교체, codex 도 갱신 (재시작)",
+                              "argv": ["update-ai", "--only", "codex", "--allow-interrupt"]})
             continue
         if r["id"] in ("codex-daemon", "codex-server"):
             # 관리형 데몬 교체는 돌고 있는 Codex 작업을 끊을 수 있다(update-ai 의 --allow-interrupt). 승인이 필요하다
