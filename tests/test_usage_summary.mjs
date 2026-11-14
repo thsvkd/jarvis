@@ -141,6 +141,9 @@ assert.match(rendered(), /hswap 0\.3\.0 · 저장 방식 파일<\/span>/);
 devices[0].hswap = { version: "0.3.0", pinned: "0.3.0", note: null, store: "file", problems: [], keychain_backups: 3 };
 click({ prov: "all" });
 assert.match(rendered(), /hswap 0\.3\.0 · 저장 방식 파일 · 키체인 백업 3개<\/span>/);
+devices[0].hswap = { version: "0.3.0", pinned: "0.3.0", note: null, store: "file", problems: [], keepalive: "jarvis 가 5분마다 keepalive 를 돌립니다" };
+click({ prov: "all" });
+assert.match(rendered(), /hswap 0\.3\.0 · 저장 방식 파일 · jarvis 가 5분마다 keepalive 를 돌립니다<\/span>/);
 assert.doesNotMatch(rendered(), /hswap doctor:/);
 delete devices[0].hswap; delete devices[1].hswap;
 

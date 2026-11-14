@@ -266,7 +266,7 @@ cmd_install() {
   if [ "$STORE_RC" = 0 ] && [ -n "$RECONCILE" ]; then py reconcile; fi
   if [ "$STORE_RC" = 5 ]; then
     say "남은 일: hswap 이 설치된 뒤(게이트웨이가 몇 분 안에 설치한다) 키체인이 열린 곳(화면 세션, 또는 security unlock-keychain 을 실행한 셸)에서"
-    say "  hswap claude migrate-store --to file --keep keychain   # 앞에 --dry-run 으로 계획을 본다"
+    say "  hswap claude migrate-store --to file --keep keychain   # 앞에 --dry-run 으로 계획을 본다. 종료 코드 3 도 성공이다(옮겼고, 예약은 다음 로그인 때 적재된다)"
     say "  그 뒤 bash $REPO/deploy/macos-daemon.sh install 을 다시 실행하면 reconcile 예약을 설치한다. 그 전에는 Claude 사용량·전환이 되지 않는다"
     return 3
   fi

@@ -2378,6 +2378,31 @@ class HeadlessTest(unittest.TestCase):
             claude_accounts._aqua = True  # 세션 안의 키체인 저장 방식은 흔한 정상이다
             self.assertEqual(claude_accounts.status()["problems"], ["brand_new"])
 
+    def test_a_missing_keepalive_service_is_no_problem_where_the_gateway_ticks(self):
+        """hswap 은 jarvis tick 을 보지 못해 keepalive_service_missing 을 낸다. tick 이 대신 도는 기기에서는 문제가 아니다"""
+        claude_accounts.doctor = {"store": "file", "problems": ["keepalive_service_missing"], "keepalive_loaded": False}
+        claude_accounts._aqua = False
+        with mock.patch.object(claude_accounts, "_version", claude_accounts.VERSION):
+            st = claude_accounts.status()
+            self.assertEqual((st["problems"], st["keepalive"]), ([], "jarvis 가 5분마다 keepalive 를 돌립니다"))
+            claude_accounts._aqua = True  # 세션 안: tick 이 돌지 않는다
+            st = claude_accounts.status()
+        self.assertNotIn("keepalive", st)
+        self.assertEqual(len(st["problems"]), 1)
+        self.assertIn("keepalive 예약이 없습니다. Claude Code 가 스스로 토큰을 갱신하면 키체인과 갈라질 수 있습니다", st["problems"][0])
+        self.assertIn("hswap claude keepalive --install-service", st["problems"][0])
+
+    def test_the_last_reconcile_hint_comes_with_the_ambiguous_problem(self):
+        hint = "Nothing records who refreshed. Keep the newer login with hswap claude migrate-store --to file --keep keychain."
+        claude_accounts.doctor = {"store": "file", "problems": ["keychain_item_present", "reconcile_ambiguous"], "last_reconcile_hint": hint}
+        claude_accounts._aqua = True
+        with mock.patch.object(claude_accounts, "_version", claude_accounts.VERSION):
+            problems = claude_accounts.status()["problems"]
+        self.assertTrue(problems[1].endswith(f"(reconcile_ambiguous): {hint}"), problems)
+        self.assertTrue(claude_accounts.item_text().endswith(hint))
+        claude_accounts.doctor = {**claude_accounts.doctor, "problems": ["keychain_item_present"]}
+        self.assertNotIn(hint, claude_accounts.item_text())  # 판정 불가가 아니면 붙이지 않는다
+
     def test_the_session_message_names_the_command_hswap_accepts(self):
         """hswap 은 --keep 없는 migrate-store --to file 을 거절한다. 화면(usage.js)·설치기(macos_daemon)와 같은 명령 하나를 쓴다"""
         self.assertEqual(claude_accounts.macos_daemon.MIGRATE, "hswap claude migrate-store --to file --keep keychain")

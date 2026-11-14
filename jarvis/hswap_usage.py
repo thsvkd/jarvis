@@ -279,18 +279,6 @@ def inspect():
     return claude_accounts.doctor
 
 
-def _ticks():
-    """게이트웨이 tick 이 keepalive·auto 를 부르는가. macOS 밖은 늘 그렇다. macOS 는 로그인 세션 밖이고 파일 저장 방식이며
-    적재된 keepalive 예약(gui·system)이 없을 때만이다(세션 안에서는 hswap 예약이 돌고, 키체인 저장 방식은 세션 밖에서 읽지 못한다)."""
-    if sys.platform != "darwin":
-        return True
-    d = claude_accounts.doctor or {}
-    loaded = d.get("keepalive_loaded")
-    if loaded is None:  # doctor 를 모르는 옛 hswap: 예약 상태(schedule)의 답을 쓴다
-        loaded = (claude_accounts.service or {}).get("loaded") is True
-    return d.get("store") == "file" and not loaded and not claude_accounts.in_session()
-
-
 def _settings(exe):
     """hswap claude config --json 의 {키: 값}. 읽지 못하면 {}."""
     body = _json(_run(exe, "claude", "config", "--json")[1]) or {}
@@ -321,7 +309,7 @@ def rotation():
         return 502, {"error": "hswap 설정을 읽지 못했습니다"}
     ordered = s.get("autoswitch.strategy") == ROTATION
     svc = None if st is None else {"managed": st.get("managed") is True, "installed": st.get("installed") is not False}
-    return 200, {"on": ordered if _ticks() else (st or {}).get("thenAuto") is True, "ordered": ordered,
+    return 200, {"on": ordered if claude_accounts.gateway_ticks() else (st or {}).get("thenAuto") is True, "ordered": ordered,
                  "order": sorted((k for k, t in pri.items() if t > 0), key=lambda k: (-pri[k], int(k))),
                  "threshold": _num(s.get("autoswitch.threshold")), "service": svc}
 
@@ -350,7 +338,7 @@ def set_rotation(on, order, threshold):
     svc = now["service"]
     if sys.platform == "darwin" and svc and svc["installed"] and not svc["managed"] and (on == "1") != now["on"]:
         return 409, {"error": "이 기기의 keepalive 예약은 사람이 만든 것이라 jarvis 가 자동 전환을 켜거나 끄지 않습니다"}
-    if (sys.platform == "darwin" and (claude_accounts.doctor or {}).get("keepalive_domain") == "system" and not _ticks()
+    if (sys.platform == "darwin" and (claude_accounts.doctor or {}).get("keepalive_domain") == "system" and not claude_accounts.gateway_ticks()
             and (on == "1") != now["on"]):  # 데몬 예약이 적재되지 않아 tick 이 도는 동안은 순서 전략만으로 켜고 끈다
         # 데몬 keepalive 는 관리자 권한으로만 다시 설치된다. jarvis 는 sudo 를 쓰지 않는다
         flag = " --then-auto" if on == "1" else ""
@@ -376,7 +364,7 @@ def set_rotation(on, order, threshold):
 
 def tick():
     """게이트웨이가 TICK_S 마다 keepalive 를 부른다(결과는 hswap 이 keepalive.json 에 남긴다). 키체인이 없는 Linux·Windows 는 늘,
-    macOS 는 doctor 를 다시 읽고 로그인 세션 밖의 파일 저장 방식이며 적재된 keepalive 예약이 없을 때만(_ticks, USAGE-15).
+    macOS 는 doctor 를 다시 읽고 로그인 세션 밖의 파일 저장 방식이며 적재된 keepalive 예약이 없을 때만(claude_accounts.gateway_ticks, USAGE-15).
     자동 전환을 켠 기기(순서 전략, USAGE-14)는 keepalive 뒤에 auto --once 로 한 번 판정한다(세션 안의 macOS 는 hswap 예약의 --then-auto 가 한다)."""
     while True:
         try:
@@ -384,7 +372,7 @@ def tick():
                 inspect()
             exe = claude_accounts.binary()
             # 저장한 계정이 없으면 유지할 로그인도 없다(로그인하지 않은 기기에 실패 기록을 만들지 않는다)
-            if (_ticks() and config.CSWAP_INSTALL and exe and which_tool("claude") and claude_accounts.installer.state != "running"
+            if (claude_accounts.gateway_ticks() and config.CSWAP_INSTALL and exe and which_tool("claude") and claude_accounts.installer.state != "running"
                     and claude_accounts._store_read()):
                 code, _ = _run(exe, "claude", "keepalive", "--ahead", str(AHEAD_S), "--json")
                 if code == 0 and _settings(exe).get("autoswitch.strategy") == ROTATION:
@@ -404,7 +392,7 @@ def maintain():
                 step()
             except Exception as e:
                 print(f"[jarvis] hswap 유지 실패: {scrub_home(str(e))[:200]}", flush=True)
-        # 첫 버전 맞추기(설치) 뒤에 시작한다. 세션 안의 macOS 는 hswap 예약이 돌아 띄우지 않는다. 세션 밖은 tick 이 매번 할 일인지 가린다(_ticks)
+        # 첫 버전 맞추기(설치) 뒤에 시작한다. 세션 안의 macOS 는 hswap 예약이 돌아 띄우지 않는다. 세션 밖은 tick 이 매번 할 일인지 가린다(claude_accounts.gateway_ticks)
         if not ticking and (sys.platform != "darwin" or not claude_accounts.in_session()):
             ticking = True
             threading.Thread(target=tick, name="jarvis-keepalive", daemon=True).start()

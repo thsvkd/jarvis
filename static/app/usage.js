@@ -154,7 +154,7 @@
  // macOS 는 hswap doctor 가 답한 Claude 저장 방식(file·auto)과 문제를 붙인다(USAGE-15)
  const STORE={file:"파일",auto:"키체인(auto)",keychain:"키체인(필수)"};
  const MIGRATE="hswap claude migrate-store --to file --keep keychain"; // jarvis/macos_daemon.py MIGRATE 와 같다(tests/test_claude_accounts.py 가 본다). hswap 은 --keep 없이 거절한다
- const hswapMeta=h=>h?html`<span class="ul-muted">hswap ${h.version||"없음"}${h.version!==h.pinned?` (고정 ${h.pinned})`:""}${h.note?" · "+h.note:""}${h.store?" · 저장 방식 "+(STORE[h.store]||h.store):""}${h.keychain_backups?" · 키체인 백업 "+h.keychain_backups+"개":""}</span>${(h.problems||[]).length?html`<span class="ul-muted">hswap doctor: ${h.problems.join(" · ")}</span>`:""}`:"";
+ const hswapMeta=h=>h?html`<span class="ul-muted">hswap ${h.version||"없음"}${h.version!==h.pinned?` (고정 ${h.pinned})`:""}${h.note?" · "+h.note:""}${h.store?" · 저장 방식 "+(STORE[h.store]||h.store):""}${h.keychain_backups?" · 키체인 백업 "+h.keychain_backups+"개":""}${h.keepalive?" · "+h.keepalive:""}</span>${(h.problems||[]).length?html`<span class="ul-muted">hswap doctor: ${h.problems.join(" · ")}</span>`:""}`:"";
 
  // ---------------------------------------------------------------- 화면
  function view(){

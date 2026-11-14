@@ -113,14 +113,26 @@ def in_session():
     return _aqua
 
 
+def gateway_ticks():
+    """게이트웨이 tick(hswap_usage.tick)이 keepalive·auto 를 부르는가. 화면의 keepalive 표시도 같은 판정을 쓴다. macOS 밖은 늘 그렇다. macOS 는 로그인 세션 밖이고 파일 저장 방식이며
+    적재된 keepalive 예약(gui·system)이 없을 때만이다(세션 안에서는 hswap 예약이 돌고, 키체인 저장 방식은 세션 밖에서 읽지 못한다)."""
+    if sys.platform != "darwin":
+        return True
+    d = doctor or {}
+    loaded = d.get("keepalive_loaded")
+    if loaded is None:  # doctor 를 모르는 옛 hswap: 예약 상태(schedule)의 답을 쓴다
+        loaded = (service or {}).get("loaded") is True
+    return d.get("store") == "file" and not loaded and not in_session()
+
+
 def item_text():
     """keychain_item_present 의 화면 문구. 정리할 길은 hswap doctor 가 답한 reconcile 예약 상태로 정한다: 설치·적재됐으면 reconcile 이 정리하고,
     아니면 예약 설치를 권한다. 지난 reconcile 이 어느 쪽이 새것인지 몰랐으면(reconcile_ambiguous) 사람이 골라야 한다. doctor 를 모르면(옛 hswap) 붙이지 않는다."""
     base = KEEPALIVE_ERRORS["keychain_item_present"]
     if not doctor:
         return base
-    if "reconcile_ambiguous" in (doctor.get("problems") or []):
-        return f"{base}. {HSWAP_ERRORS['reconcile_ambiguous']}"
+    if "reconcile_ambiguous" in (doctor.get("problems") or []):  # hswap 이 본 사정(영문, macos_daemon.summary 가 자르고 거른 것)을 함께 보인다
+        return " ".join(x for x in (f"{base}. {HSWAP_ERRORS['reconcile_ambiguous']}", doctor.get("last_reconcile_hint")) if x)
     ready = doctor.get("reconcile_installed") is True and doctor.get("reconcile_loaded") is True
     return f"{base}. " + ("로그인 세션에서 reconcile 이 정리합니다" if ready else "hswap claude reconcile --install-service 로 정리 예약을 설치하세요")
 
@@ -200,10 +212,15 @@ def status():
     note = {"running": "설치하는 중", "failed": installer.error}.get(installer.state) if behind else None
     out = {"version": _version, "pinned": VERSION, "note": note}
     if doctor:  # macOS: 저장 방식(file·auto)과 hswap doctor 의 문제. 모르는 문제 코드는 코드 그대로(소문자·밑줄만) 보인다
-        # 세션 안의 키체인 저장 방식은 흔한 정상이라 not_file_store 는 세션 밖에서만 문제로 보인다
-        codes = [p for p in doctor.get("problems") or [] if p != "not_file_store" or (sys.platform == "darwin" and not in_session())]
-        out.update(store=doctor.get("store"), problems=[f"{macos_daemon.PROBLEMS[p]}({p})" if p in macos_daemon.PROBLEMS else p for p in codes],
-                   keychain_backups=doctor.get("keychain_backups"))
+        # 세션 안의 키체인 저장 방식은 흔한 정상이라 not_file_store 는 세션 밖에서만 문제로 보인다.
+        # keepalive_service_missing 은 hswap 이 jarvis tick 을 보지 못해 나온다: tick 이 대신 도는 기기에서는 문제가 아니다
+        ticks = "keepalive_service_missing" in (doctor.get("problems") or []) and gateway_ticks()
+        codes = [p for p in doctor.get("problems") or [] if (p != "not_file_store" or (sys.platform == "darwin" and not in_session()))
+                 and not (p == "keepalive_service_missing" and ticks)]
+        text = lambda p: f"{macos_daemon.PROBLEMS[p]}({p})" if p in macos_daemon.PROBLEMS else p
+        hint = doctor.get("last_reconcile_hint")
+        out.update(store=doctor.get("store"), problems=[f"{text(p)}: {hint}" if p == "reconcile_ambiguous" and hint else text(p) for p in codes],
+                   keychain_backups=doctor.get("keychain_backups"), **({"keepalive": "jarvis 가 5분마다 keepalive 를 돌립니다"} if ticks else {}))
     return out
 
 
