@@ -91,9 +91,7 @@ INSTALL_TIMEOUT_S = 600  # 처음이면 uv 가 Python 3.12+ 까지 받는다
 CLIS = ("claude", "codex", "grok", "opencode")  # hswap 이 다루는 하네스. 하나라도 있으면 hswap 을 설치한다
 _version = None  # 마지막으로 확인한 설치 버전("0.2.7"). 화면의 기기 행에 보인다
 service = None  # macOS: hswap claude keepalive --service-status 의 마지막 답(hswap_usage.schedule 이 쓴다). 모르면 None
-service_note = None  # 그 답의 안내 코드(hswap_usage._service_plan): caller_env_only·needs_sudo. 없으면 None
-SERVICE_NOTES = {"caller_env_only": "keepalive 예약: 다음 설치 때 갱신",
-                 "needs_sudo": "keepalive 예약(LaunchDaemon)을 다시 설치해야 합니다: sudo hswap claude keepalive --install-service --system"}
+service_note = None  # 그 답의 화면 안내(hswap_usage.schedule 이 쓴다). 없으면 None
 doctor = None  # macOS: hswap claude doctor 의 요약(macos_daemon.summary, hswap_usage.inspect 가 쓴다). 모르면 None
 _aqua = None  # macOS: 로그인 세션(Aqua) 안에서 도는가. 한 번 답을 받으면 다시 묻지 않는다
 _aqua_failed = None  # 마지막으로 묻지 못한 때(monotonic). AQUA_RETRY_S 동안은 다시 묻지 않는다
@@ -127,10 +125,14 @@ def in_session():
 def tick_reason():
     """게이트웨이 tick(hswap_usage.tick)이 keepalive·auto 를 건너뛰는 이유 코드. 부르면 None. 화면의 keepalive 표시도 같은 판정을 쓴다.
     macOS 밖은 늘 부른다. macOS 는 doctor 를 아는 hswap(DOCTOR_FROM)이 파일 저장 방식이라 답하고 적재된 keepalive 예약(gui·system)이 없으며
-    로그인 세션 밖일 때만이다(세션 안에서는 hswap 예약이 돌고, 키체인 저장 방식은 세션 밖에서 읽지 못한다). launchctl 을 묻는 세션 확인은 맨 뒤다."""
+    로그인 세션 밖일 때만이다(세션 안에서는 hswap 예약이 돌고, 키체인 저장 방식은 세션 밖에서 읽지 못한다). launchctl 을 묻는 세션 확인은 맨 뒤다.
+    버전을 한 번도 읽지 못했으면 doctor 대신 설정(credentials.store)으로 판단한다: 파일이면 1.15.0 전처럼 돌고, 아니면 version_unknown."""
     if sys.platform != "darwin":
         return None
-    if not _version or _key(_version) < _key(DOCTOR_FROM):
+    if not _version:
+        if (doctor or {}).get("store") != "file":
+            return "version_unknown"
+    elif _key(_version) < _key(DOCTOR_FROM):
         return "hswap_old"
     if not doctor or not doctor.get("store"):
         return "doctor_unknown"
@@ -243,7 +245,9 @@ def ensure():
 def check():
     """설치된 버전을 다시 읽고 ensure() 로 맞춘다."""
     global _version
-    _version = installed_version()
+    v = installed_version()
+    if v or not binary():  # 읽지 못한 것(시간 초과·OSError)은 낮다는 뜻이 아니다: 마지막으로 알던 버전을 지킨다
+        _version = v
     return ensure()
 
 
@@ -254,8 +258,8 @@ def status():
     behind = _version is None or _key(_version) < _key(VERSION)  # 맞은 뒤에는 지난 실패 문구를 보이지 않는다
     note = {"running": "설치하는 중", "failed": installer.error}.get(installer.state) if behind else None
     out = {"version": _version, "pinned": VERSION, "note": note}
-    if service_note in SERVICE_NOTES:
-        out["service_note"] = SERVICE_NOTES[service_note]
+    if service_note:
+        out["service_note"] = service_note
     if doctor and doctor.get("last_events"):  # hswap 0.3.1 doctor 의 최근 기록(macos_daemon.summary 가 거른 것) 중 3개
         out["events"] = doctor["last_events"][-3:]
     if doctor:  # macOS: 저장 방식(file·auto)과 hswap doctor 의 문제. 모르는 문제 코드는 코드 그대로(소문자·밑줄만) 보인다

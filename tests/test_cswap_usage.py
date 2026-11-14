@@ -168,7 +168,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(claude_accounts.installer.state, "done")
 
     def test_upgrades_only_an_older_hswap(self):
-        """covers: USAGE-5. 고정 버전보다 낮으면 같은 설치 명령으로 올리고, 같거나 높거나 버전을 읽지 못했거나 설치를 껐으면 그대로 둔다"""
+        """covers: USAGE-5. 고정 버전보다 낮으면 같은 설치 명령으로 올리고, 같거나 높거나 버전을 읽지 못했거나(마지막으로 알던 버전을 지킨다) 설치를 껐으면 그대로 둔다"""
         self.which["hswap"] = "/home/alice/.local/bin/hswap"
         installed = {}
 
@@ -187,7 +187,8 @@ class InstallTest(unittest.TestCase):
                     self.assertIsNone(claude_accounts.check())
                 cmds = [c[0][0] for c in r.call_args_list if c[0][0][1:] != ["--version"]]
                 self.assertEqual(cmds, [["/home/alice/.local/bin/uv", "tool", "install", claude_accounts.PACKAGE]] if install is True else [], out)
-                after = (installed["out"].split() or [None, None])[1]
+                # 읽지 못한 버전("")은 낮다는 뜻이 아니다: 화면은 마지막으로 알던 버전(앞 차례의 999.0.0)을 그대로 보인다
+                after = (installed["out"].split() or [None, "999.0.0"])[1]
                 self.assertEqual(claude_accounts.status(), {"version": after, "pinned": claude_accounts.VERSION, "note": None}
                                  if after or install is True else None, out)
 

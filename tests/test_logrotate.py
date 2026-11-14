@@ -64,6 +64,21 @@ class RotateTest(unittest.TestCase):
         self.assertFalse(logrotate.rotate(self.log, limit=1))
         self.assertEqual(self.read(target), "y" * 500)
 
+    def test_a_failure_is_logged_once_while_it_lasts(self):
+        """루트 소유 로그 등: 같은 원인이 이어지는 동안 10분마다 같은 줄을 남기지 않는다"""
+        self.write("z\n")
+        denied = PermissionError(1, "Operation not permitted")
+        with mock.patch.object(logrotate, "_failed", None), mock.patch.object(logrotate, "print", create=True) as log:
+            with mock.patch.object(logrotate.os, "chmod", side_effect=denied):
+                for _ in range(3):
+                    self.assertFalse(logrotate.rotate(self.log, limit=100))
+            self.assertEqual(log.call_count, 1)
+            self.assertEqual(log.call_args.args[0], "[jarvis] 로그 회전 실패: PermissionError")
+            logrotate.rotate(self.log, limit=100)  # 풀리면 잊는다
+            with mock.patch.object(logrotate.os, "chmod", side_effect=denied):
+                logrotate.rotate(self.log, limit=100)
+            self.assertEqual(log.call_count, 2)
+
     def test_only_macos_starts_the_watch_and_the_daemon_log_is_used(self):
         for platform, want in (("darwin", 1), ("linux", 0), ("win32", 0)):
             with mock.patch.object(logrotate.sys, "platform", platform), mock.patch.object(logrotate.threading, "Thread") as thread:

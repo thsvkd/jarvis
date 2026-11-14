@@ -13,6 +13,7 @@ import time
 LIMIT = 10 << 20  # 이보다 크면 돌린다
 KEEP = 3  # jarvis.log.1 … .3
 EVERY_S = 600
+_failed = None  # 마지막 실패의 종류. 같은 원인이 이어지는 동안 다시 남기지 않는다
 
 
 def path():
@@ -22,11 +23,13 @@ def path():
 
 def rotate(log, limit=LIMIT, keep=KEEP):
     """log 가 limit 보다 크면 .1 로 복사하고(.1→.2 … keep 개까지) 비운다. 돌렸으면 True. 모든 파일을 0600 으로 둔다.
-    심볼릭 링크나 없는 파일은 건드리지 않는다."""
+    심볼릭 링크나 없는 파일은 건드리지 않는다. 실패(루트 소유 로그의 chmod 등)는 원인이 바뀔 때만 한 줄 남긴다."""
+    global _failed
     try:
         if os.path.islink(log) or not os.path.isfile(log):
             return False
         os.chmod(log, 0o600)
+        _failed = None
         if os.path.getsize(log) <= limit:
             return False
         for i in range(keep - 1, 0, -1):
@@ -39,7 +42,9 @@ def rotate(log, limit=LIMIT, keep=KEEP):
         os.truncate(log, 0)
         return True
     except OSError as e:  # 로그를 돌리지 못해도 게이트웨이는 그대로 돈다
-        print(f"[jarvis] 로그 회전 실패: {type(e).__name__}", flush=True)
+        if (type(e).__name__, e.errno) != _failed:
+            print(f"[jarvis] 로그 회전 실패: {type(e).__name__}", flush=True)
+        _failed = (type(e).__name__, e.errno)
         return False
 
 

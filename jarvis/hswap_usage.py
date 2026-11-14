@@ -40,6 +40,8 @@ ROTATION_FROM = "0.2.9"  # 이 전략과 `hswap claude priority` 를 확인한 h
 UI = "jarvis-ui"  # 사람이 화면에서 누른 버튼이 부른 hswap 의 HSWAP_CALLER
 LOG_FROM = "0.3.1"  # `hswap claude log --since … --json`(logs/events.jsonl)을 아는 hswap
 LOG_MAX = 200  # 원격 로그 조회가 돌려주는 최대 줄 수(최근 것)
+LOG_TIMEOUT_S = 30  # hswap log 는 파일만 읽는다. core 의 HSWAP_LOG_TIMEOUT_S(40초) 안에 답한다
+_log_lock = threading.Lock()  # 원격 로그 조회는 이 기기에서 한 번에 하나만
 SINCE = re.compile(r"[1-9][0-9]{0,3}[mhd]")  # 로그 조회 기간: 30m·1h·2d 꼴만 hswap 에 넘긴다
 EVENT_KEYS = ("ts", "v", "cmd", "caller", "session", "store", "activeSlot", "outcome", "exit", "ms", "error", "details")  # hswap 0.3.1 events.jsonl
 # 로그 응답에서 한 번 더 가리는 것: Claude 토큰 모양과 절대·홈 경로(Windows 포함)
@@ -125,7 +127,7 @@ def account(row):
             "_prior": state in ("stale", "error")}
 
 
-def _run(exe, *args, caller="jarvis-gateway"):
+def _run(exe, *args, caller="jarvis-gateway", timeout=None):
     """hswap 을 한 번 실행해 (종료 코드, stdout). 실행하지 못했거나 TIMEOUT_S 를 넘기면 (None, "").
     caller: hswap 에 알리는 호출 주체(HSWAP_CALLER). 사람의 버튼이 부른 것은 jarvis-ui. 결과는 claude_accounts.call_log 가 게이트웨이 로그에 남긴다."""
     start = time.monotonic()
@@ -139,7 +141,7 @@ def _run(exe, *args, caller="jarvis-gateway"):
         claude_accounts.call_log(args, None, (time.monotonic() - start) * 1000)
         return None, ""
     try:
-        out, _ = proc.communicate(timeout=TIMEOUT_S)
+        out, _ = proc.communicate(timeout=timeout or TIMEOUT_S)
     except subprocess.TimeoutExpired:
         _kill(proc)
         claude_accounts.call_log(args, None, (time.monotonic() - start) * 1000)
@@ -281,8 +283,10 @@ def schedule():
     want, note = _service_plan(st)
     if (claude_accounts.doctor or {}).get("keepalive_domain") == "system":  # 데몬 keepalive(--system) 옆에 gui 예약을 두지 않는다(hswap 0.3.0)
         want = False
+    text = {"caller_env_only": "keepalive 예약: 다음 설치 때 갱신",
+            "needs_sudo": f"keepalive 예약(LaunchDaemon)을 다시 설치해야 합니다: {_sudo_command(st or {})}"}.get(note)
     if note == "needs_sudo":
-        _say("service", note, "keepalive 예약(LaunchDaemon)이 낡았거나 적재되지 않았습니다. 그 기기에서 실행하세요: sudo hswap claude keepalive --install-service --system")
+        _say("service", note, f"keepalive 예약(LaunchDaemon)이 낡았거나 적재되지 않았습니다. 그 기기에서 실행하세요: {_sudo_command(st)}")
     if want:
         ahead = _ahead(st)
         # 0 설치·갱신, 3 GUI 세션이 없어 다음 로그인 때 적재. 어느 쪽이든 다시 물은 상태를 쓴다
@@ -294,8 +298,14 @@ def schedule():
         elif code not in (0, 3):
             print(f"[jarvis] hswap keepalive 예약 설치 실패(종료 코드 {code})", flush=True)
         st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json")[1]) or st
-    claude_accounts.service, claude_accounts.service_note = st, note
+    claude_accounts.service, claude_accounts.service_note = st, text
     return st
+
+
+def _sudo_command(st):
+    """사람이 그 기기에서 데몬 예약을 다시 설치할 명령. 지금 예약의 ahead(hswap 이 받는 값만)·thenAuto 그대로."""
+    return (f"sudo hswap claude keepalive --install-service --system --ahead {int(_ahead(st))}"
+            + (" --then-auto" if st.get("thenAuto") is True else ""))
 
 
 def _service_plan(st):
@@ -440,7 +450,12 @@ def hswap_log(since):
     exe, v = claude_accounts.binary(), claude_accounts._version
     if not exe or not v or claude_accounts._key(v) < claude_accounts._key(LOG_FROM):
         return 409, {"error": f"hswap {LOG_FROM} 이상 필요"}
-    code, out = _run(exe, "claude", "log", "--since", since, "--json", caller=UI)
+    if not _log_lock.acquire(blocking=False):
+        return 429, {"error": "hswap 로그를 이미 읽는 중입니다. 잠시 뒤 다시 시도하세요"}
+    try:
+        code, out = _run(exe, "claude", "log", "--since", since, "--json", caller=UI, timeout=LOG_TIMEOUT_S)
+    finally:
+        _log_lock.release()
     events = _events(out, code)
     if events is None:
         return 502, {"error": f"hswap log 를 읽지 못했습니다(종료 코드 {code})"}
@@ -448,21 +463,27 @@ def hswap_log(since):
 
 
 def _events(out, code):
-    """hswap log 출력 → 사건(dict) 목록. 읽지 못하면 None."""
-    try:
-        body = json.loads(out)
-    except ValueError:
-        body = None
-        lines = [x for x in out.splitlines() if x.strip()]
+    """hswap log 출력 → 사건(dict) 목록. 읽지 못하면 None. hswap 0.3.1 은 JSON Lines 라 줄마다 먼저 읽는다(깨진 줄은 건너뛴다).
+    한 줄도 읽지 못하면 여러 줄로 쓴 JSON 하나로 읽는다. 값마다 배열은 그 안의 객체, {events: [...]} 는 그 목록, 그 밖의 객체는 사건 하나다."""
+    lines = [x for x in out.splitlines() if x.strip()]
+    if not lines:
+        return [] if code == 0 else None
+    values = []
+    for x in lines:
         try:
-            rows = [json.loads(x) for x in lines]
+            values.append(json.loads(x))
+        except ValueError:
+            continue
+    if not values:
+        try:
+            values = [json.loads(out)]
         except ValueError:
             return None
-        if lines or code == 0:
-            return [r for r in rows if isinstance(r, dict)]
-        return None
-    rows = body.get("events") if isinstance(body, dict) else body
-    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else None
+    rows = []
+    for v in values:
+        v = v.get("events") if isinstance(v, dict) and isinstance(v.get("events"), list) else v
+        rows += [r for r in v if isinstance(r, dict)] if isinstance(v, list) else [v] if isinstance(v, dict) else []
+    return rows
 
 
 def _event(e):
@@ -481,7 +502,7 @@ def _clean(v, depth=0):
     if v is None or isinstance(v, bool) or (isinstance(v, (int, float)) and math.isfinite(v)):
         return v
     if depth < 3 and isinstance(v, dict):
-        return {str(k)[:40]: _clean(x, depth + 1) for k, x in list(v.items())[:20]}
+        return {_clean(str(k))[:40]: _clean(x, depth + 1) for k, x in list(v.items())[:20]}  # 키도 값과 같이 가린다
     if depth < 3 and isinstance(v, list):
         return [_clean(x, depth + 1) for x in v[:20]]
     return None

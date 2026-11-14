@@ -579,12 +579,12 @@ class ScheduleTest(FakeHswapCase):
         self.script({self.STATUS: self.st(outdated=True, outdatedReason="caller_env_only", reinstallNeedsSudo=False, ahead=3600)})
         hswap_usage.schedule()
         self.assertEqual(self.calls(), [self.STATUS])
-        self.assertEqual(hswap_usage.claude_accounts.service_note, "caller_env_only")
+        self.assertEqual(hswap_usage.claude_accounts.service_note, "keepalive 예약: 다음 설치 때 갱신")
         with mock.patch.object(hswap_usage.claude_accounts, "_version", hswap_usage.claude_accounts.VERSION):
             self.assertEqual(hswap_usage.claude_accounts.status()["service_note"], "keepalive 예약: 다음 설치 때 갱신")
 
     def test_a_daemon_that_needs_sudo_is_left_to_a_person_and_logged_once_an_hour(self):
-        self.script({self.STATUS: self.st(outdated=True, outdatedReason="job_changed", reinstallNeedsSudo=True, domain="system", ahead=3600)})
+        self.script({self.STATUS: self.st(outdated=True, outdatedReason="job_changed", reinstallNeedsSudo=True, domain="system", ahead=3600, thenAuto=True)})
         said = {}
         with mock.patch.object(hswap_usage, "_said", said), mock.patch.object(hswap_usage, "print", create=True) as log:
             hswap_usage.schedule()
@@ -594,9 +594,12 @@ class ScheduleTest(FakeHswapCase):
         self.assertFalse([c for c in self.calls() if "--install-service" in c])
         lines = [c.args[0] for c in log.call_args_list if "sudo" in c.args[0]]
         self.assertEqual(len(lines), 2, lines)
-        self.assertIn("sudo hswap claude keepalive --install-service --system", lines[0])
+        want = "sudo hswap claude keepalive --install-service --system --ahead 3600 --then-auto"  # 지금 예약의 설정 그대로
+        self.assertTrue(lines[0].endswith(want), lines[0])
         with mock.patch.object(hswap_usage.claude_accounts, "_version", hswap_usage.claude_accounts.VERSION):
-            self.assertIn("sudo hswap claude keepalive --install-service --system", hswap_usage.claude_accounts.status()["service_note"])
+            self.assertTrue(hswap_usage.claude_accounts.status()["service_note"].endswith(want))
+        self.assertEqual(hswap_usage._sudo_command({"ahead": 300, "thenAuto": False}),
+                         f"sudo hswap claude keepalive --install-service --system --ahead {hswap_usage.AHEAD_S}")  # hswap 이 거절할 짧은 ahead 는 쓰지 않는다
 
     def test_a_busy_store_postpones_the_reinstall_without_a_failure(self):
         """covers: USAGE-11. service_busy(exit 1): keepalive·reconcile 실행이 잠금을 쥐었다. 실패로 세지 않고 다음 주기(KEEP_S)에 다시 한다"""
@@ -826,6 +829,10 @@ class DebugLogTest(FakeHswapCase):
         cases = (("linux", {}, None), ("win32", {}, None),
                  ("darwin", {"_aqua": True, "doctor": file_doc}, "in_session"),
                  ("darwin", {"_version": "0.2.9", "doctor": file_doc}, "hswap_old"),
+                 # 버전을 읽지 못했다(시간 초과 등): 설정상 파일 저장 방식이면 이전처럼 돌고, 아니면 version_unknown
+                 ("darwin", {"_version": None, "doctor": file_doc}, None),
+                 ("darwin", {"_version": None, "doctor": {**file_doc, "store": "auto"}}, "version_unknown"),
+                 ("darwin", {"_version": None, "doctor": None}, "version_unknown"),
                  ("darwin", {"doctor": None}, "doctor_unknown"),
                  ("darwin", {"doctor": {**file_doc, "store": "auto"}}, "store_not_file"),
                  ("darwin", {"doctor": {**file_doc, "keepalive_loaded": True}}, "service_loaded"),
@@ -889,6 +896,39 @@ class DebugLogTest(FakeHswapCase):
         for bad in ("", "1y", "abc", "99999h", "1h;rm"):
             self.assertEqual(hswap_usage.hswap_log(bad)[0], 400, bad)
         self.assertEqual(self.calls(), [])
+
+    def test_the_log_api_reads_json_lines_first(self):
+        """covers: USAGE-16. hswap 0.3.1 의 log --json 은 JSON Lines 다. 한 줄이면 dict 하나라 사건 하나로 본다"""
+        line = lambda i: json.dumps(self.event(i))
+        for out, code, want in (("", 0, []), ("\n", 0, []), (line(1), 0, [1]), (line(1) + "\n" + line(2) + "\n", 0, [1, 2]),
+                                (line(1) + "\n{broken\n" + line(3), 0, [1, 3]),  # 깨진 줄은 건너뛴다
+                                (json.dumps([self.event(1), self.event(2)], indent=2), 0, [1, 2]),  # 여러 줄로 쓴 배열
+                                (json.dumps({"schemaVersion": 1, "events": [self.event(5)]}), 0, [5])):
+            self.script({self.LOG: [out, code]})
+            status, body = hswap_usage.hswap_log("1h")
+            self.assertEqual((status, [e["details"]["n"] for e in body["events"]]), (200, want), out[:60])
+        for out, code in (("", 1), ("{broken", 0), ("not json\nat all", 0)):
+            self.script({self.LOG: [out, code]})
+            self.assertEqual(hswap_usage.hswap_log("1h")[0], 502, out)
+
+    def test_the_log_api_has_its_own_short_timeout_and_one_reader_at_a_time(self):
+        self.assertLess(hswap_usage.LOG_TIMEOUT_S, 40)  # core 의 HSWAP_LOG_TIMEOUT_S 안에 끝난다
+        seen = []
+        with mock.patch.object(hswap_usage, "_run", side_effect=lambda *a, **kw: seen.append(kw) or (0, "")):
+            self.assertEqual(hswap_usage.hswap_log("1h")[0], 200)
+        self.assertEqual((seen[0]["timeout"], seen[0]["caller"]), (hswap_usage.LOG_TIMEOUT_S, "jarvis-ui"))
+        with hswap_usage._log_lock:
+            code, body = hswap_usage.hswap_log("1h")
+        self.assertEqual(code, 429)
+        self.assertIn("이미", body["error"])
+
+    def test_the_log_api_filters_keys_like_values(self):
+        leak = self.event(1, details={"/Users/alice/.claude/x": 1, "sk-ant-oat01-KEY": 2, "plain": 3})
+        self.script({self.LOG: [json.dumps(leak), 0]})
+        text = json.dumps(hswap_usage.hswap_log("1h")[1], ensure_ascii=False)
+        for bad in ("alice", "sk-ant", "KEY"):
+            self.assertNotIn(bad, text)
+        self.assertIn('"plain": 3', text)
 
     def test_the_log_api_returns_at_most_200_newest_lines(self):
         events = [self.event(i) for i in range(250)]

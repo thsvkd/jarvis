@@ -2479,5 +2479,26 @@ class LastEventsTest(unittest.TestCase):
             self.assertNotIn("events", claude_accounts.status())
 
 
+class VersionKeptTest(unittest.TestCase):
+    """covers: USAGE-16. --version 을 읽지 못한 것(시간 초과·OSError)은 hswap 이 낮다는 뜻이 아니다: 마지막으로 알던 버전을 지킨다."""
+
+    def test_an_unreadable_version_keeps_the_last_known_one(self):
+        with mock.patch.object(claude_accounts, "_version", "0.3.1"), mock.patch.object(claude_accounts, "ensure"), \
+                mock.patch.object(claude_accounts, "binary", return_value="/fake/hswap"), \
+                mock.patch.object(claude_accounts, "installed_version", return_value=None):
+            claude_accounts.check()
+            self.assertEqual(claude_accounts._version, "0.3.1")
+        with mock.patch.object(claude_accounts, "_version", "0.3.1"), mock.patch.object(claude_accounts, "ensure"), \
+                mock.patch.object(claude_accounts, "binary", return_value=None), \
+                mock.patch.object(claude_accounts, "installed_version", return_value=None):
+            claude_accounts.check()
+            self.assertIsNone(claude_accounts._version)  # hswap 이 없어졌으면 잊는다
+        with mock.patch.object(claude_accounts, "_version", "0.3.0"), mock.patch.object(claude_accounts, "ensure"), \
+                mock.patch.object(claude_accounts, "binary", return_value="/fake/hswap"), \
+                mock.patch.object(claude_accounts, "installed_version", return_value="0.3.1"):
+            claude_accounts.check()
+            self.assertEqual(claude_accounts._version, "0.3.1")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -218,10 +218,10 @@ Claude·Codex·Grok 계정 일(사용량 조회, 로그인 유지, 전환)은 �
 [jarvis] hswap: doctor store=file problems=keepalive_service_missing session=out
 ```
 
-- `tick …`: 5분 tick 이 keepalive 를 불렀는지, 건너뛰었다면 그 이유다. `in_session`(로그인 세션 안이라 hswap 예약이 돈다), `store_not_file`(키체인 저장 방식), `service_loaded`(적재된 keepalive 예약이 돈다), `doctor_unknown`(doctor 답을 아직 못 받음), `hswap_old`(hswap 0.3.0 미만), `not_ready`(hswap·Claude Code·저장한 계정이 없거나 설치 중이거나 `cswap_install` 이 꺼짐) 중 하나다. 같은 결정은 한 시간에 한 번만 적고, 결정이 바뀌면 바로 적는다. 세션 안의 macOS 에서는 tick 을 띄우지 않으므로 이 줄이 없다.
+- `tick …`: 5분 tick 이 keepalive 를 불렀는지, 건너뛰었다면 그 이유다. `in_session`(로그인 세션 안이라 hswap 예약이 돈다), `store_not_file`(키체인 저장 방식), `service_loaded`(적재된 keepalive 예약이 돈다), `doctor_unknown`(doctor 답을 아직 못 받음), `hswap_old`(hswap 0.3.0 미만), `version_unknown`(hswap 버전을 한 번도 읽지 못했고 설정상 파일 저장 방식도 아님. 읽지 못한 것은 낮다는 뜻이 아니라 마지막으로 알던 버전을 쓰고, 설정이 파일이면 그대로 돈다), `not_ready`(hswap·Claude Code·저장한 계정이 없거나 설치 중이거나 `cswap_install` 이 꺼짐) 중 하나다. 같은 결정은 한 시간에 한 번만 적고, 결정이 바뀌면 바로 적는다. 세션 안의 macOS 에서는 tick 을 띄우지 않으므로 이 줄이 없다.
 - `<명령> 종료 <코드> <ms> [오류 type]`: hswap 을 부른 결과다. 명령은 하위 명령과 플래그 이름만 적고, 값·이메일·슬롯 번호·경로는 적지 않는다. 오류는 hswap 의 `error.type` 을 영문자·밑줄만 남겨 적는다. 같은 명령의 같은 결과는 한 시간에 한 번, 바뀌면 바로 적는다. 종료 코드가 `없음` 이면 실행하지 못했거나 시간을 넘겼다.
 - `doctor …`: macOS 에서 hswap doctor 의 저장 방식·문제 코드·세션 여부가 바뀔 때만 적는다.
-- `keepalive 예약(LaunchDaemon)이 낡았거나 적재되지 않았습니다 … sudo hswap claude keepalive --install-service --system`: hswap 0.3.1 이 그 예약을 다시 설치하려면 sudo 가 필요하다고 답했다(`reinstallNeedsSudo`). jarvis 는 sudo 를 쓰지 않으므로 한 시간에 한 번 이 줄을 남기고 기기 행에도 보인다.
+- `keepalive 예약(LaunchDaemon)이 낡았거나 적재되지 않았습니다 … sudo hswap claude keepalive --install-service --system`: hswap 0.3.1 이 그 예약을 다시 설치하려면 sudo 가 필요하다고 답했다(`reinstallNeedsSudo`). 명령에는 지금 예약의 `--ahead`(600초 이하면 7200)와 `--then-auto` 가 그대로 붙는다. jarvis 는 sudo 를 쓰지 않으므로 한 시간에 한 번 이 줄을 남기고 기기 행에도 보인다.
 - `keepalive 예약 다시 설치를 미뤘습니다(service_busy)`: 다시 설치하는 동안 실행 중인 keepalive·reconcile 이 잠금을 30초 넘게 쥐었다. 바뀐 것은 없고 다음 주기(1시간)에 다시 한다. 0.3.1 전에 깐 예약이 HSWAP_CALLER 만 달라 낡았다고 나오면(`caller_env_only`) 동작이 같아 다시 깔지 않고 기기 행에 "keepalive 예약: 다음 설치 때 갱신"만 보인다.
 - 토큰, 경로, hswap 의 stdout·stderr 원문은 남기지 않는다.
 
@@ -240,7 +240,7 @@ curl -s "http://<core>:9300/api/devices/<기기 id>/hswap-log?since=1h"   # core
 ```
 
 - core 는 그 게이트웨이의 `GET /api/usage/hswap-log?since=`(설정 core 만)을 그대로 전달한다. SSH 기기는 bridge 로 간다. 게이트웨이는 `hswap claude log --since <기간> --json` 을 불러 최근 200줄까지(`truncated` 가 true 면 잘림) 준다.
-- `since` 는 `30m`·`1h`·`2d` 꼴이다. 다른 값은 400 이다. hswap 이 0.3.1 미만이면 409 `{"error": "hswap 0.3.1 이상 필요"}`, 그 경로가 없는 옛 게이트웨이는 501 이다.
+- `since` 는 `30m`·`1h`·`2d` 꼴이다. 다른 값은 400 이다. 게이트웨이는 hswap log 를 30초까지만 기다리고, 한 번에 하나만 읽는다(이미 읽는 중이면 429). hswap 이 0.3.1 미만이면 409 `{"error": "hswap 0.3.1 이상 필요"}`, 그 경로가 없는 옛 게이트웨이는 501 이다.
 - 사건은 정해진 키(`ts`·`v`·`cmd`·`caller`·`session`·`store`·`activeSlot`·`outcome`·`exit`·`ms`·`error`·`details`)만 남긴다. 문자열은 `sk-ant-…` 모양과 경로를 한 번 더 가리고 200자에서 자르며, `error` 는 `type` 만 남긴다.
 - 사용량 화면의 기기 행에는 doctor 의 `lastEvents` 중 최근 3개가 "최근 hswap: 14:52 keepalive · gui · none" 처럼 작게 보인다. "최근 hswap 로그" 버튼은 위 API 로 1시간 분량을 표로 펼친다.
 
