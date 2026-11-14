@@ -333,7 +333,7 @@ class SystemCollector:
             pid, comm, cpu, rss, threads, uid, state = p
             try:
                 cmd = redact(" ".join(psutil.Process(pid).cmdline()).strip())
-            except (psutil.Error, OSError):
+            except (psutil.Error, OSError, SystemError):  # SystemError: util.cmdline 참고
                 cmd = ""
             kind, name = platform.owner_of_pid(pid)
             return {

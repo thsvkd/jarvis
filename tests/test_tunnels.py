@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 from jarvis import tunnels
 
@@ -25,6 +26,22 @@ class ParseTest(unittest.TestCase):
     def test_option_values_are_not_taken_as_the_destination(self):
         argv = ["ssh", "-J", "jump", "-o", "ServerAliveInterval=15", "-L", "1:127.0.0.1:2", "mac"]
         self.assertEqual(tunnels.parse(argv), [{"port": 1, "host": "mac", "to_port": 2}])
+
+
+class CollectTest(unittest.TestCase):
+    """covers: MAP-5"""
+
+    def test_a_process_whose_cmdline_raises_systemerror_is_skipped(self):
+        """macOS 에서 명령줄을 읽는 도중 끝난 프로세스는 psutil 이 SystemError 를 던진다(2026-11-14 kgolf-macmini-m2pro). 그 하나만 건너뛴다"""
+        def proc(argv):
+            p = mock.Mock(info={"name": "ssh"})
+            p.cmdline.side_effect = argv if isinstance(argv, Exception) else None
+            p.cmdline.return_value = argv
+            return p
+        dying = proc(SystemError("<built-in function proc_cmdline> returned a result with an exception set"))
+        live = proc(["ssh", "-L", "127.0.0.1:1:127.0.0.1:2", "mac"])
+        with mock.patch.object(tunnels.psutil, "process_iter", return_value=[dying, live]):
+            self.assertEqual(tunnels.collect(), [{"port": 1, "host": "mac", "to_port": 2}])
 
 
 if __name__ == "__main__":

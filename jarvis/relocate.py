@@ -279,10 +279,14 @@ def _users(d):
     # 자신과 조상(이 이전을 기다리는 설치기 셸·서비스 관리자)은 뺀다. 옛 폴더가 옮겨져도 이름만 바뀔 뿐이다
     mine = {os.getpid()} | {q.pid for q in psutil.Process().parents()}
     found = []
-    for p in psutil.process_iter(["pid", "cwd", "cmdline"]):
+    for p in psutil.process_iter(["pid", "cwd"]):
         if p.info["pid"] in mine:
             continue
-        paths = [x for x in [p.info.get("cwd"), *(p.info.get("cmdline") or [])] if isinstance(x, str) and os.path.isabs(x)]
+        try:  # macOS 에서 읽는 도중 끝난 프로세스는 SystemError 를 던진다(util.cmdline). 이 파일은 단독 실행돼 util 을 가져오지 않는다
+            argv = p.cmdline()
+        except Exception:
+            argv = []
+        paths = [x for x in [p.info.get("cwd"), *argv] if isinstance(x, str) and os.path.isabs(x)]
         try:
             busy = any(under(x, d) for x in paths)
         except Exception:  # 판정할 수 없으면 보수적으로: 문자열로 옛 폴더 아래면 사용 중

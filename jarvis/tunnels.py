@@ -8,6 +8,8 @@ import re
 
 import psutil
 
+from .util import cmdline
+
 LOOP = ("127.0.0.1", "localhost", "::1", "[::1]")
 _SPEC = re.compile(r"^(?:(?P<bind>\[[^\]]*\]|[^:]*):)?(?P<port>\d+):(?P<host>\[[^\]]*\]|[^:]+):(?P<to>\d+)$")
 # 값을 하나 받는 ssh 옵션(대상 호스트를 찾을 때 건너뛴다). man ssh 의 SYNOPSIS 기준.
@@ -55,11 +57,11 @@ def parse(argv):
 
 def collect():
     seen, out = set(), []
-    for p in psutil.process_iter(["name", "cmdline"]):
+    for p in psutil.process_iter(["name"]):  # 명령줄은 ssh 만, 하나씩 읽는다(util.cmdline)
         name = (p.info.get("name") or "").lower()
         if name not in ("ssh", "ssh.exe"):
             continue
-        for t in parse(p.info.get("cmdline") or []):
+        for t in parse(cmdline(p)):
             k = (t["port"], t["host"], t["to_port"])
             if k not in seen:
                 seen.add(k)

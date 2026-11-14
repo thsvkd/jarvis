@@ -27,6 +27,15 @@ def read(path, default=None):
         return default
 
 
+def cmdline(p):
+    """psutil 프로세스의 명령줄. 읽지 못하면 []. macOS 에서 읽는 도중 프로세스가 끝나면 psutil 이 psutil.Error 가 아니라
+    SystemError 를 던진다(2026-11-14 kgolf-macmini-m2pro, psutil 7.2.2): 그 프로세스 하나 때문에 목록 전체를 버리지 않게 막는다."""
+    try:
+        return p.cmdline()
+    except Exception:  # psutil.Error·OSError·SystemError
+        return []
+
+
 def read_int(path, default=None):
     s = read(path)
     if s is None:
