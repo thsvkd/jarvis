@@ -52,7 +52,7 @@ PROBLEMS = {"not_file_store": "저장 방식이 파일이 아닙니다", "keycha
 LOGINWINDOW = "/Library/Preferences/com.apple.loginwindow.plist"  # 자동 로그인 사용자(autoLoginUser). 누구나 읽는다
 MIGRATE = "hswap claude migrate-store --to file --keep keychain"  # hswap 은 --keep 없는 --to file 을 거절한다. 화면(usage.js)도 같은 문자열을 쓴다
 HSWAP_TIMEOUT_S = 60
-HINT_MAX = 300  # doctor 의 lastReconcileHint(사람용 영문)를 화면에 보일 최대 길이
+HINT_MAX = 600  # doctor 의 lastReconcileHint(사람용 영문)를 화면에 보일 최대 길이
 # hswap 0.3.0 의 migrate-store 는 옮겼지만 설치한 예약이 다음 로그인 때 적재되면 3 으로 끝난다
 MIGRATE_EXIT = "종료 코드 3 도 성공입니다(옮겼고, 예약은 다음 로그인 때 적재됩니다)"
 

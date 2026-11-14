@@ -1121,7 +1121,7 @@ class Doctor(unittest.TestCase):
             self.assertIsNone(macos_daemon.summary(svc(**odd))["keepalive_ahead"], odd)
 
     def test_the_last_reconcile_hint_is_text_cut_and_cleaned(self):
-        hint = "Nothing records who refreshed.\x1b[31m\nKeep it." + "x" * 400
+        hint = "Nothing records who refreshed.\x1b[31m\nKeep it." + "x" * (macos_daemon.HINT_MAX + 100)
         got = macos_daemon.summary({**FULL_DOCTOR, "lastReconcileHint": hint})["last_reconcile_hint"]
         self.assertTrue(got.startswith("Nothing records who refreshed. [31m Keep it."), got)
         self.assertEqual(len(got), macos_daemon.HINT_MAX)
