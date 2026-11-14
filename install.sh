@@ -13,6 +13,7 @@ set -eu
 
 CORE=""
 DAEMON=""  # --daemon: macOS 에서 LaunchAgent 대신 LaunchDaemon 으로 돈다(GUI 로그인이 없는 기기. docs/operations.md 의 macOS 절)
+LEFT=""  # 끝나고 남은 일이 있으면 그 종료 코드(3)
 ALLOW_KEYCHAIN=""  # --allow-keychain-store: --daemon 의 Claude 저장 방식 검사를 넘긴다(deploy/macos-daemon.sh 로 그대로 넘긴다)
 UNINSTALL=""  # --uninstall: 서비스 등록과 실행본(app·venv·versions)을 지운다. 설정·모듈이 쓴 것은 남긴다
 while [ $# -gt 0 ]; do
@@ -218,10 +219,13 @@ if [ -n "$DAEMON" ]; then
   # 이 설치기보다 오래된 app 에는 스크립트가 없다. 나중에 uninstall 을 부를 수 있게 지워지지 않는 곳에 받는다
   if [ ! -f "$DSRC/deploy/macos-daemon.sh" ]; then DSRC="$SHARE/daemon-src"; fetch "$DSRC"; fi
   # 이 셸이 파이프(curl | sh)로 읽는 스크립트를 자식이 먹지 않게 한다. sudo 는 /dev/tty 로 묻는다
-  /bin/bash "$DSRC/deploy/macos-daemon.sh" install $ALLOW_KEYCHAIN </dev/null || {
-    echo "LaunchDaemon 으로 옮기지 못했습니다. 위 결과를 확인한 뒤 다시 실행하세요" >&2
-    exit 1
-  }
+  # 3: 옮겼지만 Claude 저장 방식을 옮길 일이 남았다(hswap 이 아직 없는 새 기기). 모듈까지 마친 뒤 같은 코드로 끝난다
+  rc=0; /bin/bash "$DSRC/deploy/macos-daemon.sh" install $ALLOW_KEYCHAIN </dev/null || rc=$?
+  case $rc in
+    0) ;;
+    3) LEFT=3 ;;
+    *) echo "LaunchDaemon 으로 옮기지 못했습니다. 위 결과를 확인한 뒤 다시 실행하세요" >&2; exit 1 ;;
+  esac
 fi
 
 # 6. 모듈: 계획을 보이고 그 plan_id 로 적용한다. app 의 런처가 받아 둔 릴리스(versions/)로 넘긴다
@@ -256,3 +260,7 @@ jarvis 를 설치했습니다: http://127.0.0.1:9300/api/health
 - Tailscale 에 로그인하고, core 설정의 devices 에 이 기기를 넣은 뒤 core 를 재시작합니다
 - 하네스(claude·codex 등)에 로그인합니다
 EOF
+if [ -n "$LEFT" ]; then
+  echo "남은 일이 있습니다: 위 LaunchDaemon 전환 결과의 '남은 일'(Claude 저장 방식 옮기기)을 마치세요" >&2
+  exit "$LEFT"
+fi

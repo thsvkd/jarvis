@@ -957,6 +957,31 @@ exec "$TEST_PY" "$@"
         self.assertLess(calls.index(f"sudo -n /bin/launchctl bootstrap system {self.daemon}"), calls.index("hswap claude reconcile --install-service --json"))
         self.assertIn("다음 GUI 로그인 때 적재됩니다", r.stdout)
 
+    def test_without_hswap_the_daemon_is_installed_and_the_exit_code_says_what_is_left(self):
+        """covers: DAEMON-15"""
+        local = os.path.join(self.home, ".local", "bin")
+        os.makedirs(local)
+        fake_tool(local, "claude", "exit 0")
+        r = self.run_script("install")
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assert_daemon_mode()
+        self.assertIn("hswap 이 설치된 뒤", r.stdout)
+        self.assertIn(macos_daemon.MIGRATE, r.stdout)
+        r = self.run_script("install", "--dry-run")  # 이미 같은 daemon: 바꿀 것이 없다
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_an_interrupt_after_the_switch_does_not_undo_it(self):
+        """covers: DAEMON-15. reconcile 단계에서 Ctrl-C 를 받아도 끝난 전환을 되돌리지 않는다"""
+        self.claude_hswap("file")
+        local = os.path.join(self.home, ".local", "bin", "hswap")
+        with open(local) as f:
+            body = f.read()
+        with open(local, "w") as f:  # 같은 프로세스 그룹(스크립트 포함)에 SIGINT
+            f.write(body.replace('"claude reconcile --install-service --json") echo "{}"', '"claude reconcile --install-service --json") kill -INT 0; sleep 1; echo "{}"'))
+        r = subprocess.run(["bash", SCRIPT, "install"], env=self.env, capture_output=True, text=True, timeout=120, start_new_session=True)
+        self.assertNotIn("LaunchAgent 로 되돌립니다", r.stdout, r.stderr)
+        self.assert_daemon_mode()
+
     def test_reconcile_can_be_turned_off_is_skipped_when_present_and_never_fails_the_install(self):
         """covers: DAEMON-15"""
         for setup, args in ((dict(), ("--no-reconcile",)), (dict(reconcile_installed=True), ()), (dict(reconcile_rc=1), ())):
@@ -1075,11 +1100,18 @@ class Doctor(unittest.TestCase):
 
     def test_full_answer(self):
         self.assertEqual(macos_daemon.summary(FULL_DOCTOR), {"store": "file", "problems": ["reconcile_service_missing"], "keychain_item_present": False,
-                                                              "keepalive_loaded": False, "keepalive_domain": "gui", "reconcile_installed": False})
+                                                              "keepalive_loaded": False, "keepalive_domain": "gui", "reconcile_installed": False,
+                                                              "reconcile_loaded": False, "keychain_backups": None})
+        later = {**FULL_DOCTOR, "keychainBackups": 3, "problems": ["keychain_item_present", "reconcile_ambiguous"]}  # hswap 0.3.0 의 뒤 수정
+        self.assertEqual((macos_daemon.summary(later)["keychain_backups"], macos_daemon.summary(later)["problems"]), (3, ["keychain_item_present", "reconcile_ambiguous"]))
+        for odd in (-1, True, "3", 1.5):
+            self.assertIsNone(macos_daemon.summary({**FULL_DOCTOR, "keychainBackups": odd})["keychain_backups"], odd)
+        self.assertIn("migrate-store", macos_daemon.PROBLEMS["reconcile_ambiguous"])
 
     def test_missing_or_odd_fields_are_unknown(self):
         self.assertEqual(macos_daemon.summary({"schemaVersion": 1}), {"store": None, "problems": [], "keychain_item_present": None,
-                                                                       "keepalive_loaded": None, "keepalive_domain": None, "reconcile_installed": None})
+                                                                       "keepalive_loaded": None, "keepalive_domain": None, "reconcile_installed": None,
+                                                                       "reconcile_loaded": None, "keychain_backups": None})
         odd = {"schemaVersion": 1, "store": "File Store!", "problems": "not_file_store", "keychainItemPresent": "yes",
                "keepaliveService": [], "reconcileService": {"installed": "true"}}
         self.assertEqual(macos_daemon.summary(odd), macos_daemon.summary({"schemaVersion": 1}))
@@ -1145,12 +1177,43 @@ class StoreCheck(unittest.TestCase):
             self.assertIn("hswap claude migrate-store --to file --keep keychain --dry-run", err)
             self.assertIn("--allow-keychain-store", err)
 
-    def test_without_hswap_the_refusal_says_the_gateway_installs_it(self):
+    def test_without_hswap_the_install_goes_on_and_says_what_is_left(self):
+        """새 Mac: hswap 은 게이트웨이가 처음 돌 때 설치한다. 거절하지 않고 5(남은 일 있음)로 알린다"""
         fake_tool(self.bin, "claude", "exit 0")
-        code, _, err = self.run_main()
-        self.assertEqual(code, 3)
-        self.assertIn("hswap 이 아직 없습니다", err)
-        self.assertIn("--allow-keychain-store", err)
+        code, out, err = self.run_main()
+        self.assertEqual((code, err), (5, ""))
+        self.assertIn("hswap 이 아직 없습니다", out)
+        self.assertIn(macos_daemon.MIGRATE, out)
+
+    def test_a_hung_hswap_is_killed_with_its_children(self):
+        pidfile = os.path.join(self.home, "child.pid")
+        fake_tool(self.bin, "hswap", f'sleep 30 & echo $! > "{pidfile}"; sleep 30')
+        start = time.monotonic()
+        with mock.patch.object(macos_daemon, "HSWAP_TIMEOUT_S", 1):
+            self.assertIsNone(macos_daemon._hswap(os.path.join(self.bin, "hswap"), "doctor"))
+        self.assertLess(time.monotonic() - start, 10)
+        with open(pidfile) as f:
+            child = int(f.read())
+        for _ in range(50):
+            try:
+                os.kill(child, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        else:
+            self.fail("hswap 이 띄운 자식이 남았습니다")
+
+    def test_hswap_is_found_like_the_gateway_path_first(self):
+        other = os.path.join(self.home, "elsewhere")
+        os.makedirs(other)
+        fake_tool(other, "hswap", "exit 0")
+        fake_tool(self.bin, "hswap", "exit 0")
+        with mock.patch.dict(os.environ, {"PATH": other + ":/usr/bin:/bin"}):
+            self.assertEqual(macos_daemon._tools(self.home)[1], os.path.join(self.bin, "hswap"))  # 시험에서는 ~/.local/bin 만 본다
+            os.environ.pop("JARVIS_DAEMON_TEST")
+            self.assertEqual(macos_daemon._tools(self.home)[1], os.path.join(other, "hswap"))  # 게이트웨이(which_local)처럼 PATH 가 먼저다
+            os.environ["PATH"] = "/usr/bin:/bin"
+            self.assertEqual(macos_daemon._tools(self.home)[1], os.path.join(self.bin, "hswap"))
 
     def test_a_doctor_error_falls_back_to_the_store_setting(self):
         envelope = {"schemaVersion": 1, "ok": False, "error": {"type": "SwitchError", "message": "/Users/x"}}

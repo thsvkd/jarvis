@@ -34,6 +34,7 @@ AHEAD_S = 7200  # 만료 2시간 전부터 갱신한다. 한 번 실패해도 �
 TICK_S = 300  # 게이트웨이가 keepalive 를 직접 부르는 간격(macOS 의 로그인 세션에서는 hswap 의 LaunchAgent 가 같은 간격으로 부른다)
 ROTATION = "priority-consume-first"  # 계정 priority 높은 것부터, 전환 기준 아래인 계정만 쓴다. 높은 계정이 풀리면 돌아간다(USAGE-14)
 ROTATION_FROM = "0.2.9"  # 이 전략과 `hswap claude priority` 를 확인한 hswap
+DOCTOR_FROM = "0.3.0"  # `hswap claude doctor --json` 을 아는 hswap. 그 전은 config 의 credentials.store 만 읽는다
 _rot_lock = threading.Lock()  # 자동 전환 설정 읽기·쓰기를 한 번에 하나만
 REMOTE = "codex,grok,opencode"  # usage.remote 가 비어 있을 때 정하는 값. Antigravity 는 약관 위험이 커서 넣지 않는다(2026-11-08 사용자 결정)
 # UsageState → (화면 문구, 사람이 손봐야 하는가). detail 원문은 오류 경로가 섞일 수 있어 쓰지 않는다
@@ -264,13 +265,16 @@ def schedule():
 
 def inspect():
     """macOS: `hswap claude doctor --json`(0.3.0, 키체인 없이 돈다)으로 저장 방식·문제·예약 상태를 읽어 claude_accounts.doctor 에 둔다(USAGE-15).
-    doctor 를 모르는 옛 hswap 은 config 의 credentials.store 만 쓴다. 할 일이 아니면(macOS 밖, hswap·Claude Code 없음, 설치 중) 지난 답도 지운다."""
+    doctor 를 모르는 옛 hswap(버전을 모르는 것 포함)은 doctor 를 부르지 않고 config 의 credentials.store 만 쓴다.
+    할 일이 아니면(macOS 밖, hswap·Claude Code 없음, 설치 중) 지난 답도 지운다."""
     exe = claude_accounts.binary()
     if (sys.platform != "darwin" or not config.CSWAP_INSTALL or not exe or not which_tool("claude")
             or claude_accounts.installer.state == "running"):
         claude_accounts.doctor = None
         return None
-    body = _json(_run(exe, "claude", "doctor", "--json")[1])  # 문제가 있으면 0 이 아닌 코드로 끝나도 JSON 은 정상이다
+    v = claude_accounts._version
+    new = bool(v) and claude_accounts._key(v) >= claude_accounts._key(DOCTOR_FROM)
+    body = _json(_run(exe, "claude", "doctor", "--json")[1]) if new else None  # 문제가 있으면 0 이 아닌 코드로 끝나도 JSON 은 정상이다
     claude_accounts.doctor = macos_daemon.summary(body, None if macos_daemon.answered(body) else _settings(exe))
     return claude_accounts.doctor
 
@@ -357,7 +361,8 @@ def set_rotation(on, order, threshold):
     steps += [(("claude", "priority", s, p), "우선순위 지정") for s, p in pri.items()]
     steps.append((("claude", "config", "set", "autoswitch.threshold", f"{t:g}"), "전환 기준 저장"))
     steps.append((("claude", "config", "set", "autoswitch.strategy", ROTATION) if on == "1" else ("claude", "config", "unset", "autoswitch.strategy"), "전략 저장"))
-    if sys.platform == "darwin" and (on == "1") != now["on"]:
+    # 데몬 keepalive 는 gui 예약으로 바꿀 수 없다(hswap 이 ServiceConflict 로 거절한다). 적재되지 않아 tick 이 도는 동안은 전략만으로 켜고 끈다
+    if sys.platform == "darwin" and (on == "1") != now["on"] and (claude_accounts.doctor or {}).get("keepalive_domain") != "system":
         st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json")[1]) or {}
         ahead = st.get("ahead") if _num(st.get("ahead")) and st.get("ahead") > 0 else AHEAD_S
         steps.append((("claude", "keepalive", "--install-service", "--ahead", str(int(ahead)), *(["--then-auto"] if on == "1" else []), "--json"), "예약 다시 설치"))
@@ -399,7 +404,8 @@ def maintain():
                 step()
             except Exception as e:
                 print(f"[jarvis] hswap 유지 실패: {scrub_home(str(e))[:200]}", flush=True)
-        if not ticking:  # 첫 버전 맞추기(설치) 뒤에 시작한다. macOS 는 tick 이 매번 할 일인지 가린다(_ticks)
+        # 첫 버전 맞추기(설치) 뒤에 시작한다. 세션 안의 macOS 는 hswap 예약이 돌아 띄우지 않는다. 세션 밖은 tick 이 매번 할 일인지 가린다(_ticks)
+        if not ticking and (sys.platform != "darwin" or not claude_accounts.in_session()):
             ticking = True
             threading.Thread(target=tick, name="jarvis-keepalive", daemon=True).start()
         time.sleep(KEEP_S)

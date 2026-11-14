@@ -34,7 +34,7 @@ KNOWN_BUCKETS = {"opus", "sonnet", "haiku"}  # 첫 단어가 이것인 이름만
 # keepalive error.type → 화면 문구. 파일의 자유 문구(error.message)는 토큰·조직 UUID 가 들어 있어도 새지 않게 내보내지 않는다
 KEEPALIVE_ERRORS = {"keychain_unavailable": "키체인 접근 불가", "relogin_required": "재로그인 필요", "split_brain": "키체인과 파일의 로그인이 갈라짐",
                     "refresh_failed": "토큰 갱신 실패", "no_credentials": "자격 증명 없음", "locked": "다른 프로세스가 잠금을 쥐고 있음", "unmanaged": "저장 슬롯에 없는 로그인",
-                    "keychain_item_present": "키체인에 Claude 로그인이 있거나 확인하지 못해 자동 갱신을 멈췄습니다. 로그인 세션에서 reconcile 이 정리합니다", "config_conflict": "hswap 설정 충돌(파일 저장소와 키체인 필수 모드)"}
+                    "keychain_item_present": "키체인에 Claude 로그인이 있거나 확인하지 못해 자동 갱신을 멈췄습니다", "config_conflict": "hswap 설정 충돌(파일 저장소와 키체인 필수 모드)"}
 # hswap 최상위 오류 type → 화면 문구(hswap 의 json_type 또는 예외 클래스 이름, claude_swap/exceptions.py). error.message 는 토큰·경로가 들어 있어도 새지 않게 쓰지 않는다
 HSWAP_ERRORS = {**KEEPALIVE_ERRORS, "stores_disagree": KEEPALIVE_ERRORS["split_brain"], "required_mode_unsupported": "hswap 이 이 저장소 모드에서 지원하지 않는 명령",
                 "stash_manifest_corrupt": "hswap 보관 목록 손상", "AccountNotFoundError": "저장 슬롯에 없는 계정", "LockError": KEEPALIVE_ERRORS["locked"],
@@ -42,7 +42,7 @@ HSWAP_ERRORS = {**KEEPALIVE_ERRORS, "stores_disagree": KEEPALIVE_ERRORS["split_b
                 # hswap 0.3.0(파일 저장 방식의 세션 밖 동작·reconcile). CredentialReadError 는 키체인을 읽지 못한 예외 클래스 이름이다
                 "CredentialReadError": "hswap 이 자격 증명을 읽지 못했습니다",
                 "keychain_item_present_locked": "키체인에 Claude 로그인이 있는데 키체인이 잠겨 정리하지 못했습니다. 로그인 세션에서 reconcile 이 정리합니다",
-                "reconcile_ambiguous": "키체인과 파일 중 어느 쪽이 새 로그인인지 알 수 없어 정리하지 않았습니다. 그 기기에서 hswap claude migrate-store 로 한쪽을 고르세요"}
+                "reconcile_ambiguous": f"키체인과 파일 중 어느 쪽이 새 로그인인지 알 수 없어 정리하지 않았습니다. 그 기기의 로그인 세션에서 한쪽을 고르세요({macos_daemon.MIGRATE} 또는 --keep file)"}
 FATAL_ERRORS = ("config_conflict", "keychain_item_present", "relogin_required")  # keepalive 기록이 옛것이어도 기기 상태에 바로 보이는 type
 LOGIN_WARN_S = 3 * 86400  # 로그인(갱신 토큰) 만료 3일 전부터 '주의 필요'. 새 /login 만이 기한을 늘린다
 CACHE_S = 30  # hswap 자체가 캐시하므로 짧게만 묶는다(요청마다 프로세스를 띄우지 않게)
@@ -55,14 +55,14 @@ STATUS = {
     # hswap 은 죽은 갱신 토큰을 슬롯 백업 기준으로 격리한다. Claude Code 에서 다시 로그인만 하면 격리가 남는다
     "relogin_required": ("다시 로그인해야 합니다: 그 계정으로 Claude Code 에서 /login 한 뒤 hswap claude add 를 실행하세요.", True),
     "keychain_unavailable": ("Keychain 을 읽지 못했습니다.", True),
-    "keychain_item_present": ("키체인에 Claude 로그인이 있거나 확인하지 못해 자동 갱신을 멈췄습니다. 로그인 세션에서 reconcile 이 정리합니다.", True),
+    "keychain_item_present": ("키체인에 Claude 로그인이 있거나 확인하지 못해 자동 갱신을 멈췄습니다.", True),  # 뒷문장은 item_text 가 예약 상태로 붙인다
     "config_conflict": ("hswap 설정 충돌(파일 저장소와 키체인 필수 모드).", True),
     "foreign_credential": ("지금 로그인이 다른 계정입니다. hswap claude switch 로 맞추세요.", True),
     "no_credentials": ("자격 증명이 없습니다.", True),
     "no_saved_usage": ("저장된 사용량이 없습니다.", False),  # 저장소 캐시 어댑터만 쓴다
 }
 # macOS 로그인 세션 밖(LaunchDaemon·SSH)인데 hswap 이 키체인 저장 방식이면 모든 슬롯이 실패한다. 슬롯마다의 실패 대신 이 한 문구를 보인다
-HEADLESS = "로그인 세션 밖에서 실행 중 — 키체인을 읽을 수 없습니다. 파일 저장 방식으로 바꾸세요(hswap claude migrate-store --to file)"
+HEADLESS = f"로그인 세션 밖에서 실행 중 — 키체인을 읽을 수 없습니다. 파일 저장 방식으로 바꾸세요({macos_daemon.MIGRATE})"
 HEADLESS_KINDS = ("CredentialReadError", "keychain_unavailable", "no_credentials")  # 세션 밖 키체인 저장 방식에서 HEADLESS 로 바꾸는 hswap 오류
 _lock = threading.Lock()
 
@@ -89,6 +89,8 @@ _version = None  # 마지막으로 확인한 설치 버전("0.2.7"). 화면의 �
 service = None  # macOS: hswap claude keepalive --service-status 의 마지막 답(hswap_usage.schedule 이 쓴다). 모르면 None
 doctor = None  # macOS: hswap claude doctor 의 요약(macos_daemon.summary, hswap_usage.inspect 가 쓴다). 모르면 None
 _aqua = None  # macOS: 로그인 세션(Aqua) 안에서 도는가. 한 번 답을 받으면 다시 묻지 않는다
+_aqua_failed = None  # 마지막으로 묻지 못한 때(monotonic). AQUA_RETRY_S 동안은 다시 묻지 않는다
+AQUA_RETRY_S = 60
 
 
 def binary():
@@ -97,14 +99,30 @@ def binary():
 
 def in_session():
     """macOS: 이 게이트웨이가 로그인 세션 안에서 도는가(launchctl managername 이 Aqua. LaunchDaemon 은 System, SSH 는 Background).
-    묻지 못하면 세션 안으로 본다(지금까지의 동작). 일시적 실패를 굳히지 않는다(svc/launchd.py 와 같은 규칙)."""
-    global _aqua
+    묻지 못하면 세션 안으로 본다(지금까지의 동작). 일시적 실패는 굳히지 않되 AQUA_RETRY_S 동안은 다시 묻지 않는다(읽기마다 띄우지 않게)."""
+    global _aqua, _aqua_failed
     if _aqua is None:
+        now = time.monotonic()
+        if _aqua_failed is not None and now - _aqua_failed < AQUA_RETRY_S:
+            return True
         rc, out, _ = run(["launchctl", "managername"], timeout=8)
         if rc != 0:
+            _aqua_failed = now
             return True
         _aqua = out.strip() == "Aqua"
     return _aqua
+
+
+def item_text():
+    """keychain_item_present 의 화면 문구. 정리할 길은 hswap doctor 가 답한 reconcile 예약 상태로 정한다: 설치·적재됐으면 reconcile 이 정리하고,
+    아니면 예약 설치를 권한다. 지난 reconcile 이 어느 쪽이 새것인지 몰랐으면(reconcile_ambiguous) 사람이 골라야 한다. doctor 를 모르면(옛 hswap) 붙이지 않는다."""
+    base = KEEPALIVE_ERRORS["keychain_item_present"]
+    if not doctor:
+        return base
+    if "reconcile_ambiguous" in (doctor.get("problems") or []):
+        return f"{base}. {HSWAP_ERRORS['reconcile_ambiguous']}"
+    ready = doctor.get("reconcile_installed") is True and doctor.get("reconcile_loaded") is True
+    return f"{base}. " + ("로그인 세션에서 reconcile 이 정리합니다" if ready else "hswap claude reconcile --install-service 로 정리 예약을 설치하세요")
 
 
 def headless():
@@ -182,7 +200,10 @@ def status():
     note = {"running": "설치하는 중", "failed": installer.error}.get(installer.state) if behind else None
     out = {"version": _version, "pinned": VERSION, "note": note}
     if doctor:  # macOS: 저장 방식(file·auto)과 hswap doctor 의 문제. 모르는 문제 코드는 코드 그대로(소문자·밑줄만) 보인다
-        out.update(store=doctor.get("store"), problems=[f"{macos_daemon.PROBLEMS[p]}({p})" if p in macos_daemon.PROBLEMS else p for p in doctor.get("problems") or []])
+        # 세션 안의 키체인 저장 방식은 흔한 정상이라 not_file_store 는 세션 밖에서만 문제로 보인다
+        codes = [p for p in doctor.get("problems") or [] if p != "not_file_store" or (sys.platform == "darwin" and not in_session())]
+        out.update(store=doctor.get("store"), problems=[f"{macos_daemon.PROBLEMS[p]}({p})" if p in macos_daemon.PROBLEMS else p for p in codes],
+                   keychain_backups=doctor.get("keychain_backups"))
     return out
 
 
@@ -243,6 +264,8 @@ def account(row, source="cswap", headless=False):
     note, attention = STATUS.get(status, (None, False))
     if headless and status in ("no_credentials", "keychain_unavailable"):
         note, attention = HEADLESS, True
+    elif status == "keychain_item_present":
+        note = item_text() + "."
     if status == "api_key":
         note = "API 키 계정이라 구독 한도가 없습니다."
     elif status != "ok" and not note:
@@ -390,7 +413,9 @@ def live(force=False, shape=None, deadline=None):
             if isinstance(e, _HswapError):  # 시간 초과처럼 답이 없는 실패는 이전 판정을 지우지 않는다
                 _state.fatal = (time.monotonic(), e.kind) if e.kind in FATAL_ERRORS else None
             # 세션 밖의 키체인 저장 방식이면 hswap 의 오류(CredentialReadError 등)는 그 결과다. 까닭과 고칠 명령을 보인다
-            out = {"error": HEADLESS if blind and getattr(e, "kind", None) in HEADLESS_KINDS else scrub_home(str(e))[:200] or type(e).__name__}
+            kind = getattr(e, "kind", None)
+            out = {"error": HEADLESS if blind and kind in HEADLESS_KINDS else item_text() if kind == "keychain_item_present"
+                   else scrub_home(str(e))[:200] or type(e).__name__}
         _state.cache = (time.monotonic(), out, shape)
         return out
     finally:
@@ -593,6 +618,8 @@ def _judge_login(k, rows, keychain, signed_in, fatal, first_seen, now, svc=None,
 def login(rows=(), keychain=False, signed_in=False, fatal=None):
     """지금 keepalive 기록으로 로그인을 판정한다(_judge_login). 파일 읽기와 처음 본 시각의 기억은 판정 밖인 여기서 한다."""
     state, _state.unconfirmed = _judge_login(_keepalive() or {}, rows, keychain, signed_in, fatal, _state.unconfirmed, time.time(), service, headless())
+    if state and state["state"] == "keychain_item_present":
+        state["text"] = item_text()
     return state
 
 

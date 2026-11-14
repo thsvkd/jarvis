@@ -433,6 +433,14 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn(f"macos-daemon cwd={self.home} install --allow-keychain-store", self.lines())
 
+    def test_a_hand_off_with_work_left_still_installs_the_modules_and_ends_with_its_code(self):
+        """covers: DAEMON-15. Claude Code 는 있지만 hswap 이 아직 없는 새 Mac: daemon 전환 뒤 모듈까지 끝내고 3 으로 알린다"""
+        self.env["FAKE_DAEMON_RC"] = "3"
+        r = self.run_install("--core", "100.64.0.1", "--daemon")
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertIn("jarvis module setup apply --json --plan-id abc123", self.lines())
+        self.assertIn("남은 일이 있습니다", r.stderr)
+
     def test_a_failed_hand_off_stops_with_an_error(self):
         """covers: DAEMON-9"""
         self.env["FAKE_DAEMON_RC"] = "1"

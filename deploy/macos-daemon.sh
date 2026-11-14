@@ -7,6 +7,7 @@
 # install 이 어느 단계에서든 실패하면 LaunchAgent 로 되돌리고 0 이 아닌 코드로 끝난다.
 # Claude Code 가 있는 기기의 install 은 hswap 저장 방식(hswap claude doctor)이 파일일 때만 진행한다. daemon 은 로그인 세션 밖이라
 # 키체인을 읽지 못한다. --allow-keychain-store 로만 넘어간다. 파일 저장 방식이면 끝에 hswap 의 reconcile 예약(gui)을 설치한다(--no-reconcile 로 끈다).
+# hswap 이 아직 없는 새 기기는 거절하지 않고 옮긴 뒤, 저장 방식을 옮길 일이 남았다고 알리고 3 으로 끝난다(install.sh 는 모듈까지 마친다).
 # 에이전트 plist 는 LaunchAgents 밖(~/.local/share/jarvis/dev.jarvis.plist.agent)에 둔다. 남겨 두면 다음 GUI 로그인 때
 # 두 번째 jarvis 가 같은 포트를 잡으려다 KeepAlive 재시작을 되풀이한다.
 set -u
@@ -192,13 +193,14 @@ install_plan() {
   say "  curl http://127.0.0.1:$PORT/api/health   # 최대 40초"
   say "  mv $AGENT $KEPT"
   if [ "$STORE_RC" = 0 ] && [ -n "$RECONCILE" ]; then say "  hswap claude reconcile --install-service --json   # 없으면(파일 저장 방식)"; fi
+  if [ "$STORE_RC" = 5 ]; then say "  # hswap 이 없어 Claude 저장 방식을 옮길 일이 남는다(종료 코드 3)"; fi
 }
 
-# Claude 계정 저장 방식(jarvis/macos_daemon.py store): 0 파일, 4 Claude Code 없음, 그 밖은 파일이 아니거나 모른다
+# Claude 계정 저장 방식(jarvis/macos_daemon.py store): 0 파일, 4 Claude Code 없음, 5 hswap 아직 없음, 그 밖은 파일이 아니거나 모른다
 check_store() {
   STORE_RC=0
   py store || STORE_RC=$?
-  if [ "$STORE_RC" != 0 ] && [ "$STORE_RC" != 4 ]; then
+  if [ "$STORE_RC" != 0 ] && [ "$STORE_RC" != 4 ] && [ "$STORE_RC" != 5 ]; then
     [ -n "$ALLOW_KEYCHAIN" ] || die "아무것도 바꾸지 않았습니다"
     say "--allow-keychain-store: 키체인 저장 방식 그대로 옮깁니다. Claude 사용량·전환은 로그인 세션이 있을 때만 됩니다"
   fi
@@ -257,9 +259,17 @@ cmd_install() {
   healthy || fail "health 가 40초 안에 응답하지 않습니다: http://127.0.0.1:$PORT/api/health"
   if [ -f "$AGENT" ]; then mv "$AGENT" "$KEPT" || fail "에이전트 plist 를 옮기지 못했습니다"; fi
   say "LaunchDaemon 으로 옮겼습니다: $DAEMON"
+  # 전환은 끝났다. 뒤 단계에서 Ctrl-C 를 받아도 되돌리지 않는다
+  trap - INT TERM
   say "에이전트 plist 는 $KEPT 에 있습니다(되돌리기: bash $REPO/deploy/macos-daemon.sh uninstall)"
   # 로그인 세션에서 Claude Code 가 키체인에 다시 쓴 로그인을 파일로 정리하는 예약. 실패해도 전환은 끝났다
   if [ "$STORE_RC" = 0 ] && [ -n "$RECONCILE" ]; then py reconcile; fi
+  if [ "$STORE_RC" = 5 ]; then
+    say "남은 일: hswap 이 설치된 뒤(게이트웨이가 몇 분 안에 설치한다) 키체인이 열린 곳(화면 세션, 또는 security unlock-keychain 을 실행한 셸)에서"
+    say "  hswap claude migrate-store --to file --keep keychain   # 앞에 --dry-run 으로 계획을 본다"
+    say "  그 뒤 bash $REPO/deploy/macos-daemon.sh install 을 다시 실행하면 reconcile 예약을 설치한다. 그 전에는 Claude 사용량·전환이 되지 않는다"
+    return 3
+  fi
 }
 
 cmd_uninstall() {

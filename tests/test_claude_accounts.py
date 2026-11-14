@@ -556,7 +556,7 @@ class LoginStateTest(StoreCase):
     def test_file_store_stops_are_reported_with_fixed_text(self):
         """covers: USAGE-7. 이전 계정의 기록이어도, 만료 임박이어도, 사용 중 계정이 재로그인 필요여도 기기의 사실이 먼저다"""
         relogin = [{"active": True, "slot": "2", "note": claude_accounts.STATUS["relogin_required"][0]}]
-        for kind, want in (("keychain_item_present", "키체인에 Claude 로그인이 있거나 확인하지 못해 자동 갱신을 멈췄습니다. 로그인 세션에서 reconcile 이 정리합니다"),
+        for kind, want in (("keychain_item_present", "키체인에 Claude 로그인이 있거나 확인하지 못해 자동 갱신을 멈췄습니다"),
                            ("config_conflict", "hswap 설정 충돌(파일 저장소와 키체인 필수 모드)")):
             self.keepalive(store="file", ok=False, error={"type": kind, "message": "x" * 500}, loginExpiresAt=iso(time.time() + 3600))
             for rows in ((), relogin):
@@ -2308,20 +2308,22 @@ class HeadlessTest(unittest.TestCase):
 
     def setUp(self):
         for p in (mock.patch.object(claude_accounts, "doctor", None), mock.patch.object(claude_accounts, "_aqua", None),
+                  mock.patch.object(claude_accounts, "_aqua_failed", None),
                   mock.patch.object(claude_accounts.sys, "platform", "darwin")):
             p.start()
             self.addCleanup(p.stop)
 
     def test_new_hswap_error_types_have_fixed_texts(self):
         """hswap 0.3.0 의 오류 type 과 예외 클래스 이름. 표에 있으면 로그에 남기지 않는다"""
-        for kind, want in (("CredentialReadError", "자격 증명을 읽지 못했습니다"), ("keychain_item_present", "로그인 세션에서 reconcile 이 정리합니다"),
+        for kind, want in (("CredentialReadError", "자격 증명을 읽지 못했습니다"), ("keychain_item_present", "자동 갱신을 멈췄습니다"),
                            ("keychain_item_present_locked", "키체인이 잠겨"), ("reconcile_ambiguous", "어느 쪽이 새 로그인인지")):
             with mock.patch.object(claude_accounts, "print", create=True) as log:
                 self.assertIn(want, str(claude_accounts._HswapError(kind)), kind)
             log.assert_not_called()
 
     def test_session_is_read_once_and_a_failed_answer_is_not_kept(self):
-        with mock.patch.object(claude_accounts, "run", return_value=(-1, "", "x")) as run:
+        with mock.patch.object(claude_accounts, "run", return_value=(-1, "", "x")) as run, \
+                mock.patch.object(claude_accounts.time, "monotonic", side_effect=[0.0, 100.0]):
             self.assertTrue(claude_accounts.in_session())  # 묻지 못하면 지금까지처럼 세션 안으로 본다
             self.assertTrue(claude_accounts.in_session())
         self.assertEqual(run.call_count, 2)
@@ -2366,12 +2368,46 @@ class HeadlessTest(unittest.TestCase):
         self.assertEqual(s["state"], "keychain")  # 세션 안이거나 모르면 지금까지와 같다
 
     def test_device_row_carries_store_and_problems(self):
+        claude_accounts._aqua = False
         with mock.patch.object(claude_accounts, "_version", claude_accounts.VERSION):
             self.assertNotIn("store", claude_accounts.status())
-            claude_accounts.doctor = {"store": "auto", "problems": ["not_file_store", "brand_new"]}
+            claude_accounts.doctor = {"store": "auto", "problems": ["not_file_store", "brand_new"], "keychain_backups": 3}
             st = claude_accounts.status()
-        self.assertEqual(st["store"], "auto")
-        self.assertEqual(st["problems"], ["저장 방식이 파일이 아닙니다(not_file_store)", "brand_new"])
+            self.assertEqual((st["store"], st["keychain_backups"]), ("auto", 3))
+            self.assertEqual(st["problems"], ["저장 방식이 파일이 아닙니다(not_file_store)", "brand_new"])
+            claude_accounts._aqua = True  # 세션 안의 키체인 저장 방식은 흔한 정상이다
+            self.assertEqual(claude_accounts.status()["problems"], ["brand_new"])
+
+    def test_the_session_message_names_the_command_hswap_accepts(self):
+        """hswap 은 --keep 없는 migrate-store --to file 을 거절한다. 화면(usage.js)·설치기(macos_daemon)와 같은 명령 하나를 쓴다"""
+        self.assertEqual(claude_accounts.macos_daemon.MIGRATE, "hswap claude migrate-store --to file --keep keychain")
+        self.assertIn(f"({claude_accounts.macos_daemon.MIGRATE})", claude_accounts.HEADLESS)
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "app", "usage.js"), encoding="utf-8") as f:
+            js = f.read()
+        self.assertIn(f'const MIGRATE="{claude_accounts.macos_daemon.MIGRATE}";', js)
+        self.assertEqual(js.count("migrate-store --to file"), 1)  # 화면의 나머지는 MIGRATE 를 쓴다
+
+    def test_a_failed_session_answer_is_kept_for_a_minute(self):
+        with mock.patch.object(claude_accounts, "run", return_value=(-1, "", "x")) as run, \
+                mock.patch.object(claude_accounts.time, "monotonic", side_effect=[100.0, 130.0, 161.0]):
+            self.assertEqual([claude_accounts.in_session() for _ in range(3)], [True, True, True])
+        self.assertEqual(run.call_count, 2)  # 60초 안에는 다시 묻지 않는다
+
+    def test_the_item_text_follows_the_reconcile_service(self):
+        base = claude_accounts.KEEPALIVE_ERRORS["keychain_item_present"]
+        self.assertEqual(claude_accounts.item_text(), base)  # doctor 를 모르면(옛 hswap) 붙이지 않는다
+        for installed, loaded, want in ((True, True, "로그인 세션에서 reconcile 이 정리합니다"), (True, False, "hswap claude reconcile --install-service 로 정리 예약을 설치하세요"),
+                                        (False, None, "hswap claude reconcile --install-service 로 정리 예약을 설치하세요")):
+            claude_accounts.doctor = {"store": "file", "problems": ["keychain_item_present"], "reconcile_installed": installed, "reconcile_loaded": loaded}
+            self.assertEqual(claude_accounts.item_text(), f"{base}. {want}", (installed, loaded))
+        claude_accounts.doctor = {"store": "file", "problems": ["keychain_item_present", "reconcile_ambiguous"], "reconcile_installed": True, "reconcile_loaded": True}
+        text = claude_accounts.item_text()
+        self.assertIn("어느 쪽이 새 로그인인지", text)  # 사람이 골라야 한다
+        self.assertIn(claude_accounts.macos_daemon.MIGRATE, text)
+        k = keepalive_value(store="file", ok=False, error={"type": "keychain_item_present"})
+        with mock.patch.object(claude_accounts, "_keepalive", return_value=k), mock.patch.object(claude_accounts.sys, "platform", "linux"):
+            s = claude_accounts.login()
+        self.assertEqual((s["state"], s["text"], s["attention"]), ("keychain_item_present", text, True))
 
 
 if __name__ == "__main__":
