@@ -456,6 +456,7 @@ class KeepTest(FakeHswapCase):
                              (None, ["check", "keep", ("sleep", hswap_usage.KEEP_S)])):
             order.clear()
             with mock.patch.object(hswap_usage.claude_accounts, "check", side_effect=lambda: order.append("check") or 1 / 0), \
+                    mock.patch.object(hswap_usage, "inspect"), mock.patch.object(hswap_usage.threading, "Thread"), \
                     mock.patch.object(hswap_usage, "_keep_once", side_effect=lambda: order.append("keep")), \
                     mock.patch.object(hswap_usage.claude_accounts, "read", side_effect=lambda: order.append("claude")), \
                     mock.patch.object(hswap_usage, "which_tool", return_value=claude), \
@@ -468,12 +469,12 @@ class KeepTest(FakeHswapCase):
 
 
 class TickStartTest(unittest.TestCase):
-    """covers: USAGE-11. macOS 밖(Linux·Windows)에서는 첫 버전 맞추기 뒤에 게이트웨이가 keepalive 를 직접 부르는 스레드를 한 번 띄운다"""
+    """covers: USAGE-11, USAGE-15. 첫 버전 맞추기 뒤에 게이트웨이가 keepalive 를 직접 부르는 스레드를 한 번 띄운다(macOS 는 tick 이 매번 할 일인지 가린다)"""
 
-    def test_tick_thread_starts_once_outside_macos(self):
+    def test_tick_thread_starts_once(self):
         class Stop(Exception):
             pass
-        for platform, want in (("linux", 1), ("win32", 1), ("darwin", 0)):
+        for platform, want in (("linux", 1), ("win32", 1), ("darwin", 1)):
             started, rounds = [], []
 
             def sleep(s):
@@ -482,7 +483,7 @@ class TickStartTest(unittest.TestCase):
                     raise Stop
             with mock.patch.object(hswap_usage.sys, "platform", platform), \
                     mock.patch.object(hswap_usage.threading, "Thread", side_effect=lambda target, **kw: mock.Mock(start=lambda: started.append(target))), \
-                    mock.patch.object(hswap_usage, "_check"), mock.patch.object(hswap_usage, "schedule"), \
+                    mock.patch.object(hswap_usage, "_check"), mock.patch.object(hswap_usage, "schedule"), mock.patch.object(hswap_usage, "inspect"), \
                     mock.patch.object(hswap_usage, "_keep_once"), mock.patch.object(hswap_usage, "which_tool", return_value=None), \
                     mock.patch.object(hswap_usage.time, "sleep", side_effect=sleep):
                 with self.assertRaises(Stop):
@@ -565,6 +566,114 @@ class ScheduleTest(FakeHswapCase):
             with patch:
                 self.assertIsNone(hswap_usage.schedule())
         self.assertEqual(self.calls(), [])
+
+
+class MacSessionTest(FakeHswapCase):
+    """covers: USAGE-15. macOS 에서 hswap doctor 로 저장 방식을 읽고, 로그인 세션 밖의 파일 저장 방식이면 게이트웨이 tick 이 keepalive 와 자동 전환을 맡는다."""
+
+    script = KeepTest.script
+    DOCTOR = "claude doctor --json"
+    CONFIG = "claude config --json"
+    KEEP = f"claude keepalive --ahead {hswap_usage.AHEAD_S} --json"
+    AUTO = "claude auto --once --json"
+
+    def setUp(self):
+        super().setUp()
+        for p in (mock.patch.object(hswap_usage.sys, "platform", "darwin"),
+                  mock.patch.object(hswap_usage, "which_tool", side_effect=lambda n: "/x/" + n),
+                  mock.patch.object(hswap_usage.claude_accounts, "_store_read", return_value={"accounts": [{}]}),
+                  mock.patch.object(hswap_usage.claude_accounts, "doctor", None),
+                  mock.patch.object(hswap_usage.claude_accounts, "service", None),
+                  mock.patch.object(hswap_usage.claude_accounts, "_aqua", False)):
+            p.start()
+            self.addCleanup(p.stop)
+
+    @staticmethod
+    def doctor(store="file", loaded=False, domain="gui", **kw):
+        return [json.dumps({"schemaVersion": 1, "store": store, "keychainItemPresent": False, "problems": [],
+                            "reconcileService": {"installed": True, "loaded": False, "managed": True},
+                            "keepaliveService": {"installed": True, "loaded": loaded, "domain": domain}, **kw}), 1]
+
+    def strategy(self, value):
+        return [json.dumps({"schemaVersion": 1, "settings": [{"key": "autoswitch.strategy", "value": value}]}), 0]
+
+    def tick_once(self):
+        class Stop(Exception):
+            pass
+        with mock.patch.object(hswap_usage.time, "sleep", side_effect=Stop):
+            with self.assertRaises(Stop):
+                hswap_usage.tick()
+
+    def test_inspect_reads_doctor_without_the_keychain(self):
+        self.script({self.DOCTOR: self.doctor(problems=["slot_without_backup", {"code": "file_mode_insecure"}, "Bad Code!"], slotsWithoutBackup=[2])})
+        d = hswap_usage.inspect()
+        self.assertEqual(d, hswap_usage.claude_accounts.doctor)
+        self.assertEqual((d["store"], d["problems"], d["keepalive_loaded"], d["keepalive_domain"]), ("file", ["slot_without_backup", "file_mode_insecure"], False, "gui"))
+        self.assertEqual(self.calls(), [self.DOCTOR])
+
+    def test_old_hswap_without_doctor_falls_back_to_the_store_setting(self):
+        for settings, want in (([{"key": "credentials.store", "value": "file"}], "file"), ([{"key": "credentials.store", "value": None}], "auto")):
+            self.script({self.DOCTOR: ["usage: hswap claude ...", 2], self.CONFIG: [json.dumps({"schemaVersion": 1, "settings": settings}), 0]})
+            d = hswap_usage.inspect()
+            self.assertEqual((d["store"], d["problems"], d["keepalive_loaded"]), (want, [], None), settings)
+        envelope = json.dumps({"schemaVersion": 1, "ok": False, "error": {"type": "SwitchError", "message": "m"}})
+        self.script({self.DOCTOR: [envelope, 1], self.CONFIG: [json.dumps({"schemaVersion": 1, "settings": [{"key": "credentials.store", "value": "auto"}]}), 0]})
+        self.assertEqual(hswap_usage.inspect()["store"], "auto")  # doctor 의 오류 봉투는 답이 아니다
+        with mock.patch.object(hswap_usage.config, "CSWAP_INSTALL", False):
+            self.assertIsNone(hswap_usage.inspect())
+        self.script({})  # 둘 다 답하지 않으면 모른다
+        self.assertIsNone(hswap_usage.inspect())
+
+    def test_outside_macos_or_without_claude_it_does_nothing(self):
+        self.script({self.DOCTOR: self.doctor()})
+        hswap_usage.claude_accounts.doctor = {"store": "file"}
+        with mock.patch.object(hswap_usage.sys, "platform", "linux"):
+            self.assertIsNone(hswap_usage.inspect())
+        self.assertIsNone(hswap_usage.claude_accounts.doctor)
+        self.assertEqual(self.calls(), [])
+
+    def test_headless_file_store_ticks_keepalive_and_rotation(self):
+        self.script({self.DOCTOR: self.doctor(), self.KEEP: ["{}", 0], self.CONFIG: self.strategy(hswap_usage.ROTATION)})
+        self.tick_once()
+        self.assertEqual(self.calls(), [self.DOCTOR, self.KEEP, self.CONFIG, self.AUTO])
+
+    def test_no_double_run_inside_a_session_or_next_to_a_loaded_service(self):
+        for aqua, doctor in ((True, self.doctor()), (False, self.doctor(loaded=True)), (False, self.doctor(loaded=True, domain="system")),
+                             (False, self.doctor(store="auto"))):
+            os.remove(os.path.join(self.dir, "argv")) if os.path.exists(os.path.join(self.dir, "argv")) else None
+            self.script({self.DOCTOR: doctor, self.KEEP: ["{}", 0]})
+            with mock.patch.object(hswap_usage.claude_accounts, "_aqua", aqua):
+                self.tick_once()
+            self.assertEqual(self.calls(), [self.DOCTOR], (aqua, doctor))
+
+    def test_linux_tick_is_unchanged(self):
+        self.script({self.KEEP: ["{}", 0], self.CONFIG: self.strategy("best")})
+        with mock.patch.object(hswap_usage.sys, "platform", "linux"):
+            self.tick_once()
+        self.assertEqual(self.calls(), [self.KEEP, self.CONFIG])
+
+    def test_rotation_follows_the_tick_when_the_gateway_runs_it(self):
+        st = json.dumps({"schemaVersion": 1, "platform": "launchd", "installed": True, "managed": True, "loaded": False, "ahead": 7200, "thenAuto": False})
+        cfg = json.dumps({"schemaVersion": 1, "settings": [{"key": "autoswitch.strategy", "value": hswap_usage.ROTATION}]})
+        self.script({"claude config --json": [cfg, 0], "claude priority": ["  Account-1  a@example.com  1\n", 0],
+                     "claude keepalive --service-status --json": [st, 0]})
+        hswap_usage.claude_accounts.doctor = {"store": "file", "problems": [], "keepalive_loaded": False, "keepalive_domain": "gui"}
+        with mock.patch.object(hswap_usage.claude_accounts, "_version", "0.3.0"):
+            self.assertTrue(hswap_usage.rotation()[1]["on"])  # 세션 밖에서는 예약이 아니라 게이트웨이 tick 이 전환한다
+            with mock.patch.object(hswap_usage.claude_accounts, "_aqua", True):
+                self.assertFalse(hswap_usage.rotation()[1]["on"])
+
+    def test_a_system_keepalive_is_not_rewritten_without_sudo(self):
+        st = json.dumps({"schemaVersion": 1, "platform": "launchd", "installed": True, "managed": True, "loaded": True, "ahead": 7200, "thenAuto": False})
+        self.script({"claude config --json": [self.strategy("best")[0], 0], "claude priority": ["  Account-1  a@example.com  0\n", 0],
+                     "claude keepalive --service-status --json": [st, 0]})
+        hswap_usage.claude_accounts.doctor = {"store": "file", "problems": [], "keepalive_loaded": True, "keepalive_domain": "system"}
+        with mock.patch.object(hswap_usage.claude_accounts, "_version", "0.3.0"):
+            code, body = hswap_usage.set_rotation("1", "1", "90")
+            self.assertEqual(code, 409, body)
+            self.assertIn("sudo hswap claude keepalive --install-service --system --then-auto", body["error"])
+            self.assertFalse([c for c in self.calls() if " set " in c or "--install-service" in c or c.startswith("claude priority ")])
+            self.assertIsNone(hswap_usage.schedule())  # 데몬 예약 옆에 gui 예약을 만들지 않는다
 
 
 if __name__ == "__main__":

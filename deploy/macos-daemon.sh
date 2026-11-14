@@ -2,9 +2,11 @@
 # macOS: jarvis 를 LaunchAgent(로그인 세션)와 LaunchDaemon(시스템 도메인, GUI 로그인 불필요) 사이에서 옮긴다.
 # 사용자로 실행한다. sudo 는 처음에 한 번만 묻는다. docs/operations.md 의 macOS 절 참고.
 #
-#   bash deploy/macos-daemon.sh install|uninstall|status [--dry-run]
+#   bash deploy/macos-daemon.sh install|uninstall|status [--dry-run] [--allow-keychain-store] [--with-reconcile|--no-reconcile]
 #
 # install 이 어느 단계에서든 실패하면 LaunchAgent 로 되돌리고 0 이 아닌 코드로 끝난다.
+# Claude Code 가 있는 기기의 install 은 hswap 저장 방식(hswap claude doctor)이 파일일 때만 진행한다. daemon 은 로그인 세션 밖이라
+# 키체인을 읽지 못한다. --allow-keychain-store 로만 넘어간다. 파일 저장 방식이면 끝에 hswap 의 reconcile 예약(gui)을 설치한다(--no-reconcile 로 끈다).
 # 에이전트 plist 는 LaunchAgents 밖(~/.local/share/jarvis/dev.jarvis.plist.agent)에 둔다. 남겨 두면 다음 GUI 로그인 때
 # 두 번째 jarvis 가 같은 포트를 잡으려다 KeepAlive 재시작을 되풀이한다.
 set -u
@@ -36,13 +38,21 @@ fi
 
 say() { printf '%s\n' "$*"; }
 die() { say "$*" >&2; exit 1; }
-usage() { die "사용법: bash deploy/macos-daemon.sh install|uninstall|status [--dry-run]"; }
+usage() { die "사용법: bash deploy/macos-daemon.sh install|uninstall|status [--dry-run] [--allow-keychain-store] [--with-reconcile|--no-reconcile]"; }
 
 CMD="${1:-}"
 [ $# -gt 0 ] && shift
 DRY=""
+ALLOW_KEYCHAIN=""
+RECONCILE=1
 for a in "$@"; do
-  case "$a" in --dry-run) DRY=1 ;; *) usage ;; esac
+  case "$a" in
+    --dry-run) DRY=1 ;;
+    --allow-keychain-store) ALLOW_KEYCHAIN=1 ;;
+    --with-reconcile) RECONCILE=1 ;;
+    --no-reconcile) RECONCILE="" ;;
+    *) usage ;;
+  esac
 done
 case "$CMD" in install|uninstall|status) ;; *) usage ;; esac
 [ "$(uname -s)" = Darwin ] || die "macOS 전용입니다"
@@ -181,6 +191,17 @@ install_plan() {
   say "  /bin/launchctl print system/$LABEL   # state = running 확인"
   say "  curl http://127.0.0.1:$PORT/api/health   # 최대 40초"
   say "  mv $AGENT $KEPT"
+  if [ "$STORE_RC" = 0 ] && [ -n "$RECONCILE" ]; then say "  hswap claude reconcile --install-service --json   # 없으면(파일 저장 방식)"; fi
+}
+
+# Claude 계정 저장 방식(jarvis/macos_daemon.py store): 0 파일, 4 Claude Code 없음, 그 밖은 파일이 아니거나 모른다
+check_store() {
+  STORE_RC=0
+  py store || STORE_RC=$?
+  if [ "$STORE_RC" != 0 ] && [ "$STORE_RC" != 4 ]; then
+    [ -n "$ALLOW_KEYCHAIN" ] || die "아무것도 바꾸지 않았습니다"
+    say "--allow-keychain-store: 키체인 저장 방식 그대로 옮깁니다. Claude 사용량·전환은 로그인 세션이 있을 때만 됩니다"
+  fi
 }
 
 cmd_install() {
@@ -207,6 +228,7 @@ cmd_install() {
   [ -f "$DAEMON" ] && before="$DAEMON"
   say "비교: $before → 렌더 결과"
   diff -u "$before" "$NEW"
+  check_store
   if [ -n "$DRY" ]; then install_plan; return 0; fi
 
   sudo_begin
@@ -236,6 +258,8 @@ cmd_install() {
   if [ -f "$AGENT" ]; then mv "$AGENT" "$KEPT" || fail "에이전트 plist 를 옮기지 못했습니다"; fi
   say "LaunchDaemon 으로 옮겼습니다: $DAEMON"
   say "에이전트 plist 는 $KEPT 에 있습니다(되돌리기: bash $REPO/deploy/macos-daemon.sh uninstall)"
+  # 로그인 세션에서 Claude Code 가 키체인에 다시 쓴 로그인을 파일로 정리하는 예약. 실패해도 전환은 끝났다
+  if [ "$STORE_RC" = 0 ] && [ -n "$RECONCILE" ]; then py reconcile; fi
 }
 
 cmd_uninstall() {

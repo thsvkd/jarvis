@@ -917,6 +917,72 @@ exec "$TEST_PY" "$@"
         self.set("daemon-unhealthy")
         self.assertIn("health: 응답 없음", self.run_script("status").stdout)
 
+    def claude_hswap(self, store, reconcile_rc=0, reconcile_installed=False):
+        """Claude Code 와 그 저장 방식(store)을 답하는 가짜 hswap 을 ~/.local/bin 에 둔다."""
+        local = os.path.join(self.home, ".local", "bin")
+        os.makedirs(local, exist_ok=True)
+        fake_tool(local, "claude", "exit 0")
+        fake_tool(local, "hswap", hswap_stub({**FULL_DOCTOR, "store": store,
+                                              "reconcileService": {"installed": reconcile_installed, "loaded": False, "managed": True}}, reconcile_rc=reconcile_rc))
+
+    def test_a_keychain_store_is_refused_before_sudo(self):
+        """covers: DAEMON-15"""
+        self.claude_hswap("auto")
+        for args in (("install",), ("install", "--dry-run")):
+            r = self.run_script(*args)
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertIn("hswap claude migrate-store --to file --keep keychain", r.stderr)
+            self.assertIn("아무것도 바꾸지 않았습니다", r.stderr)
+            self.assertTrue(self.has("agent"))
+            self.assertFalse(os.path.exists(self.daemon))
+            self.assertEqual(self.read(self.agent), self.original)
+            self.assertFalse([c for c in self.calls() if c.startswith("sudo") or "bootout" in c or "bootstrap" in c])
+
+    def test_allow_keychain_store_installs_without_reconcile(self):
+        """covers: DAEMON-15"""
+        self.claude_hswap("auto")
+        r = self.run_script("install", "--allow-keychain-store")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assert_daemon_mode()
+        self.assertIn("로그인 세션이 있을 때만", r.stdout)
+        self.assertFalse([c for c in self.calls() if "reconcile" in c])
+
+    def test_file_store_installs_and_then_the_reconcile_agent(self):
+        """covers: DAEMON-15"""
+        self.claude_hswap("file", reconcile_rc=3)
+        r = self.run_script("install")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assert_daemon_mode()
+        calls = self.calls()
+        self.assertLess(calls.index(f"sudo -n /bin/launchctl bootstrap system {self.daemon}"), calls.index("hswap claude reconcile --install-service --json"))
+        self.assertIn("다음 GUI 로그인 때 적재됩니다", r.stdout)
+
+    def test_reconcile_can_be_turned_off_is_skipped_when_present_and_never_fails_the_install(self):
+        """covers: DAEMON-15"""
+        for setup, args in ((dict(), ("--no-reconcile",)), (dict(reconcile_installed=True), ()), (dict(reconcile_rc=1), ())):
+            with self.subTest(setup=setup, args=args):
+                self.claude_hswap("file", **setup)
+                if os.path.exists(self.log):
+                    os.remove(self.log)
+                r = self.run_script("uninstall") if self.has("daemon") else None
+                if os.path.exists(self.log):
+                    os.remove(self.log)
+                r = self.run_script("install", *args)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assert_daemon_mode()
+                ran = [c for c in self.calls() if "reconcile" in c]
+                self.assertEqual(bool(ran), bool(setup.get("reconcile_rc")), self.calls())
+                if setup.get("reconcile_rc"):
+                    self.assertIn("hswap claude reconcile --install-service", r.stdout)
+
+    def test_dry_run_of_a_file_store_lists_the_reconcile_step(self):
+        """covers: DAEMON-15"""
+        self.claude_hswap("file")
+        r = self.run_script("install", "--dry-run")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("hswap claude reconcile --install-service --json", r.stdout)
+        self.assertFalse([c for c in self.calls() if "reconcile" in c or c.startswith("sudo")])
+
 
 FAKE_MAIN = '''import json, os, sys
 with open(os.environ["LOG"], "a") as f:
@@ -997,6 +1063,139 @@ if [ "$1" = venv ]; then mkdir -p "$4/bin" && printf '#!/bin/sh\\nexec "%s" "$@"
         self.assertFalse(os.path.exists(self.agent))
         self.assertEqual(self.read(self.daemon), installed)
         self.assertFalse([c for c in self.calls() if c.startswith("sudo") or "bootout" in c or "bootstrap" in c])
+
+
+FULL_DOCTOR = {"schemaVersion": 1, "store": "file", "keychainItemPresent": False, "keychainLocked": True, "fileExists": True, "fileMode": "0600",
+               "slotsWithoutBackup": [], "sessionDirs": [], "reconcileService": {"installed": False, "loaded": False, "managed": False},
+               "keepaliveService": {"installed": True, "loaded": False, "domain": "gui"}, "ok": False, "problems": ["reconcile_service_missing"]}
+
+
+class Doctor(unittest.TestCase):
+    """covers: DAEMON-15. hswap claude doctor --json 의 해석: 필드가 없거나 모양이 다르면 모르는 것으로 둔다."""
+
+    def test_full_answer(self):
+        self.assertEqual(macos_daemon.summary(FULL_DOCTOR), {"store": "file", "problems": ["reconcile_service_missing"], "keychain_item_present": False,
+                                                              "keepalive_loaded": False, "keepalive_domain": "gui", "reconcile_installed": False})
+
+    def test_missing_or_odd_fields_are_unknown(self):
+        self.assertEqual(macos_daemon.summary({"schemaVersion": 1}), {"store": None, "problems": [], "keychain_item_present": None,
+                                                                       "keepalive_loaded": None, "keepalive_domain": None, "reconcile_installed": None})
+        odd = {"schemaVersion": 1, "store": "File Store!", "problems": "not_file_store", "keychainItemPresent": "yes",
+               "keepaliveService": [], "reconcileService": {"installed": "true"}}
+        self.assertEqual(macos_daemon.summary(odd), macos_daemon.summary({"schemaVersion": 1}))
+        many = {"schemaVersion": 1, "problems": ["a" * 41, None, {"code": "file_mode_insecure", "message": "/Users/x"}, "slot_without_backup"] + ["x"] * 30}
+        self.assertEqual(macos_daemon.summary(many)["problems"], ["file_mode_insecure", "slot_without_backup", *["x"] * 18])
+
+    def test_old_hswap_uses_the_store_setting(self):
+        for body in (None, {"schemaVersion": 2, "store": "file"}, ["x"]):
+            self.assertIsNone(macos_daemon.summary(body))
+            self.assertEqual(macos_daemon.summary(body, {"credentials.store": "file"})["store"], "file")
+            self.assertEqual(macos_daemon.summary(body, {"autoswitch.threshold": 90})["store"], "auto")  # 값이 없으면 hswap 기본값
+
+    def test_auto_login_reads_the_loginwindow_plist(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "lw.plist")
+            self.assertFalse(macos_daemon.auto_login(path))
+            for data, want in (({"autoLoginUser": "someone"}, True), ({"autoLoginUser": ""}, False), ({}, False)):
+                with open(path, "wb") as f:
+                    plistlib.dump(data, f)
+                self.assertEqual(macos_daemon.auto_login(path), want, data)
+
+
+class StoreCheck(unittest.TestCase):
+    """covers: DAEMON-15, DAEMON-16. python -m jarvis.macos_daemon store [--report]: 가짜 hswap·claude 와 임시 HOME 으로 돈다."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.home = tmp.name
+        self.bin = os.path.join(self.home, ".local", "bin")
+        os.makedirs(self.bin)
+        self.lw = os.path.join(self.home, "lw.plist")
+        for p in (mock.patch.dict(os.environ, {"HOME": self.home, "JARVIS_DAEMON_TEST": "1", "JARVIS_LOGINWINDOW": self.lw}),):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def tools(self, doctor=None, config=None, claude=True):
+        if claude:
+            fake_tool(self.bin, "claude", "exit 0")
+        fake_tool(self.bin, "hswap", hswap_stub(doctor, config))
+
+    def run_main(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = macos_daemon.main(["store", *args])
+        return code, out.getvalue(), err.getvalue()
+
+    def test_file_store_passes_and_lists_problems(self):
+        self.tools(FULL_DOCTOR)
+        code, out, _ = self.run_main()
+        self.assertEqual(code, 0)
+        self.assertIn("Claude 계정 저장 방식: 파일", out)
+        self.assertIn("reconcile 예약이 없습니다", out)
+
+    def test_a_keychain_store_is_refused_with_the_reason_and_the_command(self):
+        for doctor, config, now in (({**FULL_DOCTOR, "store": "auto"}, None, "auto"), (None, None, "확인하지 못함"),
+                                    (None, {"schemaVersion": 1, "settings": [{"key": "credentials.store", "value": "auto"}]}, "auto")):
+            self.tools(doctor, config)
+            code, out, err = self.run_main()
+            self.assertEqual(code, 3, (doctor, config))
+            self.assertIn(f"(지금: {now}", err)
+            self.assertIn("로그인 세션 밖", err)
+            self.assertIn("hswap claude migrate-store --to file --keep keychain --dry-run", err)
+            self.assertIn("--allow-keychain-store", err)
+
+    def test_without_hswap_the_refusal_says_the_gateway_installs_it(self):
+        fake_tool(self.bin, "claude", "exit 0")
+        code, _, err = self.run_main()
+        self.assertEqual(code, 3)
+        self.assertIn("hswap 이 아직 없습니다", err)
+        self.assertIn("--allow-keychain-store", err)
+
+    def test_a_doctor_error_falls_back_to_the_store_setting(self):
+        envelope = {"schemaVersion": 1, "ok": False, "error": {"type": "SwitchError", "message": "/Users/x"}}
+        self.assertIsNone(macos_daemon.summary(envelope))
+        self.assertEqual(macos_daemon.summary(envelope, {"credentials.store": "file"})["store"], "file")
+        self.tools(envelope, {"schemaVersion": 1, "settings": [{"key": "credentials.store", "value": "file"}]})
+        self.assertEqual(self.run_main()[0], 0)
+
+    def test_no_claude_code_needs_no_check(self):
+        self.tools({**FULL_DOCTOR, "store": "auto"}, claude=False)
+        self.assertEqual(self.run_main()[0], 4)
+
+    def test_report_warns_only_without_auto_login_and_never_fails(self):
+        self.tools({**FULL_DOCTOR, "store": "auto"})
+        code, out, err = self.run_main("--report")
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("Claude 계정 저장 방식: 키체인(auto)", out)
+        self.assertIn("재부팅 뒤 로그인 전에는 Claude 사용량·전환이 되지 않습니다", out)
+        with open(self.lw, "wb") as f:
+            plistlib.dump({"autoLoginUser": "someone"}, f)
+        self.assertNotIn("재부팅 뒤", self.run_main("--report")[1])
+        self.tools(FULL_DOCTOR)
+        os.remove(self.lw)
+        code, out, _ = self.run_main("--report")
+        self.assertEqual(code, 0)
+        self.assertNotIn("재부팅 뒤", out)
+
+
+def fake_tool(d, name, body):
+    path = os.path.join(d, name)
+    with open(path, "w") as f:
+        f.write("#!/bin/sh\n" + body + "\n")
+    os.chmod(path, 0o755)
+
+
+def hswap_stub(doctor=None, config=None, reconcile_rc=0):
+    """가짜 hswap: 인자를 $LOG 에 남기고 doctor·config 에는 준 JSON 을, 없으면 옛 hswap 처럼 인자 오류(2)를 낸다."""
+    def answer(body):
+        return "exit 2" if body is None else "cat <<'JSON'\n%s\nJSON\nexit 1" % json.dumps(body)
+    return ('[ -z "${LOG:-}" ] || echo "hswap $*" >> "$LOG"\n'
+            'case "$*" in\n'
+            f'  "claude doctor --json") {answer(doctor)} ;;\n'
+            f'  "claude config --json") {answer(config)} ;;\n'
+            f'  "claude reconcile --install-service --json") echo "{{}}"; exit {reconcile_rc} ;;\n'
+            '  *) exit 2 ;;\nesac')
 
 
 if __name__ == "__main__":

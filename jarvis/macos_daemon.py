@@ -4,14 +4,19 @@ deploy/macos-daemon.sh 가 부른다. 표준 라이브러리만 쓰고 config �
     python -m jarvis.macos_daemon render [--agent PATH]    plist 를 stdout 으로
     python -m jarvis.macos_daemon check [--agent PATH]     기준 plist 의 python·코드 확인
     python -m jarvis.macos_daemon port [--agent PATH]      게이트웨이 포트
+    python -m jarvis.macos_daemon store [--report]         Claude 계정 저장 방식(hswap doctor). 0 파일, 3 파일이 아님·모름, 4 Claude Code 없음
+                                                           --report 는 설치기 끝의 보고라 늘 0 이다
+    python -m jarvis.macos_daemon reconcile                파일 저장 방식이면 hswap 의 reconcile 예약(gui)을 설치한다. 늘 0
 
 --agent 를 주지 않으면 LaunchAgents 의 plist, LaunchAgents 밖으로 옮겨 둔 plist, deploy/jarvis.plist 템플릿 순으로 쓴다.
 """
 
 import argparse
+import json
 import os
 import plistlib
 import re
+import subprocess
 import sys
 import tomllib
 
@@ -29,6 +34,13 @@ SECRET = re.compile(r"TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|APIKEY|COOKIE|(^|_
 KEEP = {"Label", "ProgramArguments", "WorkingDirectory", "EnvironmentVariables", "RunAtLoad", "KeepAlive", "ThrottleInterval",
         "ExitTimeOut", "ProcessType", "SoftResourceLimits", "HardResourceLimits", "Nice"}
 REPLACED = {"Program", "StandardOutPath", "StandardErrorPath"}  # 아래에서 대신 쓰므로 버려도 알리지 않는다
+# hswap claude doctor(0.3.0, claude_swap/doctor.py run_doctor) 의 problems 코드 → 화면 문구. 모르는 코드는 코드 그대로 보인다
+PROBLEMS = {"not_file_store": "저장 방식이 파일이 아닙니다", "keychain_item_present": "키체인에 Claude 로그인이 있습니다(로그인 세션에서 reconcile 이 정리합니다)",
+            "file_missing": "자격 증명 파일이 없습니다", "file_mode_insecure": "자격 증명 파일을 다른 사용자가 읽을 수 있습니다(0600 이 아님)",
+            "slot_without_backup": "백업이 없는 슬롯이 있습니다", "session_profiles": "세션 프로필(sessions/)이 남아 있습니다",
+            "profile_env": "CLAUDE_CONFIG_DIR 같은 프로필 환경 변수가 있습니다", "reconcile_service_missing": "reconcile 예약이 없습니다"}
+LOGINWINDOW = "/Library/Preferences/com.apple.loginwindow.plist"  # 자동 로그인 사용자(autoLoginUser). 누구나 읽는다
+MIGRATE = "hswap claude migrate-store --to file --keep keychain"
 
 
 def _program(agent):
@@ -110,14 +122,141 @@ def port(data, home):
         return DEFAULT_PORT
 
 
+def summary(body, settings=None):
+    """hswap claude doctor --json(schemaVersion 1) → {store, problems, keychain_item_present, keepalive_loaded, keepalive_domain, reconcile_installed}.
+    없는 필드·다른 모양은 모름(None·[])으로 둔다. doctor 를 모르는 옛 hswap 은 settings({키: 값}, hswap claude config --json)의
+    credentials.store 만 쓴다(값이 없으면 hswap 기본값 auto). doctor 가 오류로 답했어도(error 봉투) 같다. 둘 다 없으면 None."""
+    if not answered(body):
+        if not settings:
+            return None
+        store = settings.get("credentials.store")
+        return {"store": store if store in ("auto", "file") else "auto", "problems": [], "keychain_item_present": None,
+                "keepalive_loaded": None, "keepalive_domain": None, "reconcile_installed": None}
+    flag = lambda d, k: d.get(k) if isinstance(d.get(k), bool) else None
+    obj = lambda k: body.get(k) if isinstance(body.get(k), dict) else {}
+    word = lambda v, pat: v if isinstance(v, str) and re.fullmatch(pat, v) else None
+    raw = body.get("problems") if isinstance(body.get("problems"), list) else []
+    codes = [word(p.get("code") if isinstance(p, dict) else p, r"[a-z_]{1,40}") for p in raw]
+    return {"store": word(body.get("store"), r"[a-z]{1,16}"), "problems": [c for c in codes if c][:20],
+            "keychain_item_present": flag(body, "keychainItemPresent"), "keepalive_loaded": flag(obj("keepaliveService"), "loaded"),
+            "keepalive_domain": word(obj("keepaliveService").get("domain"), r"[a-z]{1,16}"), "reconcile_installed": flag(obj("reconcileService"), "installed")}
+
+
+def answered(body):
+    """doctor 가 보고서로 답했는가(오류 봉투 {schemaVersion, error} 는 아니다)."""
+    return isinstance(body, dict) and body.get("schemaVersion") == 1 and not body.get("error")
+
+
+def _hswap(exe, *args):
+    """hswap claude <args> --json 의 JSON 객체. 실행하지 못했거나 JSON 이 아니면 None(문제가 있으면 doctor 는 0 이 아닌 코드로 끝난다)."""
+    try:
+        p = subprocess.run([exe, "claude", *args, "--json"], capture_output=True, text=True, errors="replace", timeout=60, stdin=subprocess.DEVNULL)
+        body = json.loads(p.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    return body if isinstance(body, dict) else None
+
+
+def _tools(home):
+    """(claude 실행 파일 또는 None, hswap 실행 파일 또는 None). hswap 은 jarvis 가 설치하는 ~/.local/bin 에서만 찾는다.
+    테스트(JARVIS_DAEMON_TEST=1)는 시스템 폴더를 보지 않는다(deploy/macos-daemon.sh 의 재정의와 같은 조건)."""
+    local = os.path.join(home, ".local", "bin")
+    dirs = [local] if os.environ.get("JARVIS_DAEMON_TEST") == "1" else [local, "/opt/homebrew/bin", "/usr/local/bin"]
+    found = lambda d, n: os.path.join(d, n) if os.access(os.path.join(d, n), os.X_OK) else None
+    return next((p for d in dirs if (p := found(d, "claude"))), None), found(local, "hswap")
+
+
+def inspect(home):
+    """(Claude Code 가 있는가, summary() 또는 None)."""
+    claude, hswap = _tools(home)
+    if not claude:
+        return False, None
+    if not hswap:
+        return True, None
+    body = _hswap(hswap, "doctor")
+    if answered(body):
+        return True, summary(body)
+    cfg = _hswap(hswap, "config") or {}
+    return True, summary(None, {s["key"]: s.get("value") for s in cfg.get("settings") or [] if isinstance(s, dict) and isinstance(s.get("key"), str)})
+
+
+def auto_login(path=LOGINWINDOW):
+    """macOS 자동 로그인이 켜져 있는가. 읽지 못하면 꺼진 것으로 본다."""
+    try:
+        with open(path, "rb") as f:
+            user = plistlib.load(f).get("autoLoginUser")
+    except (OSError, ValueError, AttributeError, plistlib.InvalidFileException):
+        return False
+    return isinstance(user, str) and bool(user)
+
+
+def store(home, report=False):
+    """store 명령. 반환은 종료 코드(모듈 docstring)."""
+    has_claude, d = inspect(home)
+    if not has_claude:
+        print("Claude Code 가 없어 Claude 계정 저장 방식을 검사하지 않습니다")
+        return 0 if report else 4
+    now = (d or {}).get("store")
+    print("Claude 계정 저장 방식: " + ("파일" if now == "file" else f"키체인({now})" if now else "확인하지 못함(hswap 이 없거나 답하지 않았습니다)"))
+    for p in (d or {}).get("problems", []):
+        print(f"  문제: {PROBLEMS.get(p, p)}({p})")
+    if now == "file":
+        return 0
+    if d is None and not _tools(home)[1] and not report:  # 새 기기: hswap 은 게이트웨이가 처음 돌 때 설치한다
+        print("hswap 이 아직 없습니다. 게이트웨이가 LaunchAgent 로 돌며 hswap 을 설치한 뒤(몇 분) 저장 방식을 파일로 옮기고 다시 실행하거나, "
+              "--allow-keychain-store 로 지금 옮깁니다", file=sys.stderr)
+        return 3
+    if report:
+        # 테스트(JARVIS_DAEMON_TEST=1)만 자동 로그인 설정 파일을 바꾼다
+        lw = os.environ.get("JARVIS_LOGINWINDOW", LOGINWINDOW) if os.environ.get("JARVIS_DAEMON_TEST") == "1" else LOGINWINDOW
+        if not auto_login(lw):
+            print("주의: 자동 로그인이 꺼져 있고 Claude 계정이 키체인에 있습니다. 재부팅 뒤 로그인 전에는 Claude 사용량·전환이 되지 않습니다")
+            print(f"  키체인이 열린 곳(화면 세션, 또는 security unlock-keychain 을 실행한 셸)에서 파일 저장 방식으로 옮기면 됩니다: {MIGRATE}")
+        return 0
+    print(f"Claude 계정 저장 방식이 파일이 아닙니다(지금: {now or '확인하지 못함'}). LaunchDaemon 은 로그인 세션 밖에서 돌아 키체인을 읽지 못하므로,\n"
+          "이대로 옮기면 Claude 사용량·계정 전환이 되지 않습니다. 먼저 키체인이 열린 곳(그 기기의 화면 세션, 또는 security unlock-keychain 을\n"
+          "실행한 셸)에서 파일 저장 방식으로 옮기세요:\n"
+          f"  {MIGRATE} --dry-run   # 계획 확인\n"
+          f"  {MIGRATE}\n"
+          "그래도 키체인 저장 방식 그대로 옮기려면 --allow-keychain-store 를 붙입니다", file=sys.stderr)
+    return 3
+
+
+def reconcile(home):
+    """파일 저장 방식이면 hswap 의 reconcile 예약(gui LaunchAgent, 키체인에 로그인이 다시 생기면 로그인 세션에서 정리)을 설치한다.
+    이미 있거나 파일 저장 방식이 아니면 하지 않는다. 실패해도 0 이다(daemon 전환은 이미 끝났다)."""
+    _, d = inspect(home)
+    if not d or d.get("store") != "file" or d.get("reconcile_installed") is True:
+        if d and d.get("reconcile_installed") is True:
+            print("reconcile 예약이 이미 있습니다")
+        return 0
+    try:
+        rc = subprocess.run([_tools(home)[1], "claude", "reconcile", "--install-service", "--json"], capture_output=True, timeout=60,
+                            stdin=subprocess.DEVNULL).returncode
+    except (OSError, subprocess.SubprocessError):
+        rc = None
+    if rc == 0:
+        print("reconcile 예약을 설치했습니다")
+    elif rc == 3:  # hswap keepalive 예약과 같은 관례: GUI 세션이 없어 다음 로그인 때 적재된다
+        print("reconcile 예약을 설치했습니다. 다음 GUI 로그인 때 적재됩니다")
+    else:
+        print(f"reconcile 예약을 설치하지 못했습니다(종료 코드 {rc}). 그 기기의 화면 세션에서 실행하세요: hswap claude reconcile --install-service")
+    return 0
+
+
 def main(argv=None):
     import grp  # Windows 에는 없다. 테스트가 render 를 어디서나 부를 수 있게 여기서 읽는다
     import pwd
     p = argparse.ArgumentParser(prog="python -m jarvis.macos_daemon")
-    p.add_argument("command", choices=("render", "check", "port"))
+    p.add_argument("command", choices=("render", "check", "port", "store", "reconcile"))
     p.add_argument("--agent", help="기준 LaunchAgent plist")
+    p.add_argument("--report", action="store_true", help="store: 설치기 끝의 보고(거절하지 않는다)")
     args = p.parse_args(argv)
     home = os.path.expanduser("~")
+    if args.command == "store":
+        return store(home, args.report)
+    if args.command == "reconcile":
+        return reconcile(home)
     try:
         data = base(args.agent, home)
         if args.command == "render":

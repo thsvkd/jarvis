@@ -99,7 +99,7 @@ class InstallTest(unittest.TestCase):
             f.write(FAKE_MAIN)
         with open(os.path.join(src, "deploy", "macos-daemon.sh"), "w") as f:  # 실제 전환은 tests/test_macos_daemon.py 가 본다
             f.write('echo "macos-daemon cwd=$PWD $*" >> "$LOG"\nexit "${FAKE_DAEMON_RC:-0}"\n')
-        for name in ("launch.py", "relocate.py"):  # 설치기가 부르는 실제 이전 코드
+        for name in ("launch.py", "relocate.py", "macos_daemon.py"):  # 설치기가 부르는 실제 이전 코드와 저장 방식 보고
             shutil.copy(os.path.join(ROOT, "jarvis", name), os.path.join(src, "jarvis"))
         if fake_relocate:
             with open(os.path.join(src, "jarvis", "relocate.py"), "w") as f:
@@ -142,6 +142,21 @@ class InstallTest(unittest.TestCase):
                          ["jarvis module hooks plan --json", "jarvis module hooks apply --json --plan-id abc123",
                           "jarvis module setup plan --json", "jarvis module setup apply --json --plan-id abc123"])
         self.assertIn("install hooks", r.stderr)
+
+    def test_a_mac_install_reports_the_claude_store_and_warns_without_auto_login(self):
+        """covers: DAEMON-16"""
+        local = os.path.join(self.home, ".local", "bin")
+        os.makedirs(local)
+        doctor = {"schemaVersion": 1, "store": "auto", "problems": ["not_file_store"]}
+        for name, body in (("claude", "exit 0"), ("hswap", "cat <<'JSON'\n%s\nJSON\nexit 1" % json.dumps(doctor))):
+            with open(os.path.join(local, name), "w") as f:
+                f.write("#!/bin/sh\n" + body + "\n")
+            os.chmod(os.path.join(local, name), 0o755)
+        self.env["JARVIS_LOGINWINDOW"] = os.path.join(self.tmp, "no-loginwindow.plist")
+        r = self.run_install("--core", "100.115.245.91")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Claude 계정 저장 방식: 키체인(auto)", r.stdout)
+        self.assertIn("재부팅 뒤 로그인 전에는 Claude 사용량·전환이 되지 않습니다", r.stdout)
 
     def test_rerun_keeps_existing_config_and_does_not_download_again(self):
         """covers: BOOT-1"""
@@ -411,6 +426,12 @@ class InstallTest(unittest.TestCase):
         self.assertFalse([line for line in log if line.startswith("launchctl ")])
         i = log.index(f"macos-daemon cwd={self.home} install")
         self.assertLess(i, log.index("jarvis module hooks plan --json"))
+
+    def test_allow_keychain_store_is_passed_to_the_daemon_script(self):
+        """covers: DAEMON-15"""
+        r = self.run_install("--core", "100.64.0.1", "--daemon", "--allow-keychain-store")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(f"macos-daemon cwd={self.home} install --allow-keychain-store", self.lines())
 
     def test_a_failed_hand_off_stops_with_an_error(self):
         """covers: DAEMON-9"""

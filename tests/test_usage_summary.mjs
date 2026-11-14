@@ -131,6 +131,14 @@ click({ prov: "all" });
 assert.match(rendered(), /<span class="ul-muted">hswap 0\.2\.1<\/span>/);
 assert.match(rendered(), /hswap 0\.2\.0 \(고정 0\.2\.1\) · hswap 설치 실패\(종료 코드 2\): &lt;in use&gt;/);
 assert.equal((rendered().match(/>hswap /g) || []).length, 2); // 확인 전인 기기(hswap 없음)에는 적지 않는다
+// macOS 는 저장 방식과 hswap doctor 의 문제를 붙인다(USAGE-15)
+devices[0].hswap = { version: "0.3.0", pinned: "0.3.0", note: null, store: "auto", problems: ["저장 방식이 파일이 아닙니다(not_file_store)", "<x>"] };
+click({ prov: "all" });
+assert.match(rendered(), /hswap 0\.3\.0 · 저장 방식 키체인\(auto\)<\/span><span class="ul-muted">hswap doctor: 저장 방식이 파일이 아닙니다\(not_file_store\) · &lt;x&gt;<\/span>/);
+devices[0].hswap = { version: "0.3.0", pinned: "0.3.0", note: null, store: "file", problems: [] };
+click({ prov: "all" });
+assert.match(rendered(), /hswap 0\.3\.0 · 저장 방식 파일<\/span>/);
+assert.doesNotMatch(rendered(), /hswap doctor:/);
 delete devices[0].hswap; delete devices[1].hswap;
 
 // covers: USAGE-7. Claude 칸의 기기 로그인 상태: 정상은 작게, 이상은 주의 색과 안내 버튼. 이상만 '주의 필요'로 센다
@@ -230,6 +238,13 @@ assert.match(guide, /<code>security unlock-keychain<\/code> 을 먼저 실행합
 guide = guideOf({ state: "keychain_item_present", text: "멈춤", store: null }); // store 가 없어도 이 오류는 파일 저장소의 것이다. GUI 안내는 파일을 지울 수 있다
 assert.match(guide, /migrate-store/);
 assert.doesNotMatch(guide, /GUI/);
+assert.match(guide, /로그인 세션에서 <code>hswap claude reconcile<\/code> 이 정리합니다/);
+assert.ok(guide.indexOf("hswap claude reconcile") < guide.indexOf("migrate-store"));
+// 로그인 세션 밖의 키체인 저장 방식은 다시 로그인이 아니라 파일 저장 방식으로 옮기는 순서다(USAGE-15)
+guide = guideOf({ state: "headless", text: "로그인 세션 밖에서 실행 중 — 키체인을 읽을 수 없습니다", store: null });
+assert.match(guide, /<code>hswap claude migrate-store --to file --keep keychain --dry-run<\/code>/);
+assert.match(guide, /다시 로그인하지 않아도 됩니다/);
+assert.doesNotMatch(guide, /\/login|hswap claude add|ssh &lt;/);
 // 설정 충돌은 설정만 고친다. 다시 로그인을 권하지 않는다
 guide = guideOf({ state: "config_conflict", text: "hswap 설정 충돌", store: "file" });
 assert.match(guide, /credentials\.store.*credentials\.requireKeychain/);

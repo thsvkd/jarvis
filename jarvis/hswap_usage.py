@@ -18,7 +18,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout, wait
 
-from . import caam_usage, claude_accounts, config, provider_usage
+from . import caam_usage, claude_accounts, config, macos_daemon, provider_usage
 from .util import _NO_WINDOW, scrub_home, tool_path, which_tool
 
 WAIT_S = 8  # 읽기를 시작한 뒤 hswap 을 기다리는 시간. 기존 수집기가 그보다 오래 걸리면 그동안 함께 기다린다(수집 대기 55초 안)
@@ -31,7 +31,7 @@ KEEP_S = 3600  # 로그인 유지 주기. refresh 는 기한이 된 토큰만 �
 KEEP = ("codex", "grok")
 SERVICE_FROM = "0.2.8"  # `hswap claude keepalive --install-service·--service-status` 를 아는 hswap
 AHEAD_S = 7200  # 만료 2시간 전부터 갱신한다. 한 번 실패해도 고칠 시간이 남는다
-TICK_S = 300  # macOS 밖에서 게이트웨이가 keepalive 를 직접 부르는 간격(macOS 는 hswap 의 LaunchAgent 가 같은 간격으로 부른다)
+TICK_S = 300  # 게이트웨이가 keepalive 를 직접 부르는 간격(macOS 의 로그인 세션에서는 hswap 의 LaunchAgent 가 같은 간격으로 부른다)
 ROTATION = "priority-consume-first"  # 계정 priority 높은 것부터, 전환 기준 아래인 계정만 쓴다. 높은 계정이 풀리면 돌아간다(USAGE-14)
 ROTATION_FROM = "0.2.9"  # 이 전략과 `hswap claude priority` 를 확인한 hswap
 _rot_lock = threading.Lock()  # 자동 전환 설정 읽기·쓰기를 한 번에 하나만
@@ -245,6 +245,8 @@ def schedule():
     if (sys.platform != "darwin" or not config.CSWAP_INSTALL or not exe or not which_tool("claude") or claude_accounts.installer.state == "running"
             or not v or claude_accounts._key(v) < claude_accounts._key(SERVICE_FROM) or not claude_accounts._store_read()):
         return None
+    if (claude_accounts.doctor or {}).get("keepalive_domain") == "system":  # 데몬 keepalive(--system) 옆에 gui 예약을 두지 않는다(hswap 0.3.0)
+        return None
     st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json")[1])
     # hswap 이 만든 예약은 적재되지 않았거나 지금 hswap 이 만드는 모양보다 낡았을 때(outdated)만 그 설정 그대로 다시 설치한다
     if st and st.get("platform") == "launchd" and (st.get("installed") is False or (st.get("managed") is True and (st.get("loaded") is False or st.get("outdated") is True))):
@@ -258,6 +260,31 @@ def schedule():
         st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json")[1]) or st
     claude_accounts.service = st
     return st
+
+
+def inspect():
+    """macOS: `hswap claude doctor --json`(0.3.0, 키체인 없이 돈다)으로 저장 방식·문제·예약 상태를 읽어 claude_accounts.doctor 에 둔다(USAGE-15).
+    doctor 를 모르는 옛 hswap 은 config 의 credentials.store 만 쓴다. 할 일이 아니면(macOS 밖, hswap·Claude Code 없음, 설치 중) 지난 답도 지운다."""
+    exe = claude_accounts.binary()
+    if (sys.platform != "darwin" or not config.CSWAP_INSTALL or not exe or not which_tool("claude")
+            or claude_accounts.installer.state == "running"):
+        claude_accounts.doctor = None
+        return None
+    body = _json(_run(exe, "claude", "doctor", "--json")[1])  # 문제가 있으면 0 이 아닌 코드로 끝나도 JSON 은 정상이다
+    claude_accounts.doctor = macos_daemon.summary(body, None if macos_daemon.answered(body) else _settings(exe))
+    return claude_accounts.doctor
+
+
+def _ticks():
+    """게이트웨이 tick 이 keepalive·auto 를 부르는가. macOS 밖은 늘 그렇다. macOS 는 로그인 세션 밖이고 파일 저장 방식이며
+    적재된 keepalive 예약(gui·system)이 없을 때만이다(세션 안에서는 hswap 예약이 돌고, 키체인 저장 방식은 세션 밖에서 읽지 못한다)."""
+    if sys.platform != "darwin":
+        return True
+    d = claude_accounts.doctor or {}
+    loaded = d.get("keepalive_loaded")
+    if loaded is None:  # doctor 를 모르는 옛 hswap: 예약 상태(schedule)의 답을 쓴다
+        loaded = (claude_accounts.service or {}).get("loaded") is True
+    return d.get("store") == "file" and not loaded and not claude_accounts.in_session()
 
 
 def _settings(exe):
@@ -277,7 +304,8 @@ def _priorities(exe):
 def rotation():
     """GET /api/usage/rotation(USAGE-14): 이 기기의 Claude 자동 전환 설정. (http 상태, 응답).
     {on, ordered, order: [슬롯, 우선 순서], threshold: 전환하는 사용률(%), service: macOS 예약 상태 요약(그 밖 None)}.
-    on: macOS 는 hswap 예약의 then-auto, 그 밖에서는 순서 전략(게이트웨이 tick 이 그때만 auto 를 부른다). ordered: 순서 전략인지."""
+    on: 게이트웨이 tick 이 도는 곳(macOS 밖, macOS 의 세션 밖 파일 저장 방식)은 순서 전략(tick 이 그때만 auto 를 부른다), 그 밖의 macOS 는 hswap 예약의 then-auto.
+    ordered: 순서 전략인지."""
     exe = claude_accounts.binary()
     v = claude_accounts._version
     if not exe or not v or claude_accounts._key(v) < claude_accounts._key(ROTATION_FROM):
@@ -289,7 +317,7 @@ def rotation():
         return 502, {"error": "hswap 설정을 읽지 못했습니다"}
     ordered = s.get("autoswitch.strategy") == ROTATION
     svc = None if st is None else {"managed": st.get("managed") is True, "installed": st.get("installed") is not False}
-    return 200, {"on": (st or {}).get("thenAuto") is True if sys.platform == "darwin" else ordered, "ordered": ordered,
+    return 200, {"on": ordered if _ticks() else (st or {}).get("thenAuto") is True, "ordered": ordered,
                  "order": sorted((k for k, t in pri.items() if t > 0), key=lambda k: (-pri[k], int(k))),
                  "threshold": _num(s.get("autoswitch.threshold")), "service": svc}
 
@@ -318,6 +346,11 @@ def set_rotation(on, order, threshold):
     svc = now["service"]
     if sys.platform == "darwin" and svc and svc["installed"] and not svc["managed"] and (on == "1") != now["on"]:
         return 409, {"error": "이 기기의 keepalive 예약은 사람이 만든 것이라 jarvis 가 자동 전환을 켜거나 끄지 않습니다"}
+    if (sys.platform == "darwin" and (claude_accounts.doctor or {}).get("keepalive_domain") == "system" and not _ticks()
+            and (on == "1") != now["on"]):  # 데몬 예약이 적재되지 않아 tick 이 도는 동안은 순서 전략만으로 켜고 끈다
+        # 데몬 keepalive 는 관리자 권한으로만 다시 설치된다. jarvis 는 sudo 를 쓰지 않는다
+        flag = " --then-auto" if on == "1" else ""
+        return 409, {"error": f"이 기기의 keepalive 예약은 LaunchDaemon 이라 jarvis 가 자동 전환을 켜거나 끄지 않습니다. 그 기기에서 실행하세요: sudo hswap claude keepalive --install-service --system{flag}"}
     exe = claude_accounts.binary()
     pri = {s: str(len(slots) - i) for i, s in enumerate(slots)}
     steps = [(("claude", "priority", s, "--unset"), "우선순위 해제") for s in now["order"] if s not in pri]
@@ -337,13 +370,16 @@ def set_rotation(on, order, threshold):
 
 
 def tick():
-    """macOS 밖(Linux·Windows): 키체인이 없어 서비스 없이 게이트웨이가 TICK_S 마다 keepalive 를 부른다(결과는 hswap 이 keepalive.json 에 남긴다).
-    자동 전환을 켠 기기(순서 전략, USAGE-14)는 keepalive 뒤에 auto --once 로 한 번 판정한다(macOS 는 hswap 예약의 --then-auto 가 한다)."""
+    """게이트웨이가 TICK_S 마다 keepalive 를 부른다(결과는 hswap 이 keepalive.json 에 남긴다). 키체인이 없는 Linux·Windows 는 늘,
+    macOS 는 doctor 를 다시 읽고 로그인 세션 밖의 파일 저장 방식이며 적재된 keepalive 예약이 없을 때만(_ticks, USAGE-15).
+    자동 전환을 켠 기기(순서 전략, USAGE-14)는 keepalive 뒤에 auto --once 로 한 번 판정한다(세션 안의 macOS 는 hswap 예약의 --then-auto 가 한다)."""
     while True:
         try:
+            if sys.platform == "darwin":
+                inspect()
             exe = claude_accounts.binary()
             # 저장한 계정이 없으면 유지할 로그인도 없다(로그인하지 않은 기기에 실패 기록을 만들지 않는다)
-            if (config.CSWAP_INSTALL and exe and which_tool("claude") and claude_accounts.installer.state != "running"
+            if (_ticks() and config.CSWAP_INSTALL and exe and which_tool("claude") and claude_accounts.installer.state != "running"
                     and claude_accounts._store_read()):
                 code, _ = _run(exe, "claude", "keepalive", "--ahead", str(AHEAD_S), "--json")
                 if code == 0 and _settings(exe).get("autoswitch.strategy") == ROTATION:
@@ -354,16 +390,16 @@ def tick():
 
 
 def maintain():
-    """게이트웨이가 도는 동안 KEEP_S 마다: hswap 버전을 맞추고(USAGE-5) Claude 자동 갱신 예약을 맞추며(USAGE-11) 로그인을 유지한다(USAGE-9).
+    """게이트웨이가 도는 동안 KEEP_S 마다: hswap 버전을 맞추고(USAGE-5) macOS 의 저장 방식을 읽고(USAGE-15) Claude 자동 갱신 예약을 맞추며(USAGE-11) 로그인을 유지한다(USAGE-9).
     Claude 는 0.2.1 에 refresh 가 없어, 같은 주기로 hswap claude list 를 묻는 읽기로 hswap 이 토큰을 갱신하게 한다."""
     ticking = False
     while True:
-        for step in (_check, schedule, _keep_once, lambda: which_tool("claude") and claude_accounts.read()):
+        for step in (_check, inspect, schedule, _keep_once, lambda: which_tool("claude") and claude_accounts.read()):
             try:
                 step()
             except Exception as e:
                 print(f"[jarvis] hswap 유지 실패: {scrub_home(str(e))[:200]}", flush=True)
-        if not ticking and sys.platform != "darwin":  # 첫 버전 맞추기(설치) 뒤에 시작한다. 키체인이 없는 Linux·Windows 는 파일 저장소라 서비스가 필요 없다
+        if not ticking:  # 첫 버전 맞추기(설치) 뒤에 시작한다. macOS 는 tick 이 매번 할 일인지 가린다(_ticks)
             ticking = True
             threading.Thread(target=tick, name="jarvis-keepalive", daemon=True).start()
         time.sleep(KEEP_S)

@@ -511,7 +511,7 @@ class LoginStateTest(StoreCase):
 
     def test_unknown_hswap_type_goes_only_to_the_log_filtered_and_cut(self):
         """covers: USAGE-6. 표에 있는 type 은 로그에 남기지 않는다"""
-        for kind, want in (("brand_new_error", "brand_new_error"), ("Sk-1/ab_c", "kab_c"), ("a" * 41, "a" * 40), (["list"], ""), (None, "")):
+        for kind, want in (("brand_new_error", "brand_new_error"), ("BrandNewError", "BrandNewError"), ("Sk-1/ab_c", "Skab_c"), ("a" * 41, "a" * 40), (["list"], ""), (None, "")):
             with mock.patch.object(claude_accounts, "print", create=True) as log:
                 self.assertEqual(str(claude_accounts._HswapError(kind)), "hswap 오류(알 수 없는 종류)")
             self.assertEqual(log.call_args[0][0], f"[jarvis] hswap 의 모르는 오류 종류: {want}", kind)
@@ -556,7 +556,7 @@ class LoginStateTest(StoreCase):
     def test_file_store_stops_are_reported_with_fixed_text(self):
         """covers: USAGE-7. 이전 계정의 기록이어도, 만료 임박이어도, 사용 중 계정이 재로그인 필요여도 기기의 사실이 먼저다"""
         relogin = [{"active": True, "slot": "2", "note": claude_accounts.STATUS["relogin_required"][0]}]
-        for kind, want in (("keychain_item_present", "키체인에 Claude 로그인이 있거나 확인하지 못해 자동 갱신을 멈췄습니다"),
+        for kind, want in (("keychain_item_present", "키체인에 Claude 로그인이 있거나 확인하지 못해 자동 갱신을 멈췄습니다. 로그인 세션에서 reconcile 이 정리합니다"),
                            ("config_conflict", "hswap 설정 충돌(파일 저장소와 키체인 필수 모드)")):
             self.keepalive(store="file", ok=False, error={"type": kind, "message": "x" * 500}, loginExpiresAt=iso(time.time() + 3600))
             for rows in ((), relogin):
@@ -2301,6 +2301,77 @@ class JudgeLoginTest(unittest.TestCase):
         self.assertIsNone(state["note"])  # 확인되지 않았는데 자동 갱신을 말하지 않는다
         self.assertIn("째)", state["text"])
         self.assertEqual(state["store"], "file")
+
+
+class HeadlessTest(unittest.TestCase):
+    """covers: USAGE-15. macOS 에서 로그인 세션 밖(LaunchDaemon·SSH)이고 hswap 저장 방식이 파일이 아니면 키체인을 읽지 못한다는 한 문구로 보인다."""
+
+    def setUp(self):
+        for p in (mock.patch.object(claude_accounts, "doctor", None), mock.patch.object(claude_accounts, "_aqua", None),
+                  mock.patch.object(claude_accounts.sys, "platform", "darwin")):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_new_hswap_error_types_have_fixed_texts(self):
+        """hswap 0.3.0 의 오류 type 과 예외 클래스 이름. 표에 있으면 로그에 남기지 않는다"""
+        for kind, want in (("CredentialReadError", "자격 증명을 읽지 못했습니다"), ("keychain_item_present", "로그인 세션에서 reconcile 이 정리합니다"),
+                           ("keychain_item_present_locked", "키체인이 잠겨"), ("reconcile_ambiguous", "어느 쪽이 새 로그인인지")):
+            with mock.patch.object(claude_accounts, "print", create=True) as log:
+                self.assertIn(want, str(claude_accounts._HswapError(kind)), kind)
+            log.assert_not_called()
+
+    def test_session_is_read_once_and_a_failed_answer_is_not_kept(self):
+        with mock.patch.object(claude_accounts, "run", return_value=(-1, "", "x")) as run:
+            self.assertTrue(claude_accounts.in_session())  # 묻지 못하면 지금까지처럼 세션 안으로 본다
+            self.assertTrue(claude_accounts.in_session())
+        self.assertEqual(run.call_count, 2)
+        for out, want in (("Aqua\n", True), ("System\n", False), ("Background\n", False)):
+            claude_accounts._aqua = None
+            with mock.patch.object(claude_accounts, "run", return_value=(0, out, "")) as run:
+                self.assertEqual((claude_accounts.in_session(), claude_accounts.in_session()), (want, want), out)
+            run.assert_called_once_with(["launchctl", "managername"], timeout=8)
+
+    def test_headless_needs_macos_outside_a_session_and_a_store_that_is_not_file(self):
+        for platform, aqua, store, want in (("darwin", False, "auto", True), ("darwin", False, "file", False), ("darwin", True, "auto", False),
+                                            ("darwin", False, None, False), ("linux", False, "auto", False)):
+            with mock.patch.object(claude_accounts.sys, "platform", platform), mock.patch.object(claude_accounts, "_aqua", aqua), \
+                    mock.patch.object(claude_accounts, "doctor", {"store": store, "problems": []} if store else None):
+                self.assertEqual(claude_accounts.headless(), want, (platform, aqua, store))
+
+    def test_slots_without_credentials_say_why_outside_a_session(self):
+        for status in ("no_credentials", "keychain_unavailable"):
+            row = {"number": 1, "email": "a@example.com", "usageStatus": status}
+            self.assertEqual(claude_accounts.account(row)["error"], claude_accounts.STATUS[status][0])
+            a = claude_accounts.account(row, headless=True)
+            self.assertEqual((a["error"], a["attention"]), (claude_accounts.HEADLESS, True), status)
+            self.assertIn("hswap claude migrate-store --to file", a["error"])
+        ok = claude_accounts.account({"number": 1, "usageStatus": "relogin_required"}, headless=True)
+        self.assertEqual(ok["error"], claude_accounts.STATUS["relogin_required"][0])  # 다른 상태는 그대로다
+
+    def test_only_credential_errors_become_the_session_message(self):
+        claude_accounts.doctor = {"store": "auto", "problems": []}
+        claude_accounts._aqua = False
+        for kind, headless in (("CredentialReadError", True), ("keychain_unavailable", True), ("LockError", False)):
+            body = {"schemaVersion": 1, "error": {"type": kind, "message": "m"}}
+            with mock.patch.object(claude_accounts, "binary", return_value="/fake/hswap"), mock.patch.object(claude_accounts._state, "cache", None), \
+                    mock.patch.object(claude_accounts.subprocess, "run", return_value=types.SimpleNamespace(stdout=json.dumps(body), returncode=1)):
+                out = claude_accounts.live(force=True)
+            self.assertEqual(out["error"] == claude_accounts.HEADLESS, headless, kind)
+
+    def test_login_state_outside_a_session_comes_first_even_without_a_record(self):
+        for k in ({}, keepalive_value(ok=False, error={"type": "keychain_unavailable"}), keepalive_value(ok=False, error={"type": "no_credentials"})):
+            s, _ = claude_accounts._judge_login(k, [], True, False, None, None, NOW, None, headless=True)
+            self.assertEqual((s["state"], s["text"], s["attention"], s["note"]), ("headless", claude_accounts.HEADLESS, True, None), k)
+        s, _ = claude_accounts._judge_login({}, [], True, False, None, None, NOW, None)
+        self.assertEqual(s["state"], "keychain")  # 세션 안이거나 모르면 지금까지와 같다
+
+    def test_device_row_carries_store_and_problems(self):
+        with mock.patch.object(claude_accounts, "_version", claude_accounts.VERSION):
+            self.assertNotIn("store", claude_accounts.status())
+            claude_accounts.doctor = {"store": "auto", "problems": ["not_file_store", "brand_new"]}
+            st = claude_accounts.status()
+        self.assertEqual(st["store"], "auto")
+        self.assertEqual(st["problems"], ["저장 방식이 파일이 아닙니다(not_file_store)", "brand_new"])
 
 
 if __name__ == "__main__":

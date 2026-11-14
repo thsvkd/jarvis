@@ -13,11 +13,13 @@ set -eu
 
 CORE=""
 DAEMON=""  # --daemon: macOS 에서 LaunchAgent 대신 LaunchDaemon 으로 돈다(GUI 로그인이 없는 기기. docs/operations.md 의 macOS 절)
+ALLOW_KEYCHAIN=""  # --allow-keychain-store: --daemon 의 Claude 저장 방식 검사를 넘긴다(deploy/macos-daemon.sh 로 그대로 넘긴다)
 UNINSTALL=""  # --uninstall: 서비스 등록과 실행본(app·venv·versions)을 지운다. 설정·모듈이 쓴 것은 남긴다
 while [ $# -gt 0 ]; do
   case "$1" in
     --core) CORE="${2:?--core 에 tailnet IP 를 주세요}"; shift 2 ;;
     --daemon) DAEMON=1; shift ;;
+    --allow-keychain-store) ALLOW_KEYCHAIN=--allow-keychain-store; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     *) echo "모르는 인자: $1" >&2; exit 1 ;;
   esac
@@ -216,7 +218,7 @@ if [ -n "$DAEMON" ]; then
   # 이 설치기보다 오래된 app 에는 스크립트가 없다. 나중에 uninstall 을 부를 수 있게 지워지지 않는 곳에 받는다
   if [ ! -f "$DSRC/deploy/macos-daemon.sh" ]; then DSRC="$SHARE/daemon-src"; fetch "$DSRC"; fi
   # 이 셸이 파이프(curl | sh)로 읽는 스크립트를 자식이 먹지 않게 한다. sudo 는 /dev/tty 로 묻는다
-  /bin/bash "$DSRC/deploy/macos-daemon.sh" install </dev/null || {
+  /bin/bash "$DSRC/deploy/macos-daemon.sh" install $ALLOW_KEYCHAIN </dev/null || {
     echo "LaunchDaemon 으로 옮기지 못했습니다. 위 결과를 확인한 뒤 다시 실행하세요" >&2
     exit 1
   }
@@ -240,6 +242,12 @@ print(p["plan_id"] if p["steps"] else "")' "$m")
     *) echo "$m: 적용하지 못했습니다(종료 코드 $rc)" >&2 ;;
   esac
 done
+
+# macOS LaunchAgent: Claude 계정 저장 방식(hswap doctor)을 보인다. 키체인 방식이면 로그인 세션이 있어야 Claude 사용량·전환이 된다.
+# daemon 전환은 macos-daemon.sh 가 같은 검사로 거절한다. 이 보고가 없는 옛 app 이면 조용히 넘어간다
+if [ "$OS" = Darwin ] && [ -z "$DAEMON" ] && [ -z "$MY_DAEMON" ]; then
+  (cd "$APP" && "$PY" -m jarvis.macos_daemon store --report 2>/dev/null) || true
+fi
 
 cat <<EOF
 

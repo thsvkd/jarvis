@@ -112,6 +112,13 @@ curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh 
 그다음 설정 파일과 LaunchAgent(`dev.jarvis`, Linux 는 systemd 사용자 유닛 `jarvis`)를 만들고, 모듈(훅·셋업)을 plan 으로 보인 뒤 그 plan_id 로 apply 한다.
 이미 있는 설정·LaunchAgent·유닛·코드는 덮어쓰지 않으므로 다시 실행해도 된다. 옛 배치가 있으면 [실행본 이전](#실행본-이전-180)을 한다. Tailscale·하네스 로그인과 core 의 `devices` 등록은 직접 한다.
 
+**Claude 계정 저장 방식(macOS).** Claude Code 는 macOS 에서 로그인을 키체인에 두고, 키체인은 로그인 세션 안에서만 열린다. 그래서 hswap 이 키체인 저장 방식(`credentials.store=auto`)이면 로그인 세션이 없을 때(재부팅 뒤 로그인 전, LaunchDaemon, SSH) Claude 사용량 조회·로그인 유지·계정 전환이 모두 실패한다.
+- `install.sh` 는 LaunchAgent 설치 끝에 `python -m jarvis.macos_daemon store --report` 로 저장 방식과 `hswap claude doctor` 의 문제를 출력한다. 자동 로그인이 꺼져 있고 저장 방식이 파일이 아니면 "재부팅 뒤 로그인 전에는 Claude 사용량·전환이 되지 않습니다"라고 경고한다. 설치는 계속한다.
+- 세션 없이도 쓰려면 키체인이 열린 곳(그 기기의 화면 세션, 또는 `security unlock-keychain` 을 먼저 실행한 셸)에서 파일 저장 방식으로 옮긴다: `hswap claude migrate-store --to file --keep keychain --dry-run` 으로 계획을 본 뒤 같은 명령을 `--dry-run` 없이 실행한다. 자격은 `~/.claude/.credentials.json`(0600 평문)과 슬롯 `.enc` 에 남는다. 키체인의 저장 시 암호화를 잃으므로 FileVault 를 켜 두는 것을 권한다.
+- 파일 저장 방식에서도 로그인 세션의 Claude Code 가 로그인을 키체인에 다시 쓸 수 있다. hswap 0.3.0 의 reconcile 예약(`hswap claude reconcile --install-service`, gui LaunchAgent `dev.hswap.reconcile`)이 로그인 세션에서 그것을 파일로 정리한다. 정리 전에는 화면에 "키체인에 Claude 로그인이 있거나 확인하지 못해 자동 갱신을 멈췄습니다. 로그인 세션에서 reconcile 이 정리합니다"가 보인다.
+- 게이트웨이는 macOS 에서 `hswap claude doctor --json`(키체인 없이 돈다)을 시작할 때, 그 뒤 5분마다 읽어 사용량 화면의 기기 행에 저장 방식과 문제를 보인다. 로그인 세션 밖(`launchctl managername` 이 Aqua 가 아님)인데 저장 방식이 파일이 아니면 슬롯마다의 "자격 증명이 없습니다" 대신 "로그인 세션 밖에서 실행 중 — 키체인을 읽을 수 없습니다. 파일 저장 방식으로 바꾸세요(hswap claude migrate-store --to file)"를 보인다.
+- 로그인 세션 밖이고 파일 저장 방식이며 적재된 hswap keepalive 예약(gui·system)이 없으면, 게이트웨이가 Linux 처럼 5분마다 `hswap claude keepalive` 와(자동 전환을 켰으면) `auto --once` 를 부른다. 로그인 세션 안이거나 예약이 적재돼 있으면 두 번 돌지 않게 부르지 않는다. 자동 전환을 켜고 끄는 화면 버튼은 hswap 이 만든 gui 예약의 `--then-auto` 를 함께 고친다. 데몬 keepalive(`--install-service --system`)는 관리자 권한이 필요해 jarvis 가 바꾸지 않고 실행할 명령을 알린다.
+
 제거는 같은 설치기에 `--uninstall` 을 준다(다른 인자와 함께 쓰지 않는다):
 
 ```sh
@@ -144,15 +151,20 @@ launchctl bootout gui/$(id -u)/dev.jarvis                 # 잠시 끄기(다음
 ```sh
 # 새 기기는 --core 도 준다. 이미 설치한 기기도 같은 한 줄이다(app 에 스크립트가 없으면 ~/.local/share/jarvis/daemon-src 에 받는다)
 curl -fsSL https://raw.githubusercontent.com/thsvkd/jarvis/main/install.sh | sh -s -- --daemon
+# Claude Code 는 있는데 hswap 이 아직 파일 저장 방식이 아니면(새 기기는 hswap 도 아직 없다) 아래 저장 방식 검사가 거절한다.
+# 키체인 저장 방식 그대로 옮기려면 --allow-keychain-store 를 덧붙인다(그대로 macos-daemon.sh 로 넘긴다)
 
 # 스크립트 위치: ~/.local/share/jarvis/app/deploy, 없으면 ~/.local/share/jarvis/daemon-src/deploy(설치가 끝날 때 경로를 출력한다)
 # 사용자로 실행한다. sudo 는 처음에 한 번만 묻는다
 bash deploy/macos-daemon.sh install --dry-run   # 렌더한 plist 와 실행할 명령만 본다(sudo 도 묻지 않는다)
-bash deploy/macos-daemon.sh install             # LaunchAgent → LaunchDaemon
+bash deploy/macos-daemon.sh install             # LaunchAgent → LaunchDaemon(Claude Code 가 있으면 hswap 파일 저장 방식일 때만)
+bash deploy/macos-daemon.sh install --allow-keychain-store   # 키체인 저장 방식 그대로 옮긴다(Claude 는 로그인 세션이 있을 때만 된다)
+bash deploy/macos-daemon.sh install --no-reconcile           # hswap reconcile 예약을 설치하지 않는다(기본은 --with-reconcile)
 bash deploy/macos-daemon.sh status              # 어느 쪽이 로드됐는지, health
 bash deploy/macos-daemon.sh uninstall           # LaunchDaemon → LaunchAgent
 ```
 
+- **Claude 저장 방식 검사:** Claude Code 가 있는 기기(`~/.local/bin`·`/opt/homebrew/bin`·`/usr/local/bin` 의 `claude`)에서 `install` 은 sudo 를 묻기 전에(`--dry-run` 도) `hswap claude doctor --json` 으로 저장 방식을 읽는다(doctor 가 없는 옛 hswap 은 `hswap claude config --json` 의 `credentials.store`). 파일이 아니거나 확인하지 못하면(hswap 없음 포함) 이유와 `hswap claude migrate-store --to file --keep keychain` 명령을 보이고 아무것도 바꾸지 않은 채 끝난다. LaunchDaemon 은 로그인 세션 밖이라 키체인을 읽지 못해서다. `--allow-keychain-store` 로만 넘어간다. 파일 저장 방식이면 전환이 끝난 뒤 `hswap claude reconcile --install-service --json` 으로 reconcile 예약(gui)을 설치한다(이미 있으면 건너뛰고, GUI 세션이 없으면 다음 로그인 때 적재되며, 실패해도 전환은 되돌리지 않고 실행할 명령을 알린다). 저장 방식을 옮기는 방법은 위 [Claude 계정 저장 방식](#운영--macos-launchd-또는-pm2)을 본다.
 - `/Library/LaunchDaemons/dev.jarvis.plist` 는 에이전트 plist 를 기준으로 렌더한다(`python -m jarvis.macos_daemon render`). 허용한 키(`Label`·`ProgramArguments`·`Program`·`WorkingDirectory`·`EnvironmentVariables`·`RunAtLoad`·`KeepAlive`·`ThrottleInterval`·`ExitTimeOut`·`ProcessType`·`SoftResourceLimits`·`HardResourceLimits`·`Nice`)만 옮기고, 나머지(`Sockets`·`MachServices`·`UserName` 등)는 버리고 이름을 알린다. 고친 ProgramArguments·WorkingDirectory·환경 변수는 남고, `UserName`·`GroupName`·`InitGroups`·`HOME`·`USER`·`LOGNAME` 이 더해지며 `KeepAlive`·`RunAtLoad` 는 true 가 된다. 이 파일은 누구나 읽을 수 있으므로 비밀로 보이는 환경 변수 이름이나 인자(TOKEN·SECRET·PASSWORD·`_KEY` 등)가 있으면 렌더를 거절한다. 이름으로만 판별하므로 그 밖의 비밀은 직접 뺀다.
 - 에이전트 plist 는 `~/.local/share/jarvis/dev.jarvis.plist.agent` 로 옮긴다(남겨 두면 다음 GUI 로그인 때 두 번째 jarvis 가 같은 포트를 잡으려 한다). `uninstall` 이 되돌린다.
 - `install` 은 어느 단계에서든 실패하거나 Ctrl-C 로 중단하면 daemon 을 내리고 LaunchAgent 로 되돌린 뒤 0 이 아닌 코드로 끝난다. GUI 세션이 없으면 에이전트는 다음 GUI 로그인 때까지 뜨지 않고, 스크립트가 그렇게 알린다(`uninstall` 도 같다). 렌더 결과가 같으면 다시 실행해도 아무것도 하지 않는다.
@@ -163,7 +175,7 @@ bash deploy/macos-daemon.sh uninstall           # LaunchDaemon → LaunchAgent
 - **메뉴 막대 아이콘이 없다.** GUI 세션이 없으면 AppKit 이 프로세스를 죽일 수 있어 `JARVIS_TRAY` 를 뺀다.
 - **로그:** `~/Library/Logs/jarvis.log`(LaunchAgent 와 같은 파일). launchd 는 `StandardOutPath` 를 root 로 열 수 있어 둘 다 `/dev/null` 로 두고, 사용자 권한으로 바뀐 뒤 셸이 이 파일에 덧붙인 다음 `<python> -m jarvis` 로 exec 한다.
 - **SSH(core 로 쓸 때):** ssh-agent·키체인이 없다. passphrase 없는 키 파일만 쓸 수 있다.
-- **키체인에 의존하는 도구는 안 될 수 있다.** 파일 저장소를 쓰는 도구는 그대로 돈다.
+- **키체인에 의존하는 도구는 안 될 수 있다.** 파일 저장소를 쓰는 도구는 그대로 돈다. Claude 는 hswap 파일 저장 방식이면 게이트웨이가 keepalive·자동 전환을 직접 부른다(위 macOS 절).
 - **사용자 작업 목록:** 시스템 도메인에서는 `launchctl list` 대신 `launchctl print gui/<uid>` 로 읽고, GUI 세션이 없으면 사용자 작업이 없는 것으로 보인다.
 - **업데이트 버튼:** `KeepAlive=true` 와 사용자 권한이면 그대로 돈다(서비스 정의 조건은 위 SSH 기기 절의 확인 명령을 daemon 경로로 본다). 게이트웨이 코드 경로는 `~/.local/share/jarvis` 의 런처·`versions` 그대로다.
 
