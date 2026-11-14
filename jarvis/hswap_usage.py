@@ -1,7 +1,7 @@
 """hswap 이 재는 Claude 밖 하네스(Codex·Grok·OpenCode)의 계정별 사용량을 읽고(USAGE-8), 게이트웨이가 도는 동안 로그인을 유지한다(USAGE-9).
 
 하네스마다 `hswap list <하네스> --json` 을 한 번 부른다(Claude 는 claude_accounts 가 `hswap claude list` 로 따로 읽어 같은 하네스를 두 번 재지 않는다).
-읽기는 설정·등록·전환을 하지 않는다. 측정 간격과 실패 백오프는 hswap 이 정한다. 등록·usage.remote·refresh 는 maintain() 만 한다(전환·자동 회전은 하지 않는다).
+읽기는 설정·등록·전환을 하지 않는다. 측정 간격과 실패 백오프는 hswap 이 정한다. 등록·usage.remote·refresh 는 maintain() 만 한다(자동 전환은 사람이 켠 Claude 만, USAGE-14).
 원격 측정은 하네스 CLI 를 띄워 수십 초가 걸릴 수 있어 뒤에서 읽고, 기존 수집기와 동시에 돌려 기다리는 시간 안에 끝나지 않으면 마지막 답을 준다.
 계정은 이메일만 내보낸다. identity·details(계정 ID)·hswap 의 detail 원문은 내보내지 않는다.
 
@@ -32,6 +32,9 @@ KEEP = ("codex", "grok")
 SERVICE_FROM = "0.2.8"  # `hswap claude keepalive --install-service·--service-status` 를 아는 hswap
 AHEAD_S = 7200  # 만료 2시간 전부터 갱신한다. 한 번 실패해도 고칠 시간이 남는다
 TICK_S = 300  # macOS 밖에서 게이트웨이가 keepalive 를 직접 부르는 간격(macOS 는 hswap 의 LaunchAgent 가 같은 간격으로 부른다)
+ROTATION = "priority-consume-first"  # 계정 priority 높은 것부터, 전환 기준 아래인 계정만 쓴다. 높은 계정이 풀리면 돌아간다(USAGE-14)
+ROTATION_FROM = "0.2.9"  # 이 전략과 `hswap claude priority` 를 확인한 hswap
+_rot_lock = threading.Lock()  # 자동 전환 설정 읽기·쓰기를 한 번에 하나만
 REMOTE = "codex,grok,opencode"  # usage.remote 가 비어 있을 때 정하는 값. Antigravity 는 약관 위험이 커서 넣지 않는다(2026-11-08 사용자 결정)
 # UsageState → (화면 문구, 사람이 손봐야 하는가). detail 원문은 오류 경로가 섞일 수 있어 쓰지 않는다
 STATES = {
@@ -247,7 +250,9 @@ def schedule():
     if st and st.get("platform") == "launchd" and (st.get("installed") is False or (st.get("managed") is True and (st.get("loaded") is False or st.get("outdated") is True))):
         ahead = st.get("ahead") if isinstance(st.get("ahead"), (int, float)) and not isinstance(st.get("ahead"), bool) and st.get("ahead") > 0 else AHEAD_S
         # 0 설치·갱신, 3 GUI 세션이 없어 다음 로그인 때 적재. 어느 쪽이든 다시 물은 상태를 쓴다
-        code, _ = _run(exe, "claude", "keepalive", "--install-service", "--ahead", str(int(ahead)), *(["--then-auto"] if st.get("thenAuto") is True else []), "--json")
+        # 예약이 없을 때 사람이 자동 전환을 켜 두었으면(순서 전략, USAGE-14) 그것도 다시 붙인다
+        then = st.get("thenAuto") is True or (st.get("installed") is False and _settings(exe).get("autoswitch.strategy") == ROTATION)
+        code, _ = _run(exe, "claude", "keepalive", "--install-service", "--ahead", str(int(ahead)), *(["--then-auto"] if then else []), "--json")
         if code not in (0, 3):
             print(f"[jarvis] hswap keepalive 예약 설치 실패(종료 코드 {code})", flush=True)
         st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json")[1]) or st
@@ -255,15 +260,94 @@ def schedule():
     return st
 
 
+def _settings(exe):
+    """hswap claude config --json 의 {키: 값}. 읽지 못하면 {}."""
+    body = _json(_run(exe, "claude", "config", "--json")[1]) or {}
+    return {s["key"]: s.get("value") for s in body.get("settings") or [] if isinstance(s, dict) and isinstance(s.get("key"), str)}
+
+
+def _priorities(exe):
+    """hswap claude priority(--json 이 없다)의 '  Account-<슬롯>  <이메일>  <tier>' 줄 → {슬롯: tier}. 읽지 못하면 None."""
+    code, out = _run(exe, "claude", "priority")
+    if code != 0:
+        return None
+    return {m[1]: int(m[2]) for m in re.finditer(r"^\s*Account-(\d+)\s+\S+\s+(\d+)\s*$", re.sub(r"\x1b\[[0-9;]*m", "", out), re.M)}
+
+
+def rotation():
+    """GET /api/usage/rotation(USAGE-14): 이 기기의 Claude 자동 전환 설정. (http 상태, 응답).
+    {on, ordered, order: [슬롯, 우선 순서], threshold: 전환하는 사용률(%), service: macOS 예약 상태 요약(그 밖 None)}.
+    on: macOS 는 hswap 예약의 then-auto, 그 밖에서는 순서 전략(게이트웨이 tick 이 그때만 auto 를 부른다). ordered: 순서 전략인지."""
+    exe = claude_accounts.binary()
+    v = claude_accounts._version
+    if not exe or not v or claude_accounts._key(v) < claude_accounts._key(ROTATION_FROM):
+        return 409, {"error": f"이 기기에 hswap {ROTATION_FROM} 이상이 필요합니다"}  # 404 는 core 가 'jarvis 갱신 필요'로 바꾼다
+    with _rot_lock:
+        s, pri = _settings(exe), _priorities(exe)
+        st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json")[1]) if sys.platform == "darwin" else None
+    if not s or pri is None or (sys.platform == "darwin" and st is None):  # 예약 상태를 모르면 켜짐을 추측하지 않는다
+        return 502, {"error": "hswap 설정을 읽지 못했습니다"}
+    ordered = s.get("autoswitch.strategy") == ROTATION
+    svc = None if st is None else {"managed": st.get("managed") is True, "installed": st.get("installed") is not False}
+    return 200, {"on": (st or {}).get("thenAuto") is True if sys.platform == "darwin" else ordered, "ordered": ordered,
+                 "order": sorted((k for k, t in pri.items() if t > 0), key=lambda k: (-pri[k], int(k))),
+                 "threshold": _num(s.get("autoswitch.threshold")), "service": svc}
+
+
+def set_rotation(on, order, threshold):
+    """POST /api/usage/rotation(USAGE-14): 순서 order(슬롯 쉼표 목록, 앞이 먼저)는 hswap priority 로(앞에서부터 N..1, 빠진 슬롯은 0),
+    threshold(전환 사용률 50~99.9)는 autoswitch.threshold 로, 켜면 autoswitch.strategy 를 priority-consume-first 로 둔다.
+    macOS 는 hswap 이 만든 keepalive 예약을 같은 ahead 에 --then-auto 를 붙이거나 떼어 다시 설치한다(사람이 만든 예약은 바꾸지 않는다).
+    그 밖에서는 tick 이 순서 전략일 때만 auto --once 를 부른다. 단계마다 실패하면 거기서 멈추고 409 로 그 단계를 알린다."""
+    if on not in ("0", "1"):
+        return 400, {"error": "on 은 0 또는 1 이어야 합니다"}
+    slots = [x for x in (order or "").split(",") if x]
+    if not all(x.isdigit() and len(x) <= 4 for x in slots) or len(set(slots)) != len(slots) or len(slots) > 100:
+        return 400, {"error": "order 는 겹치지 않는 hswap 슬롯 번호의 쉼표 목록이어야 합니다"}
+    try:
+        t = float(threshold)
+    except (TypeError, ValueError):
+        t = math.nan
+    if not 50 <= t <= 99.9:  # hswap autoswitch.threshold 의 범위
+        return 400, {"error": "threshold 는 50 이상 99.9 이하여야 합니다"}
+    if on == "1" and not slots:
+        return 400, {"error": "켜려면 순서에 계정이 하나 이상 있어야 합니다"}
+    code, now = rotation()
+    if code != 200:
+        return code, now
+    svc = now["service"]
+    if sys.platform == "darwin" and svc and svc["installed"] and not svc["managed"] and (on == "1") != now["on"]:
+        return 409, {"error": "이 기기의 keepalive 예약은 사람이 만든 것이라 jarvis 가 자동 전환을 켜거나 끄지 않습니다"}
+    exe = claude_accounts.binary()
+    pri = {s: str(len(slots) - i) for i, s in enumerate(slots)}
+    steps = [(("claude", "priority", s, "--unset"), "우선순위 해제") for s in now["order"] if s not in pri]
+    steps += [(("claude", "priority", s, p), "우선순위 지정") for s, p in pri.items()]
+    steps.append((("claude", "config", "set", "autoswitch.threshold", f"{t:g}"), "전환 기준 저장"))
+    steps.append((("claude", "config", "set", "autoswitch.strategy", ROTATION) if on == "1" else ("claude", "config", "unset", "autoswitch.strategy"), "전략 저장"))
+    if sys.platform == "darwin" and (on == "1") != now["on"]:
+        st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json")[1]) or {}
+        ahead = st.get("ahead") if _num(st.get("ahead")) and st.get("ahead") > 0 else AHEAD_S
+        steps.append((("claude", "keepalive", "--install-service", "--ahead", str(int(ahead)), *(["--then-auto"] if on == "1" else []), "--json"), "예약 다시 설치"))
+    with _rot_lock:
+        for args, what in steps:
+            rc, _ = _run(exe, *args)
+            if rc not in ((0, 3) if "--install-service" in args else (0,)):  # 예약 설치의 3 은 GUI 세션이 없어 다음 로그인 때 적재된다는 뜻이다
+                return 409, {"error": f"hswap 이 {what}에 실패했습니다(종료 코드 {rc})"}
+    return rotation()
+
+
 def tick():
-    """macOS 밖(Linux·Windows): 키체인이 없어 서비스 없이 게이트웨이가 TICK_S 마다 keepalive 를 부른다(결과는 hswap 이 keepalive.json 에 남긴다)."""
+    """macOS 밖(Linux·Windows): 키체인이 없어 서비스 없이 게이트웨이가 TICK_S 마다 keepalive 를 부른다(결과는 hswap 이 keepalive.json 에 남긴다).
+    자동 전환을 켠 기기(순서 전략, USAGE-14)는 keepalive 뒤에 auto --once 로 한 번 판정한다(macOS 는 hswap 예약의 --then-auto 가 한다)."""
     while True:
         try:
             exe = claude_accounts.binary()
             # 저장한 계정이 없으면 유지할 로그인도 없다(로그인하지 않은 기기에 실패 기록을 만들지 않는다)
             if (config.CSWAP_INSTALL and exe and which_tool("claude") and claude_accounts.installer.state != "running"
                     and claude_accounts._store_read()):
-                _run(exe, "claude", "keepalive", "--ahead", str(AHEAD_S), "--json")
+                code, _ = _run(exe, "claude", "keepalive", "--ahead", str(AHEAD_S), "--json")
+                if code == 0 and _settings(exe).get("autoswitch.strategy") == ROTATION:
+                    _run(exe, "claude", "auto", "--once", "--json")
         except Exception as e:
             print(f"[jarvis] hswap keepalive 실패: {scrub_home(str(e))[:200]}", flush=True)
         time.sleep(TICK_S)

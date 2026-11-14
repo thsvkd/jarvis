@@ -37,6 +37,7 @@ PULL_TIMEOUT_S = 150  # jarvis 갱신은 게이트웨이가 manifest(30초)와 �
 USAGE_TIMEOUT_S = 70  # 사용량 새로고침은 게이트웨이가 프로바이더 API 를 부른다(수집기 대기 55초)
 LOGIN_TIMEOUT_S = 40  # 게이트웨이가 CLI 의 URL·코드를 30초까지 기다린다
 SWITCH_TIMEOUT_S = 40  # 게이트웨이가 hswap claude switch 를 30초까지 기다린다
+ROTATION_TIMEOUT_S = 90  # 자동 전환 설정은 계정마다 hswap priority 를 한 번씩 부르고, macOS 는 예약을 다시 설치한다
 DEADLINE_S = 15  # 응답 하나 전체(조금씩 흘려 보내는 응답이 스레드를 붙잡지 못하게)
 STALE_S = 3 * EVERY_S  # 이보다 오래된 스냅샷은 주지 않는다(기기 화면이 '응답 없음'을 띄우게)
 MAX_BYTES = 16 << 20  # 압축을 푼 뒤 기준. 24h history 가 수 MB 다
@@ -562,6 +563,15 @@ class Core:
         req = urllib.request.Request(self.devices[i]["url"] + "/api/usage/account/remove?slot=" + urllib.parse.quote(slot),
                                      data=b"", method="POST", headers={"X-Jarvis-Action": "usage-account"})
         return self._ask(i, req, SWITCH_TIMEOUT_S, "계정 삭제를")
+
+    def usage_rotation(self, i, query=None):
+        """자동 전환 설정(USAGE-14): query 가 없으면 그 게이트웨이 GET /api/usage/rotation, 있으면 같은 쿼리(on·order·threshold)로 POST 를 전달한다."""
+        url = self.devices[i]["url"] + "/api/usage/rotation"
+        if query is not None:  # 받은 쿼리를 그대로 넘기지 않고 세 키만 다시 만든다
+            q = urllib.parse.parse_qs(query)
+            url += "?" + urllib.parse.urlencode({k: (q.get(k) or [""])[0] for k in ("on", "order", "threshold")})
+        req = urllib.request.Request(url) if query is None else urllib.request.Request(url, data=b"", method="POST", headers={"X-Jarvis-Action": "usage-account"})
+        return self._ask(i, req, ROTATION_TIMEOUT_S, "자동 전환 설정을")
 
     def usage_all(self, force=False):
         """모든 기기의 사용량을 동시에 묻는다. 한 대가 느리거나 실패해도 나머지는 그대로 준다."""

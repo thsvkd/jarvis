@@ -20,7 +20,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from . import __version__, claude_accounts, cli_login, config, fleet, independent_usage, ipc, modules_api, self_update
+from . import __version__, claude_accounts, cli_login, config, fleet, hswap_usage, independent_usage, ipc, modules_api, self_update
 from .core import why
 from .util import client_kind
 
@@ -233,6 +233,9 @@ def make_handler(collector, core=None):
                         return self._json({"error": "로그인은 허용된 기기(viewers)에서만 할 수 있습니다"}, head, 403)
                     code, body = core.usage_login_status(dev, (parse_qs(u.query).get("provider") or [""])[0])
                     return self._json(body, head, code)
+                if what == "rotation":
+                    code, body = core.usage_rotation(dev)
+                    return self._json(body, head, code)
                 if what == "usage":
                     force = self._usage_force(u)
                     if force is None:
@@ -322,6 +325,20 @@ def make_handler(collector, core=None):
                             return self._json({"error": "계정 전환은 허용된 기기(viewers)에서만 할 수 있습니다"}, head, 403)
                         code, body = core.usage_switch(dev, (parse_qs(u.query).get("slot") or [""])[0])
                         return self._json(body, head, code)
+                    if path == "/api/usage/rotation":
+                        if not self._trusted(config.CORE):
+                            return self._json({"error": "core 로 지정한 기기만 부를 수 있습니다"}, head, 403)
+                        q = parse_qs(u.query)
+                        code, body = hswap_usage.set_rotation(*((q.get(k) or [""])[0] for k in ("on", "order", "threshold")))
+                        return self._json(body, head, code)
+                    if core and path.startswith("/api/devices/") and path.endswith("/rotation"):
+                        dev = path.split("/")[3]
+                        if path.count("/") != 4 or not core.has(dev):
+                            return self._json({"error": "not found"}, head, 404)
+                        if not self._trusted(config.VIEWERS, config.PROXIES):
+                            return self._json({"error": "자동 전환 설정은 허용된 기기(viewers)에서만 바꿀 수 있습니다"}, head, 403)
+                        code, body = core.usage_rotation(dev, u.query)
+                        return self._json(body, head, code)
                     if path == "/api/usage/account/remove":
                         if not self._trusted(config.CORE):
                             return self._json({"error": "core 로 지정한 기기만 부를 수 있습니다"}, head, 403)
@@ -376,6 +393,11 @@ def make_handler(collector, core=None):
                     if not self._trusted(config.CORE):
                         return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
                     return self._json(cli_login.status((parse_qs(u.query).get("provider") or [""])[0]), head)
+                if path == "/api/usage/rotation":
+                    if not self._trusted(config.CORE):
+                        return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
+                    code, body = hswap_usage.rotation()
+                    return self._json(body, head, code)
                 if path == "/api/usage/independent":
                     if not self._trusted(config.CORE):
                         return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)

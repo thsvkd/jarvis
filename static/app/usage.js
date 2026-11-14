@@ -10,7 +10,7 @@
  // 셸이 기억한 core 값이 있으면 확인 전에도 섹션을 연다('불러오는 중…'). 게이트웨이면 load 가 404 로 다시 숨긴다
  if(document.querySelector('[data-sh-sec="usage"][data-core]'))sec.hidden=false;
  const MODE_KEY="jarvis.usage.mode";
- const S={devs:null,hn:{},hnWatch:new Set(),hnTimer:null,prov:"all",hot:false,busy:new Set(),dlg:null,login:null,guide:null,
+ const S={devs:null,hn:{},hnWatch:new Set(),hnTimer:null,prov:"all",hot:false,busy:new Set(),dlg:null,login:null,guide:null,rot:null,
   mode:(()=>{try{return localStorage.getItem(MODE_KEY)==="full"?"full":"brief";}catch(e){return "brief";}})()};
  const WIN={session:"5시간",weekly:"주간",fable:"Fable 주간",monthly:"월간"};
  const PROVIDER={claude:"Claude",codex:"Codex",grok:"Grok",antigravity:"Antigravity",gemini:"Gemini",kimi:"Kimi",minimax:"MiniMax",zcode:"Z Code",cursor:"Cursor",opencodeGo:"OpenCode Go"};
@@ -19,6 +19,7 @@
  const REFRESH=P.raw('<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 11.5A8 8 0 0 0 6.3 6.3L4 8.5"/><path d="M4 4v4.5h4.5"/><path d="M4 12.5a8 8 0 0 0 13.7 5.2l2.3-2.2"/><path d="M20 20v-4.5h-4.5"/></svg>');
  // 읽는 동안 disabled 대신 aria-disabled 를 쓴다: disabled 는 키보드 포커스를 버튼에서 떨어뜨린다(중복 클릭은 코드가 막는다)
  const refBtn=(id,label,busy)=>html`<button type="button" class="icon-btn sm" data-refresh="${id}" aria-label="${label}" title="${label}" aria-busy="${String(busy)}" aria-disabled="${String(busy)}">${REFRESH}</button>`;
+ const ARROW={"-1":P.raw('<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 15l6-6 6 6"/></svg>'),"1":P.raw('<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6"/></svg>')};
  const LOGIN={codex:"Codex",grok:"Grok",claude:"Claude"}; // 게이트웨이가 로그인을 띄울 수 있는 CLI(Claude 는 device-code 가 아니라 인증 코드를 화면에 붙여 넣는다)
 
  // ---------------------------------------------------------------- 값
@@ -119,6 +120,8 @@
  // slot: 게이트웨이 hswap 의 슬롯 번호(Claude). 그 기기의 Claude Code 로그인을 이 계정으로 바꾼다
  const useBtn=(a,d)=>a.slot&&!a.active?html`<button type="button" class="seg-action" data-use="${d.id}" data-slot="${a.slot}" data-label="${a.label}" aria-disabled="${String(S.busy.has(d.id))}">이 계정 사용</button>`:"";
  // 사용 중이 아닌 저장 계정(hswap 슬롯)을 그 기기의 hswap 에서 지운다. 사용 중 계정은 지우면 지금 로그인이 관리 밖으로 남아 내지 않는다
+ // 기기마다 Claude 계정(hswap 슬롯)을 쓸 순서와 넘어갈 시점을 정한다(USAGE-14). 슬롯이 둘 이상일 때만 순서가 뜻이 있다
+ const rotBtn=(d,p)=>p.id==="claude"&&p.accounts.filter(a=>a.slot).length>1?html`<button type="button" class="seg-action" data-rot="${d.id}">전환 순서</button>`:"";
  const rmBtn=(a,d)=>a.slot&&!a.active?html`<button type="button" class="seg-action" data-remove="${d.id}" data-slot="${a.slot}" data-label="${a.label}" aria-disabled="${String(S.busy.has(d.id))}">계정 삭제</button>`:"";
  // 인증 실패·조치 필요 계정에는 그 기기에서 다시 로그인할 버튼을 함께 낸다(요약 카드도 상세와 같다)
  const relogIf=(a,d,p)=>(isErr(a)&&kind(a)[0]==="auth"||a.attention)&&(d.logins||[]).includes(p.id)?relog(d,p.id):"";
@@ -167,7 +170,7 @@
    const p=provs(d).find(p=>p.id===c.id),list=p?shown(d,p):[],L=p&&loginShown(p)?loginLine(d,p):"";
    if(!list.length&&fresh(d).includes(c.id))return html`<td data-label="${c.name}" class="ul-full"><div class="ul-acct"><p class="ul-muted">로그인하지 않았습니다.</p>${relog(d,c.id,false)}</div></td>`;
    if(!list.length)return L?html`<td data-label="${c.name}" class="ul-full">${L}</td>`:!p&&(d.unavailable||[]).includes(c.id)?html`<td data-label="${c.name}" class="ul-unk">확인 불가</td>`:html`<td data-label="${c.name}" class="ul-nil">–</td>`;
-   if(S.mode==="full")return html`<td data-label="${c.name}" class="ul-full">${L}${list.map(a=>acct(a,d,p))}${addBtn(d,c.id)}</td>`;
+   if(S.mode==="full")return html`<td data-label="${c.name}" class="ul-full">${L}${list.map(a=>acct(a,d,p))}${acts(addBtn(d,c.id),rotBtn(d,p))}</td>`;
    // 칸 값은 계정마다 가장 찬 한도의 평균이다(읽지 못한 계정은 빼고 센다)
    const err=list.some(isErr),act=list.some(a=>a.attention),pk=list.map(peak).filter(v=>v!=null),avg=pk.length?pk.reduce((x,y)=>x+y,0)/pk.length:null;
    return html`<td data-label="${c.name}"><button type="button" class="ul-cell" data-cell="${d.id+":"+c.id}" data-tone="${err||act?"crit":tone(avg)}"><b>${err&&avg==null?kind(list.find(isErr))[1]:pct(avg)}</b><span>${pk.length>1?"평균 · ":""}계정 ${list.length}${err&&avg!=null?" · "+kind(list.find(isErr))[1]+" 포함":""}${act?" · 조치 필요":""}</span></button>${L}</td>`;
@@ -212,13 +215,14 @@
    P.render($("#ulDlgB"),html`<div class="ul-login">${guideSteps(L)}<p class="ul-muted">이 기기가 화면 로그인을 낼 수 있으면 'Claude 다시 로그인' 버튼으로도 할 수 있습니다.</p></div>`);
    return;
   }
+  if(S.rot)return; // 자동 전환 설정은 rotDraw 만 그린다(주기적인 다시 그리기가 입력 중인 값을 지우지 않게)
   if(!S.dlg)return;
   const d=S.devs.find(x=>x.id===S.dlg.dev),p=d&&provs(d).find(x=>x.id===S.dlg.prov);
   if(!p){dlg.close();return;}
   $("#ulDlgT").textContent=(d.host||d.id)+" · "+p.name;
-  P.render($("#ulDlgB"),html`${devMeta(d)}${loginLine(d,p)}${shown(d,p).map(a=>acct(a,d,p))}${addBtn(d,p.id)}`);
+  P.render($("#ulDlgB"),html`${devMeta(d)}${loginLine(d,p)}${shown(d,p).map(a=>acct(a,d,p))}${acts(addBtn(d,p.id),rotBtn(d,p))}`);
  }
- dlg.addEventListener("close",()=>{S.dlg=null;S.login=null;S.guide=null;});
+ dlg.addEventListener("close",()=>{S.dlg=null;S.login=null;S.guide=null;S.rot=null;$("#ulDlgLive").textContent="";});
  // 바깥(backdrop)을 누르면 닫는다. backdrop 클릭도 대상이 dialog 라서 좌표가 상자 밖인지로 가린다(안쪽 여백 클릭은 닫지 않게)
  dlg.addEventListener("click",e=>{
   const r=dlg.getBoundingClientRect();
@@ -333,6 +337,70 @@
   S.busy.delete(dev);
   refreshOne(dev,true); // 실패해도 다시 읽는다(hswap 이 지운 뒤 확인 줄만 못 낸 경우)
  }
+ // ---------------------------------------------------------------- 자동 전환 순서(USAGE-14)
+ // 저장 값은 hswap 의 '전환하는 사용률'(50~99.9)이고, 화면은 사람이 생각하는 '남은 양'(1~50%)으로 묻는다
+ const rotAccts=d=>(((d.providers||[]).find(p=>p.id==="claude")||{}).accounts||[]).filter(a=>a.slot);
+ function rotView(){
+  const R=S.rot,d=S.devs.find(x=>x.id===R.dev),byslot=new Map(rotAccts(d||{}).map(a=>[a.slot,a]));
+  if(R.err&&!R.loaded)return html`<div class="ul-st" data-tone="crit" role="alert"><p class="ul-st-t">설정을 읽지 못했습니다</p><p class="ul-why">${R.err}</p></div>`;
+  if(!R.loaded)return html`<p class="ul-muted">이 기기의 hswap 설정을 읽는 중입니다…</p>`;
+  const n=R.order.length,human=R.service&&R.service.installed&&!R.service.managed,busy=String(!!R.saving);
+  const mv=(i,dir,a)=>{const off=dir<0?i===0:i===n-1;return html`<button type="button" class="icon-btn sm" data-mv="${dir}" data-i="${i}" aria-label="${a.label+(a.org?" ("+a.org+")":"")} ${dir<0?"위로":"아래로"}" title="${dir<0?"위로":"아래로"}" aria-disabled="${String(off||!!R.saving)}">${ARROW[dir]}</button>`;};
+  return html`<form class="ul-rot" data-rotform="1" novalidate>
+   ${R.err?html`<div class="ul-st" data-tone="crit" role="alert"><p class="ul-st-t">저장하지 못했습니다</p><p class="ul-why">${R.err}</p></div>`:""}
+   <label class="ul-check"><input type="checkbox" name="on" ${R.on?"checked":""} ${human||R.saving?"disabled":""}> 한도에 가까워지면 다음 계정으로 자동 전환</label>
+   ${human?html`<p class="ul-why">이 기기의 hswap 예약은 사람이 만든 것이라 켜고 끄기는 그 기기에서 직접 합니다. 순서와 기준은 저장할 수 있습니다.</p>`:""}
+   ${R.was&&!R.ordered?html`<p class="ul-muted">지금은 hswap 기본 방식(남은 한도가 가장 많은 계정)으로 전환합니다. 저장하면 아래 순서를 씁니다.</p>`:""}
+   <fieldset class="ul-fs"><legend class="ul-wl">쓰는 순서</legend>
+    <ol class="ul-order">${R.order.map((s,i)=>{const a=byslot.get(s)||{label:"슬롯 "+s};return html`<li><span class="ul-rank">${i+1}</span><span class="ul-who"><b class="ul-email">${a.label}</b>${a.org?html`<span class="ul-plan">${a.org}</span>`:""}${a.active?html`<span class="badge" data-tone="info">사용 중</span>`:""}</span><span class="ul-mv">${mv(i,-1,a)}${mv(i,1,a)}</span></li>`;})}</ol>
+   </fieldset>
+   <div class="ul-left"><label for="ulRotLeft">남은 한도가</label><span class="ul-num"><input id="ulRotLeft" name="left" type="text" inputmode="numeric" autocomplete="off" value="${R.left}" aria-describedby="ulRotLeftH" ${R.saving?"disabled":""}><span aria-hidden="true">%</span></span><span>이하가 되면 다음 계정으로 넘어갑니다.</span></div>
+   <p class="ul-muted" id="ulRotLeftH">1~50 사이 정수. 5시간·주간 한도 중 먼저 닿는 쪽을 봅니다. 앞 순서 계정의 한도가 풀리면 다시 그 계정으로 돌아갑니다.</p>
+   <div class="ul-acts"><button type="submit" class="seg-action primary" aria-busy="${busy}" aria-disabled="${busy}">${R.saving?"저장 중…":"저장"}</button><button type="button" class="seg-action" data-close>취소</button></div>
+  </form>`;
+ }
+ function rotDraw(focus){
+  const R=S.rot,d=S.devs.find(x=>x.id===R.dev),f=dlg.querySelector("[data-rotform]");
+  if(f&&!R.saving){R.on=f.elements.on.checked;R.left=f.elements.left.value;} // 다시 그리기 전에 고친 값을 옮겨 둔다
+  $("#ulDlgT").textContent=(d?d.host||d.id:R.dev)+" · Claude 전환 순서";
+  P.render($("#ulDlgB"),rotView());
+  if(focus)(dlg.querySelector(focus)||dlg.querySelector("[data-rotform] [data-mv][aria-disabled=false]"))?.focus();
+ }
+ async function rotOpen(dev){
+  const R=S.rot={dev,loaded:false};S.dlg=null;rotDraw();if(!dlg.open)dlg.showModal();
+  try{
+   const r=await fetch("/api/devices/"+encodeURIComponent(dev)+"/rotation",{cache:"no-store"}),o=await r.json();
+   if(!r.ok)throw new Error(o.error||"HTTP "+r.status);
+   const slots=rotAccts(S.devs.find(x=>x.id===dev)||{}).map(a=>a.slot);
+   // 순서에 없는 계정은 뒤에 슬롯 번호 순으로 둔다(저장하면 모두 순서를 받는다). 지운 슬롯은 뺀다
+   Object.assign(R,{loaded:true,on:o.on===true,was:o.on===true,ordered:o.ordered===true,service:o.service,
+    order:[...(o.order||[]).filter(s=>slots.includes(s)),...slots.filter(s=>!(o.order||[]).includes(s))],
+    left:o.threshold!=null?String(Math.max(1,Math.min(50,Math.round(100-o.threshold)))):"10"});
+  }catch(e){R.err=e.message||String(e);}
+  if(S.rot===R)rotDraw();
+ }
+ function rotMove(i,dir){
+  const R=S.rot,j=i+dir,d=S.devs.find(x=>x.id===R.dev);
+  if(R.saving||j<0||j>=R.order.length)return;
+  [R.order[i],R.order[j]]=[R.order[j],R.order[i]];
+  const a=rotAccts(d||{}).find(x=>x.slot===R.order[j]);
+  rotDraw(`[data-mv="${dir}"][data-i="${j}"][aria-disabled=false]`); // 옮긴 계정의 같은 방향 버튼에 포커스를 둔다(끝이면 반대 방향)
+  $("#ulDlgLive").textContent=(a?a.label:"슬롯 "+R.order[j])+" 을(를) "+(j+1)+"순위로 옮겼습니다("+R.order.length+"개 중)";
+ }
+ async function rotSave(form){
+  const R=S.rot;if(!R||R.saving)return;
+  R.on=form.elements.on.checked;R.left=String(form.elements.left.value).trim();
+  if(!/^\d{1,2}$/.test(R.left)||+R.left<1||+R.left>50){R.err="남은 한도는 1 이상 50 이하의 정수여야 합니다.";rotDraw("#ulRotLeft");return;}
+  Object.assign(R,{saving:true,err:null});rotDraw();
+  const q="on="+(R.on?1:0)+"&order="+encodeURIComponent(R.order.join(","))+"&threshold="+(100-R.left);
+  try{
+   const r=await fetch("/api/devices/"+encodeURIComponent(R.dev)+"/rotation?"+q,{method:"POST",cache:"no-store",headers:{"X-Jarvis-Action":"usage-account"}}),o=await r.json();
+   if(!r.ok)throw new Error(o.error||"HTTP "+r.status);
+   const d=S.devs.find(x=>x.id===R.dev);
+   if(S.rot===R)dlg.close();
+   note((d&&d.host||R.dev)+": Claude 자동 전환을 "+(o.on?"켰습니다 · 남은 "+R.left+"%에서 다음 계정":"껐습니다(순서는 남겨 둡니다)"));
+  }catch(e){Object.assign(R,{saving:false,err:e.message||String(e)});if(S.rot===R)rotDraw();}
+ }
  const HRES={done:"하네스를 갱신했습니다",current:"하네스가 이미 최신입니다",deferred:"세션이 돌고 있어 일부 하네스를 보류했습니다",
   stale:"그사이 계획이 바뀌어 실행하지 않았습니다. 다시 누르세요",failed:"하네스 갱신에 실패했습니다",interrupted:"게이트웨이 재시작으로 하네스 갱신이 중단됐습니다"};
  async function loadMods(){
@@ -380,6 +448,7 @@
   S.busy.delete(id);draw();
  }
  dlg.addEventListener("submit",e=>{
+  if(e.target.dataset&&e.target.dataset.rotform){e.preventDefault();rotSave(e.target);return;}
   if(!e.target.dataset||!e.target.dataset.paste)return;
   e.preventDefault();
   const code=String(e.target.elements.code.value).trim();
@@ -399,6 +468,8 @@
   if(t.dataset.guide){S.guide=t.dataset.guide;dlgDraw();if(!dlg.open)dlg.showModal();return;}
   if(t.dataset.use){use(t.dataset.use,t.dataset.slot,t.dataset.label);return;}
   if(t.dataset.hup){hup(t.dataset.hup,t.dataset.tool||"");return;}
+  if(t.dataset.rot){rotOpen(t.dataset.rot);return;}
+  if(t.dataset.mv){rotMove(+t.dataset.i,+t.dataset.mv);return;}
   if(t.dataset.remove){remove(t.dataset.remove,t.dataset.slot,t.dataset.label);return;}
   if(t.dataset.refresh){if(S.login)dlg.close();refreshOne(t.dataset.refresh);return;}
   if(t.dataset.cell){const [dev,prov]=t.dataset.cell.split(":");S.dlg={dev,prov};dlgDraw();if(!dlg.open)dlg.showModal();return;}

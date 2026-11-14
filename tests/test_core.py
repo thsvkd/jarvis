@@ -283,6 +283,25 @@ class RouteTest(unittest.TestCase):
         finally:
             server.client_kind, config.VIEWERS = kind, vw
 
+    def test_rotation_reaches_the_gateway_with_only_its_three_keys(self):
+        """covers: USAGE-14. 읽기는 GET, 저장은 viewers 만 POST 로 전달하며 on·order·threshold 외의 쿼리는 다시 만들지 않는다"""
+        Gateway.routes["/api/usage/rotation"] = (200, b'{"on":false,"order":[]}', False)
+        Gateway.routes["/api/usage/rotation?on=1&order=3%2C1&threshold=85"] = (200, b'{"on":true,"order":["3","1"]}', False)
+        self.assertEqual(self.get("/api/devices/gw/rotation")[1], {"on": False, "order": []})
+        req = urllib.request.Request(self.base + "/api/devices/gw/rotation?threshold=85&x=1&order=3,1&on=1", data=b"", method="POST",
+                                     headers={"X-Jarvis-Action": "usage-account"})
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(req)
+        self.assertEqual(e.exception.code, 403)  # viewers 가 아니다
+        kind, vw = server.client_kind, config.VIEWERS
+        server.client_kind, config.VIEWERS = (lambda ip: "tailnet"), ["127.0.0.1"]
+        try:
+            with urllib.request.urlopen(req) as r:
+                self.assertEqual(json.loads(r.read())["order"], ["3", "1"])
+        finally:
+            server.client_kind, config.VIEWERS = kind, vw
+        self.assertEqual(Gateway.posted, ("/api/usage/rotation?on=1&order=3%2C1&threshold=85", "usage-account"))
+
     def test_claude_login_code_travels_in_a_header_and_is_checked_first(self):
         """covers: USAGE-10. 인증 코드는 URL·본문이 아니라 헤더로 전달하고, 모양이 틀리면 게이트웨이로 보내지 않는다"""
         Gateway.routes["/api/usage/login?provider=claude"] = (200, b'{"submitted":true}', False)

@@ -1251,3 +1251,27 @@ p.ul-hn { flex-direction: row; align-items: center; gap: var(--sp-2); }
   .ul-mx td.ul-nil { display: none; }
   .ul-cell { min-width: 0; }
 }
+/* Claude 전환 순서(USAGE-14): 켜기 -> 순서 -> 기준 -> 저장. 순위 번호 · 계정 · 위/아래 버튼을 한 줄에 둔다 */
+/* 묶음 안은 8, 묶음(켜기 · 순서 · 기준 · 동작) 사이는 16 */
+.ul-rot > * + * { margin-top: var(--sp-2); }
+.ul-rot > .ul-fs, .ul-rot > .ul-left, .ul-rot > .ul-acts { margin-top: var(--sp-4); }
+.ul-fs legend { margin-bottom: var(--sp-2); }
+.ul-mv .ic { width: 16px; height: 16px; }
+#ulDlg .seg-action.primary { background: var(--accent); color: var(--on-accent); }
+#ulDlg .seg-action.primary:hover { background: var(--accent-hover); }
+/* 다크의 강조색(#5aa6ff)은 흰 글자와 4.5:1 이 안 된다: 램프의 밝은 중립색 바탕에 어두운 글자로 둔다 */
+:root[data-theme="dark"] #ulDlg .seg-action.primary { background: var(--text); color: var(--bg); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) #ulDlg .seg-action.primary { background: var(--text); color: var(--bg); } }
+.ul-dlg-h .seg-action { white-space: nowrap; }
+.ul-check { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+.ul-fs { border: 0; margin: 0; padding: 0; min-width: 0; }
+.ul-order { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1_5); }
+.ul-order li { display: grid; grid-template-columns: 1.5rem minmax(0, 1fr) auto; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-2_5); border-radius: var(--r-sm); background: var(--tile-2); }
+.ul-rank { font: var(--fw-semibold) var(--fs-sm) var(--mono); color: var(--text-2); text-align: center; }
+.ul-who { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1_5); min-width: 0; }
+.ul-mv { display: flex; gap: var(--sp-1); }
+.ul-mv [aria-disabled="true"] { opacity: .35; cursor: default; }
+.ul-left { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); }
+.ul-num { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.ul-num input { width: 3.5rem; padding: var(--sp-1_5) var(--sp-2); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--tile-2); color: var(--text); font: var(--fs-sm) var(--mono); text-align: right; }
+.ul-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

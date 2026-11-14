@@ -515,7 +515,15 @@ class ScheduleTest(FakeHswapCase):
     def test_installs_when_missing(self):
         self.script({self.STATUS: self.st(installed=False, managed=None, loaded=False), self.INSTALL: ['{"schemaVersion": 1, "ok": true}', 0]})
         hswap_usage.schedule()
-        self.assertEqual(self.calls(), [self.STATUS, self.INSTALL, self.STATUS])
+        self.assertEqual(self.calls(), [self.STATUS, "claude config --json", self.INSTALL, self.STATUS])  # 자동 전환을 켜 두었는지 본다(USAGE-14)
+
+    def test_missing_service_keeps_rotation_that_was_turned_on(self):
+        """covers: USAGE-14. 켜 둔 자동 전환(순서 전략)은 예약을 새로 설치할 때 --then-auto 로 이어진다"""
+        cfg = json.dumps({"schemaVersion": 1, "settings": [{"key": "autoswitch.strategy", "value": hswap_usage.ROTATION}]})
+        install = "claude keepalive --install-service --ahead 7200 --then-auto --json"
+        self.script({self.STATUS: self.st(installed=False, managed=None, loaded=False), "claude config --json": [cfg, 0], install: ['{"schemaVersion": 1}', 0]})
+        hswap_usage.schedule()
+        self.assertEqual(self.calls(), [self.STATUS, "claude config --json", install, self.STATUS])
 
     def test_loaded_managed_service_keeps_the_settings_people_chose(self):
         self.script({self.STATUS: self.st(ahead=3600, thenAuto=True)})
@@ -561,3 +569,86 @@ class ScheduleTest(FakeHswapCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RotationTest(FakeHswapCase):
+    """covers: USAGE-14. 기기별 Claude 자동 전환: 순서는 hswap priority 로, 전환 기준은 autoswitch.threshold 로, 켜기는 순서 전략과 실행 경로로 둔다."""
+
+    script = KeepTest.script
+    CONFIG = "claude config --json"
+    PRIORITY = "claude priority"
+    STATUS = "claude keepalive --service-status --json"
+
+    def setUp(self):
+        super().setUp()
+        p = mock.patch.object(hswap_usage.claude_accounts, "_version", "0.2.9")
+        p.start()
+        self.addCleanup(p.stop)
+
+    def answers(self, strategy=None, pri=(("1", 0), ("2", 0), ("3", 0)), **extra):
+        cfg = {"schemaVersion": 1, "settings": [{"key": "autoswitch.threshold", "value": 90.0}, {"key": "autoswitch.strategy", "value": strategy or "best"}]}
+        lines = "Account priorities (higher first; default 0):\n" + "".join(f"  Account-{s}  u{s}@example.com  {t}\n" for s, t in pri)
+        self.script({self.CONFIG: [json.dumps(cfg), 0], self.PRIORITY: [lines, 0], **extra})
+
+    def test_reads_order_from_priorities_highest_first(self):
+        self.answers(hswap_usage.ROTATION, pri=(("1", 1), ("2", 0), ("3", 2)))
+        with mock.patch.object(hswap_usage.sys, "platform", "linux"):
+            code, body = hswap_usage.rotation()
+        self.assertEqual(code, 200)
+        self.assertEqual(body, {"on": True, "ordered": True, "order": ["3", "1"], "threshold": 90.0, "service": None})
+
+    def test_linux_save_sets_priorities_threshold_and_strategy(self):
+        self.answers(pri=(("1", 0), ("2", 5), ("3", 0)))
+        with mock.patch.object(hswap_usage.sys, "platform", "linux"):
+            code, _ = hswap_usage.set_rotation("1", "3,1", "85")
+        self.assertEqual(code, 200)
+        writes = [c for c in self.calls() if c not in (self.CONFIG, self.PRIORITY)]
+        self.assertEqual(writes, ["claude priority 2 --unset", "claude priority 3 2", "claude priority 1 1",
+                                  "claude config set autoswitch.threshold 85", "claude config set autoswitch.strategy priority-consume-first"])
+
+    def test_turning_off_keeps_order_and_unsets_strategy(self):
+        self.answers(hswap_usage.ROTATION, pri=(("1", 1), ("2", 0), ("3", 0)))
+        with mock.patch.object(hswap_usage.sys, "platform", "linux"):
+            hswap_usage.set_rotation("0", "1", "90")
+        self.assertIn("claude config unset autoswitch.strategy", self.calls())
+        self.assertNotIn("claude priority 1 --unset", self.calls())
+
+    def test_macos_reinstalls_managed_service_with_then_auto_and_its_ahead(self):
+        st = json.dumps({"schemaVersion": 1, "platform": "launchd", "installed": True, "managed": True, "loaded": True, "ahead": 3600, "thenAuto": False})
+        again = "claude keepalive --install-service --ahead 3600 --then-auto --json"
+        self.answers(**{self.STATUS: [st, 0], again: ['{"schemaVersion": 1}', 0]})
+        with mock.patch.object(hswap_usage.sys, "platform", "darwin"):
+            code, _ = hswap_usage.set_rotation("1", "2", "90")
+        self.assertEqual(code, 200)
+        self.assertIn(again, self.calls())
+
+    def test_macos_human_made_service_is_not_changed(self):
+        st = json.dumps({"schemaVersion": 1, "platform": "launchd", "installed": True, "managed": False, "loaded": True})
+        self.answers(**{self.STATUS: [st, 0]})
+        with mock.patch.object(hswap_usage.sys, "platform", "darwin"):
+            code, body = hswap_usage.set_rotation("1", "2", "90")
+        self.assertEqual(code, 409, body)
+        self.assertFalse([c for c in self.calls() if "set" in c or "--install-service" in c or c.startswith("claude priority ")])
+
+    def test_bad_input_and_old_hswap_do_not_write(self):
+        self.answers()
+        for args in (("2", "1", "90"), ("1", "1,1", "90"), ("1", "a", "90"), ("1", "1", "49"), ("1", "1", "100"), ("1", "1", "x"), ("1", "", "90")):
+            self.assertEqual(hswap_usage.set_rotation(*args)[0], 400, args)
+        with mock.patch.object(hswap_usage.claude_accounts, "_version", "0.2.8"):
+            self.assertEqual(hswap_usage.set_rotation("1", "1", "90")[0], 409)  # 404 면 core 가 jarvis 갱신 필요로 보인다
+        self.assertEqual(self.calls(), [])
+
+    def test_macos_unknown_service_state_is_not_guessed(self):
+        self.answers()  # --service-status 가 빈 출력이다
+        with mock.patch.object(hswap_usage.sys, "platform", "darwin"):
+            self.assertEqual(hswap_usage.rotation()[0], 502)
+            self.assertEqual(hswap_usage.set_rotation("0", "1", "90")[0], 502)
+        self.assertFalse([c for c in self.calls() if " set " in c or "--unset" in c or "--install-service" in c])
+
+    def test_failed_step_stops_and_names_it(self):
+        self.answers(**{"claude priority 1 1": ["", 1]})
+        with mock.patch.object(hswap_usage.sys, "platform", "linux"):
+            code, body = hswap_usage.set_rotation("1", "1", "90")
+        self.assertEqual(code, 409)
+        self.assertIn("우선순위 지정", body["error"])
+        self.assertFalse([c for c in self.calls() if c.startswith("claude config set")])
