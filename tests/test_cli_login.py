@@ -253,6 +253,7 @@ class ClaudeLoginTest(unittest.TestCase):
 FAKE_HSWAP_ADD = """#!/bin/sh
 # hswap 0.2.8 add --login --json 의 흉내: 인자를 남기고 JSON Lines 이벤트만 stdout 에 낸다
 echo "$@" > "$(dirname "$0")/args"
+echo "$HSWAP_CALLER" > "$(dirname "$0")/caller"
 if [ "$1" = claude ]; then
   echo '{"type":"login_url","harness":"claude","url":"https://claude.example.com/oauth","awaitsCode":true}'
   read line
@@ -303,6 +304,8 @@ class HswapAddTest(unittest.TestCase):
 
     def test_codex_add_runs_hswap_and_shows_the_device_code(self):
         st, o = cli_login.start("codex", add=True)
+        with open(os.path.join(self.dir, "caller")) as f:
+            self.assertEqual(f.read().strip(), "jarvis-ui")  # covers: USAGE-16. 화면의 버튼이 부른 hswap 이다
         self.assertEqual((st, o["url"], o["code"], o["paste"]), (200, "https://auth.example.com/device", "ABCD-EFGH1", False))
         self.assertLess(o["expires_at"], time.time() + 601)  # hswap 이 알려 준 유효 시간을 쓴다
         self.assertEqual(self.wait("codex", "done"), {"state": "done"})

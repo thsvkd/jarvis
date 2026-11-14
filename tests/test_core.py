@@ -209,6 +209,35 @@ class RouteTest(unittest.TestCase):
         finally:
             server.client_kind, config.VIEWERS = kind, vw
 
+    def test_hswap_log_routes(self):
+        """covers: USAGE-16. 게이트웨이 경로는 설정 core 만, core 경로는 tailnet·local 만. 옛 게이트웨이는 501, hswap 이 낮으면 409 그대로"""
+        self.assertEqual(self.get("/api/usage/hswap-log?since=1h")[0], 403)  # 루프백은 설정 core 가 아니다
+        kind, core_ips = server.client_kind, config.CORE
+        with mock.patch.object(server.hswap_usage, "hswap_log", return_value=(200, {"since": "1h", "events": [], "truncated": False})) as log:
+            server.client_kind, config.CORE = (lambda ip: "tailnet"), ["127.0.0.1"]
+            try:
+                self.assertEqual(self.get("/api/usage/hswap-log?since=2h"), (200, {"since": "1h", "events": [], "truncated": False}))
+                self.assertEqual(self.get("/api/usage/hswap-log")[0], 200)
+            finally:
+                server.client_kind, config.CORE = kind, core_ips
+        self.assertEqual([c.args for c in log.call_args_list], [("2h",), ("1h",)])
+        self.assertEqual(self.get("/api/devices/gw/hswap-log?since=1h")[0], 501)  # 그 경로가 없는 옛 게이트웨이
+        Gateway.routes["/api/usage/hswap-log?since=1h"] = (200, b'{"since":"1h","events":[{"cmd":"keepalive"}],"truncated":false}', False)
+        Gateway.routes["/api/usage/hswap-log?since=30m"] = (409, '{"error":"hswap 0.3.1 이상 필요"}'.encode(), False)
+        self.assertEqual(self.get("/api/devices/gw/hswap-log"), (200, {"since": "1h", "events": [{"cmd": "keepalive"}], "truncated": False}))
+        self.assertEqual(self.get("/api/devices/gw/hswap-log?since=30m"), (409, {"error": "hswap 0.3.1 이상 필요"}))
+        self.assertEqual(self.get("/api/devices/gw/hswap-log?since=1y")[0], 400)
+        self.assertEqual(self.get("/api/devices/nope/hswap-log")[0], 404)
+        for other in ("lan", "docker", "public"):  # docker·public 은 앞단(_peer_ok)이 먼저 막고, LAN 은 이 경로가 막는다
+            server.client_kind = lambda ip, k=other: k
+            try:
+                with self.assertRaises(urllib.error.HTTPError) as e:
+                    urllib.request.urlopen(self.base + "/api/devices/gw/hswap-log")
+                self.assertEqual(e.exception.code, 403, other)
+                e.exception.close()
+            finally:
+                server.client_kind = kind
+
     def test_update_progress_is_relayed_and_old_gateways_are_501(self):
         """covers: UI-4. 갱신 진행은 기기의 GET /api/jarvis/update 를 그대로 준다(읽기라 viewers 가 아니어도 된다)"""
         self.assertEqual(self.get("/api/devices/gw/jarvis/update")[0], 501)  # 그 경로가 없는 옛 게이트웨이

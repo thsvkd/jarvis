@@ -1227,6 +1227,9 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
 .ul-hn li { display: contents; }
 .ul-hn li > span { display: grid; gap: var(--sp-0_5); }
 .ul-hn code { font-size: var(--fs-sm); }
+.ul-hlog { margin-top: var(--sp-2); font-size: var(--fs-sm); border-collapse: collapse; }
+.ul-hlog caption { text-align: start; }
+.ul-hlog th, .ul-hlog td { padding: var(--sp-0_5) var(--sp-2); text-align: start; font-weight: normal; white-space: nowrap; }
 p.ul-hn { flex-direction: row; align-items: center; gap: var(--sp-2); }
 .ul-raw { margin-top: var(--sp-1_5); font-size: var(--fs-xs); color: var(--text-3); }
 .ul-raw summary { cursor: pointer; }

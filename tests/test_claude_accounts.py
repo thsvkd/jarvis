@@ -928,7 +928,7 @@ class SwitchRaceTest(StoreCase):
     def login_as_b(self):
         self.live_identity.return_value = ("b@example.com", "o2")
 
-    def fake_json(self, exe, *args, timeout=None):
+    def fake_json(self, exe, *args, timeout=None, caller=None):
         if args[0] == "switch":
             if self.gate:
                 self.gate.wait(5)
@@ -960,7 +960,7 @@ class SwitchRaceTest(StoreCase):
         """covers: USAGE-6. hswap 을 기다리는 사이 로그인이 바뀌면 답을 받기 전의 사용 중 슬롯으로 덮지 않는다"""
         real = self.fake_json
 
-        def changed_meanwhile(exe, *args, timeout=None):
+        def changed_meanwhile(exe, *args, timeout=None, caller=None):
             self.login_as_b()
             return real(exe, *args, timeout=timeout)
         claude_accounts._json.side_effect = changed_meanwhile
@@ -1009,7 +1009,7 @@ class SwitchRaceTest(StoreCase):
         claude_accounts.read()
         real = self.fake_json
 
-        def fail(exe, *args, timeout=None):
+        def fail(exe, *args, timeout=None, caller=None):
             if args[0] == "switch":
                 raise RuntimeError("locked")
             return real(exe, *args, timeout=timeout)
@@ -1600,7 +1600,7 @@ class ReadDeadlineTest(StoreCase):
         """호출마다 takes 초(시한 안에서)가 지나고 그 사이 저장소에 슬롯이 하나 는다. 답은 호출 전 슬롯 구성이다."""
         run = self.hswap()
 
-        def answer(exe, *args, timeout=None):
+        def answer(exe, *args, timeout=None, caller=None):
             self.timeouts.append(timeout)
             self.now[0] += min(takes, timeout)
             rows = [hswap_row(number=n, email=f"u{n}@example.com", organizationUuid=f"o{n}", active=n == 1) for n in range(1, self.slots + 1)]
@@ -2435,6 +2435,48 @@ class HeadlessTest(unittest.TestCase):
         with mock.patch.object(claude_accounts, "_keepalive", return_value=k), mock.patch.object(claude_accounts.sys, "platform", "linux"):
             s = claude_accounts.login()
         self.assertEqual((s["state"], s["text"], s["attention"]), ("keychain_item_present", text, True))
+
+
+class CallerTest(unittest.TestCase):
+    """covers: USAGE-16. hswap 에게 누가 불렀는지 알린다: 게이트웨이의 읽기는 jarvis-gateway, 사람 버튼(전환·삭제)은 jarvis-ui."""
+
+    def run_with(self, fn, body=None):
+        seen = []
+
+        def fake(cmd, **kw):
+            seen.append((cmd[1:3], (kw.get("env") or {}).get("HSWAP_CALLER")))
+            return types.SimpleNamespace(stdout=json.dumps(body or {"schemaVersion": 1, "switched": True, "accounts": []}), returncode=0, stderr="")
+        with mock.patch.object(claude_accounts, "binary", return_value="/fake/hswap"), mock.patch.object(claude_accounts.subprocess, "run", side_effect=fake), \
+                mock.patch.object(claude_accounts._state, "cache", None), mock.patch.object(claude_accounts, "_logged", {}), \
+                mock.patch.object(claude_accounts, "print", create=True):
+            fn()
+        return seen
+
+    def test_callers(self):
+        self.assertEqual(self.run_with(lambda: claude_accounts.switch("2")), [(["claude", "switch"], "jarvis-ui")])
+        self.assertEqual(self.run_with(lambda: claude_accounts.remove("2")), [(["claude", "remove"], "jarvis-ui")])
+        self.assertEqual(self.run_with(lambda: claude_accounts.live(force=True)), [(["claude", "list"], "jarvis-gateway")])
+        self.assertEqual(self.run_with(claude_accounts.installed_version), [(["--version"], "jarvis-gateway")])
+
+    def test_the_caller_keeps_the_rest_of_the_environment(self):
+        seen = []
+        with mock.patch.object(claude_accounts.subprocess, "run", side_effect=lambda cmd, **kw: seen.append(kw["env"]) or types.SimpleNamespace(stdout="{}", returncode=0, stderr="")), \
+                mock.patch.dict(os.environ, {"KEEP_ME": "1"}), mock.patch.object(claude_accounts, "_logged", {}), mock.patch.object(claude_accounts, "print", create=True):
+            claude_accounts._json("/fake/hswap", "list")
+        self.assertEqual((seen[0]["KEEP_ME"], seen[0]["HSWAP_CALLER"]), ("1", "jarvis-gateway"))
+
+
+class LastEventsTest(unittest.TestCase):
+    """covers: USAGE-16. doctor 의 lastEvents 중 최근 3개를 기기 행에 보인다."""
+
+    def test_device_row_carries_the_last_three_events(self):
+        events = [{"ts": f"2026-11-14T14:5{i}:00Z", "cmd": "keepalive", "caller": "gui", "outcome": "none", "exit": 0} for i in range(5)]
+        with mock.patch.object(claude_accounts, "_version", claude_accounts.VERSION), mock.patch.object(claude_accounts.sys, "platform", "darwin"), \
+                mock.patch.object(claude_accounts, "_aqua", True), \
+                mock.patch.object(claude_accounts, "doctor", {"store": "file", "problems": [], "last_events": events}):
+            self.assertEqual(claude_accounts.status()["events"], events[-3:])
+        with mock.patch.object(claude_accounts, "_version", claude_accounts.VERSION), mock.patch.object(claude_accounts, "doctor", {"store": "file", "problems": []}):
+            self.assertNotIn("events", claude_accounts.status())
 
 
 if __name__ == "__main__":

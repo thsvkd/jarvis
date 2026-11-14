@@ -236,6 +236,14 @@ def make_handler(collector, core=None):
                 if what == "rotation":
                     code, body = core.usage_rotation(dev)
                     return self._json(body, head, code)
+                if what == "hswap-log":  # USAGE-16: 진단 기록이라 화면을 보는 tailnet 기기와 이 기기에만 준다(LAN·컨테이너 프록시는 아니다)
+                    if client_kind(self.client_address[0]) not in ("tailnet", "local"):
+                        return self._json({"error": "tailnet 기기에서만 볼 수 있습니다"}, head, 403)
+                    since = (parse_qs(u.query).get("since") or ["1h"])[0]
+                    if not hswap_usage.SINCE.fullmatch(since):
+                        return self._json({"error": "since 는 30m·1h·2d 꼴이어야 합니다"}, head, 400)
+                    code, body = core.hswap_log(dev, since)
+                    return self._json(body, head, code)
                 if what == "usage":
                     force = self._usage_force(u)
                     if force is None:
@@ -397,6 +405,11 @@ def make_handler(collector, core=None):
                     if not self._trusted(config.CORE):
                         return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
                     code, body = hswap_usage.rotation()
+                    return self._json(body, head, code)
+                if path == "/api/usage/hswap-log":  # USAGE-16: 이 기기의 hswap 기록(core 가 전달한다)
+                    if not self._trusted(config.CORE):
+                        return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
+                    code, body = hswap_usage.hswap_log((parse_qs(u.query).get("since") or ["1h"])[0])
                     return self._json(body, head, code)
                 if path == "/api/usage/independent":
                     if not self._trusted(config.CORE):

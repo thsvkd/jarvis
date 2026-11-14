@@ -443,3 +443,41 @@ console.log("usage summary ok");
   delete devices[0].logins; delete claudeOf(devices[0]).login;
   click({ mode: "brief" });
 }
+// covers: USAGE-16. 기기 행에 hswap 의 최근 기록 3개를 작게 보이고, '최근 hswap 로그'로 그 기기의 1시간 분량을 표로 펼친다. 모두 이스케이프한다
+{
+  const ev = (cmd, caller, outcome) => ({ ts: "2026-11-14T05:52:00Z", cmd, caller, outcome, exit: 0 });
+  devices[0].hswap = { version: "0.3.1", pinned: "0.3.1", note: null, events: [ev("keepalive", "gui", "none"), ev("<b>x</b>", "<i>", "ok")] };
+  click({ prov: "all" });
+  const hm = new Date(Date.parse("2026-11-14T05:52:00Z")).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false });
+  assert.ok(rendered().includes(`최근 hswap: ${hm} keepalive · gui · none / ${hm} &lt;b&gt;x&lt;/b&gt; · &lt;i&gt; · ok`), rendered().match(/최근 hswap:[^<]*/)?.[0]);
+  assert.doesNotMatch(rendered(), /<b>x<\/b>|<i>/);
+  assert.match(rendered(), /data-hlog="first" aria-expanded="false">최근 hswap 로그</);
+  const asked = [];
+  const before = ctx.fetch;
+  ctx.fetch = async url => {
+    asked.push(url);
+    if (!url.includes("/hswap-log")) return before(url);
+    return { ok: true, status: 200, json: async () => ({ since: "1h", truncated: true, events: [
+      { ts: 1763099520, cmd: "keepalive", caller: "jarvis-gateway", outcome: "ok", exit: 0, ms: 120, error: null },
+      { ts: "2026-11-14T05:53:00Z", cmd: "<script>x</script>", caller: "jarvis-ui", outcome: "failed", exit: 1, ms: 30, error: { type: "<img src=x>" } }] }) };
+  };
+  click({ hlog: "first" });
+  for (let i = 0; i < 3; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(asked.filter(u => u.includes("hswap-log")), ["/api/devices/first/hswap-log?since=1h"]);
+  const table = rendered().match(/<table class="ul-hlog">[\s\S]*?<\/table>/)?.[0] || "";
+  assert.match(table, /<td>&lt;script&gt;x&lt;\/script&gt;<\/td><td>jarvis-ui<\/td><td>failed<\/td><td>1<\/td><td>30<\/td><td>&lt;img src=x&gt;<\/td>/);
+  assert.match(table, /<td>keepalive<\/td><td>jarvis-gateway<\/td><td>ok<\/td><td>0<\/td><td>120<\/td><td><\/td>/);
+  assert.ok(table.indexOf("&lt;script&gt;") < table.indexOf("<td>keepalive</td>")); // 새것이 위에
+  assert.doesNotMatch(rendered(), /<script>|<img/);
+  assert.match(rendered(), /최근 200줄만 보입니다/);
+  assert.match(rendered(), /data-hlog="first" aria-expanded="true"/);
+  ctx.fetch = async url => url.includes("/hswap-log") ? { ok: false, status: 409, json: async () => ({ error: "hswap 0.3.1 이상 필요" }) } : before(url);
+  click({ hlog: "first" }); // 접는다
+  assert.doesNotMatch(rendered(), /ul-hlog/);
+  click({ hlog: "first" });
+  for (let i = 0; i < 3; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.match(rendered(), /<p class="ul-err">hswap 0\.3\.1 이상 필요<\/p>/);
+  ctx.fetch = before;
+  delete devices[0].hswap;
+  click({ prov: "all" });
+}

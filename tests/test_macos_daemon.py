@@ -1103,7 +1103,7 @@ class Doctor(unittest.TestCase):
         self.assertEqual(macos_daemon.summary(FULL_DOCTOR), {"store": "file", "problems": ["reconcile_service_missing"], "keychain_item_present": False,
                                                               "keepalive_loaded": False, "keepalive_domain": "gui", "reconcile_installed": False,
                                                               "reconcile_loaded": False, "keychain_backups": None, "last_reconcile_hint": None,
-                                                              "keepalive_ahead": None})
+                                                              "keepalive_ahead": None, "last_events": []})
         later = {**FULL_DOCTOR, "keychainBackups": 3, "problems": ["keychain_item_present", "reconcile_ambiguous"]}  # hswap 0.3.0 의 뒤 수정
         self.assertEqual((macos_daemon.summary(later)["keychain_backups"], macos_daemon.summary(later)["problems"]), (3, ["keychain_item_present", "reconcile_ambiguous"]))
         for odd in (-1, True, "3", 1.5):
@@ -1113,6 +1113,25 @@ class Doctor(unittest.TestCase):
         self.assertEqual(macos_daemon.PROBLEMS["keepalive_ahead_too_short"], "keepalive 예약의 갱신 여유가 너무 짧습니다. 다시 설치하세요(hswap claude keepalive --install-service)")
         self.assertIn("--keep file|keychain", macos_daemon.PROBLEMS["reconcile_ambiguous"])
         self.assertNotIn("--keep keychain", macos_daemon.PROBLEMS["reconcile_ambiguous"])
+
+    def test_last_events_keep_five_known_fields_in_a_safe_shape(self):
+        """covers: USAGE-16. hswap 0.3.1 doctor 의 lastEvents: 최근 5개 {ts, cmd, caller, outcome, exit}"""
+        ok = {"ts": "2026-11-14T14:52:00Z", "cmd": "keepalive", "caller": "gui", "outcome": "none", "exit": 0}
+        odd = {"ts": 1763131920, "cmd": "keepalive /Users/alice/x", "caller": "<b>", "outcome": "x" * 50, "exit": True, "token": "sk-ant-x"}
+        got = macos_daemon.summary({**FULL_DOCTOR, "lastEvents": [ok] * 6 + [odd, "junk", None]})["last_events"]
+        self.assertEqual(len(got), 5)
+        self.assertEqual(got[0], ok)
+        self.assertEqual(got[-1], {"ts": 1763131920, "cmd": None, "caller": None, "outcome": None, "exit": None})
+        for odd_list in (None, "x", {"a": 1}):
+            self.assertEqual(macos_daemon.summary({**FULL_DOCTOR, "lastEvents": odd_list})["last_events"], [])
+
+    def test_hswap_is_told_the_caller(self):
+        seen = os.path.join(tempfile.mkdtemp(), "caller")
+        exe = os.path.join(os.path.dirname(seen), "hswap")
+        fake_tool(os.path.dirname(seen), "hswap", f'echo "$HSWAP_CALLER" > "{seen}"; echo "{{}}"')
+        self.assertEqual(macos_daemon._hswap(exe, "doctor"), {})
+        with open(seen) as f:
+            self.assertEqual(f.read().strip(), "jarvis-gateway")
 
     def test_the_keepalive_ahead_is_read_when_present(self):
         svc = lambda **kw: {**FULL_DOCTOR, "keepaliveService": {**FULL_DOCTOR["keepaliveService"], **kw}}
@@ -1132,7 +1151,7 @@ class Doctor(unittest.TestCase):
         self.assertEqual(macos_daemon.summary({"schemaVersion": 1}), {"store": None, "problems": [], "keychain_item_present": None,
                                                                        "keepalive_loaded": None, "keepalive_domain": None, "reconcile_installed": None,
                                                                        "reconcile_loaded": None, "keychain_backups": None, "last_reconcile_hint": None,
-                                                                       "keepalive_ahead": None})
+                                                                       "keepalive_ahead": None, "last_events": []})
         odd = {"schemaVersion": 1, "store": "File Store!", "problems": "not_file_store", "keychainItemPresent": "yes",
                "keepaliveService": [], "reconcileService": {"installed": "true"}}
         self.assertEqual(macos_daemon.summary(odd), macos_daemon.summary({"schemaVersion": 1}))

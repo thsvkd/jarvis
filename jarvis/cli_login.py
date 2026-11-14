@@ -45,6 +45,7 @@ def _grok():
 CLIS = {"codex": caam_usage._codex_cli, "grok": _grok, "claude": lambda: which_local("claude")}
 ARGS = {"claude": ["auth", "login", "--claudeai"]}  # 그 밖은 login --device-auth
 PASTE = {"claude"}  # 코드를 화면에서 CLI 로 붙여 넣는 프로바이더(출력에 코드가 없다)
+UI_CALLER = {"HSWAP_CALLER": "jarvis-ui"}  # 화면의 로그인·계정 추가 버튼이 부른 hswap(hswap 0.3.1 logs/events.jsonl 의 caller)
 HSWAP_ADD = "0.2.8"  # `hswap <하네스> add --login --json`(JSON Lines 이벤트)을 아는 hswap
 # hswap add --login 의 error.type → 화면 문구. message 원문은 내보내지 않는다
 ADD_ERRORS = {"login_failed": "로그인이 끝나지 않았습니다", "wrong_account": "다른 계정으로 로그인했습니다",
@@ -284,12 +285,12 @@ def _read(job):
     rc = job["proc"].wait()
     if job["paste"]:  # 로그인이 끝나야 저장한다. 저장까지 마친 뒤에 done 으로 본다
         hswap = claude_accounts.binary()
-        saved = run([hswap, "claude", "add"], 60)[0] if rc == 0 and hswap else rc
+        saved = run([hswap, "claude", "add"], 60, env=UI_CALLER)[0] if rc == 0 and hswap else rc
         job["unsaved"] = rc == 0 and saved != 0  # 로그인은 바뀌었고 슬롯 저장만 실패했다
         if saved == 0 and hswap and sys.platform == "darwin":
             # add 가 종료 0 이어도 키체인·파일은 다른 로그인을 가질 수 있다.
             # hswap 이 검증·동기화한다. 어느 저장소가 새 것인지 추측해 adopt 하지는 않는다.
-            checked, out, _ = run([hswap, "claude", "keepalive", "--json"], 60)
+            checked, out, _ = run([hswap, "claude", "keepalive", "--json"], 60, env=UI_CALLER)
             try:
                 report = json.loads(out)
             except (ValueError, RecursionError):
@@ -332,7 +333,7 @@ def start(provider, add=False):
                                     # 이벤트 모드의 stderr 는 hswap 의 진단 문구라 이벤트 줄과 섞지 않는다
                                     stderr=subprocess.DEVNULL if hswap else subprocess.STDOUT, text=True, errors="replace", cwd=os.path.expanduser("~"),
                                     # hswap 은 하네스 CLI 를 PATH 로 찾는다: 서비스의 짧은 PATH 에는 ~/.grok/bin 등이 없어 "not installed" 로 거절한다
-                                    env={**_ENV, "NO_COLOR": "1", "TERM": "dumb", **({"PATH": tool_path()} if hswap else {})}, creationflags=_NO_WINDOW,
+                                    env={**_ENV, "NO_COLOR": "1", "TERM": "dumb", **({"PATH": tool_path(), **UI_CALLER} if hswap else {})}, creationflags=_NO_WINDOW,
                                     preexec_fn=_unmask if hswap and hasattr(signal, "pthread_sigmask") else None)
             job = _jobs[provider] = {"proc": proc, "out": "", "url": None, "code": None, "started_at": time.time(),
                                      "paste": provider in PASTE, "rc": None, "unsaved": False, "unsynced": False,

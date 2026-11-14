@@ -203,6 +203,46 @@ Disable-ScheduledTask jarvis; Stop-ScheduledTask jarvis         # 잠시 끄기(
 Get-Content -Encoding UTF8 $env:LOCALAPPDATA\jarvis\jarvis.log -Tail 20
 ```
 
+## 디버깅 — hswap 로그
+
+Claude·Codex·Grok 계정 일(사용량 조회, 로그인 유지, 전환)은 게이트웨이가 hswap 을 불러서 한다. 문제를 따라갈 때 볼 곳은 세 군데다.
+
+**게이트웨이 로그의 `[jarvis] hswap:` 줄.** 위치는 macOS `~/Library/Logs/jarvis.log`, Linux `journalctl --user -u jarvis`, Windows `%LOCALAPPDATA%\jarvis\jarvis.log` 다.
+
+```text
+[jarvis] hswap: tick keepalive 실행
+[jarvis] hswap: tick 건너뜀(service_loaded)
+[jarvis] hswap: claude keepalive --ahead 종료 0 812ms
+[jarvis] hswap: claude list 종료 1 15032ms CredentialReadError
+[jarvis] hswap: doctor store=file problems=keepalive_service_missing session=out
+```
+
+- `tick …`: 5분 tick 이 keepalive 를 불렀는지, 건너뛰었다면 그 이유다. `in_session`(로그인 세션 안이라 hswap 예약이 돈다), `store_not_file`(키체인 저장 방식), `service_loaded`(적재된 keepalive 예약이 돈다), `doctor_unknown`(doctor 답을 아직 못 받음), `hswap_old`(hswap 0.3.0 미만), `not_ready`(hswap·Claude Code·저장한 계정이 없거나 설치 중이거나 `cswap_install` 이 꺼짐) 중 하나다. 같은 결정은 한 시간에 한 번만 적고, 결정이 바뀌면 바로 적는다. 세션 안의 macOS 에서는 tick 을 띄우지 않으므로 이 줄이 없다.
+- `<명령> 종료 <코드> <ms> [오류 type]`: hswap 을 부른 결과다. 명령은 하위 명령과 플래그 이름만 적고, 값·이메일·슬롯 번호·경로는 적지 않는다. 오류는 hswap 의 `error.type` 을 영문자·밑줄만 남겨 적는다. 같은 명령의 같은 결과는 한 시간에 한 번, 바뀌면 바로 적는다. 종료 코드가 `없음` 이면 실행하지 못했거나 시간을 넘겼다.
+- `doctor …`: macOS 에서 hswap doctor 의 저장 방식·문제 코드·세션 여부가 바뀔 때만 적는다.
+- 토큰, 경로, hswap 의 stdout·stderr 원문은 남기지 않는다.
+
+**hswap 기록(hswap 0.3.1 이상).** hswap 은 실행마다 `<backup root>/logs/events.jsonl` 에 한 줄을 남긴다(macOS·Windows `~/.claude-swap-backup`, Linux `~/.local/share/claude-swap`). jarvis 는 hswap 을 부를 때 `HSWAP_CALLER` 로 자기를 알린다: 게이트웨이 스스로는 `jarvis-gateway`, 사람이 화면에서 누른 버튼(계정 전환·삭제, 전환 순서, 로그인·계정 추가, 로그 조회)은 `jarvis-ui` 다. 설치기(`deploy/macos-daemon.sh`)가 부르는 doctor·reconcile 도 `jarvis-gateway` 다.
+
+**원격 조회.** SSH 없이 core 에서 본다.
+
+```sh
+curl -s "http://<core>:9300/api/devices/<기기 id>/hswap-log?since=1h"   # core: tailnet·이 기기에서만
+```
+
+```json
+{"since": "1h", "truncated": false, "events": [
+  {"ts": "2026-11-14T14:52:03Z", "v": "0.3.1", "cmd": "keepalive", "caller": "jarvis-gateway", "session": "none", "store": "file",
+   "activeSlot": 1, "outcome": "refreshed", "exit": 0, "ms": 812, "error": null, "details": {}}]}
+```
+
+- core 는 그 게이트웨이의 `GET /api/usage/hswap-log?since=`(설정 core 만)을 그대로 전달한다. SSH 기기는 bridge 로 간다. 게이트웨이는 `hswap claude log --since <기간> --json` 을 불러 최근 200줄까지(`truncated` 가 true 면 잘림) 준다.
+- `since` 는 `30m`·`1h`·`2d` 꼴이다. 다른 값은 400 이다. hswap 이 0.3.1 미만이면 409 `{"error": "hswap 0.3.1 이상 필요"}`, 그 경로가 없는 옛 게이트웨이는 501 이다.
+- 사건은 정해진 키(`ts`·`v`·`cmd`·`caller`·`session`·`store`·`activeSlot`·`outcome`·`exit`·`ms`·`error`·`details`)만 남긴다. 문자열은 `sk-ant-…` 모양과 경로를 한 번 더 가리고 200자에서 자르며, `error` 는 `type` 만 남긴다.
+- 사용량 화면의 기기 행에는 doctor 의 `lastEvents` 중 최근 3개가 "최근 hswap: 14:52 keepalive · gui · none" 처럼 작게 보인다. "최근 hswap 로그" 버튼은 위 API 로 1시간 분량을 표로 펼친다.
+
+**읽는 법.** Claude 사용량이 멈췄으면 먼저 그 기기의 `tick` 줄로 keepalive 를 누가 돌리는지 본다. `service_loaded` 이면 hswap 예약이 돌고 있으므로 hswap 기록에서 `caller` 가 그 예약인 줄을 본다. 기록이 없으면 예약이 실제로 돌지 않는 것이다. `tick keepalive 실행` 뒤의 `claude keepalive --ahead 종료 …` 줄이 실패면, 같은 시각의 hswap 기록에서 `error.type` 과 `details` 를 본다.
+
 ## 실행본 이전 (1.8.0)
 
 1.8.0 부터 실행본은 `~/.local/share/jarvis/app`(Windows `%LOCALAPPDATA%\jarvis\app`)에 둔다. 그 전 설치기가 `~/Workspace/jarvis` 에 푼 실행본(.git 없음)은

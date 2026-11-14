@@ -83,7 +83,7 @@ _state = _State()
 # 자동 설치·올리기: 검증한 버전으로 고정한다(서비스가 최신판을 저절로 받아 실행하지 않게). PyPI 배포본이 그 태그의 소스와 같은지
 # 대조한 뒤 여기 버전을 올려 릴리스하면, 게이트웨이(hswap_usage.maintain)가 이보다 낮은 hswap 을 이 버전으로 올린다
 # ponytail: 버전만 고정한다. 같은 버전에 나중에 더해진 배포 파일은 대조 없이 받을 수 있다. 막으려면 파일 해시로 고정한다
-VERSION = "0.3.0"  # 태그 v0.3.0 = 6951adb (PyPI wheel·sdist 를 태그 소스 빌드와 대조함, 2026-11-14)
+VERSION = "0.3.1"  # 릴리스 전 미대조(태그·PyPI 배포본을 태그 소스 빌드와 아직 대조하지 않았다)
 PACKAGE = f"harness-swap=={VERSION}"
 INSTALL_TIMEOUT_S = 600  # 처음이면 uv 가 Python 3.12+ 까지 받는다
 CLIS = ("claude", "codex", "grok", "opencode")  # hswap 이 다루는 하네스. 하나라도 있으면 hswap 을 설치한다
@@ -93,6 +93,10 @@ doctor = None  # macOS: hswap claude doctor 의 요약(macos_daemon.summary, hsw
 _aqua = None  # macOS: 로그인 세션(Aqua) 안에서 도는가. 한 번 답을 받으면 다시 묻지 않는다
 _aqua_failed = None  # 마지막으로 묻지 못한 때(monotonic). AQUA_RETRY_S 동안은 다시 묻지 않는다
 AQUA_RETRY_S = 60
+DOCTOR_FROM = "0.3.0"  # `hswap claude doctor --json` 을 아는 hswap. 그 전은 config 의 credentials.store 만 읽는다
+LOG_AGAIN_S = 3600  # 게이트웨이 로그의 같은 hswap 줄은 이 간격에 한 번만
+_logged = {}  # call_log: 명령 → ((종료 코드, type), 남긴 때)
+_clock = time.monotonic  # call_log 의 시계(subprocess 의 시간 측정과 따로 바꿀 수 있게)
 
 
 def binary():
@@ -115,16 +119,45 @@ def in_session():
     return _aqua
 
 
-def gateway_ticks():
-    """게이트웨이 tick(hswap_usage.tick)이 keepalive·auto 를 부르는가. 화면의 keepalive 표시도 같은 판정을 쓴다. macOS 밖은 늘 그렇다. macOS 는 로그인 세션 밖이고 파일 저장 방식이며
-    적재된 keepalive 예약(gui·system)이 없을 때만이다(세션 안에서는 hswap 예약이 돌고, 키체인 저장 방식은 세션 밖에서 읽지 못한다)."""
+def tick_reason():
+    """게이트웨이 tick(hswap_usage.tick)이 keepalive·auto 를 건너뛰는 이유 코드. 부르면 None. 화면의 keepalive 표시도 같은 판정을 쓴다.
+    macOS 밖은 늘 부른다. macOS 는 doctor 를 아는 hswap(DOCTOR_FROM)이 파일 저장 방식이라 답하고 적재된 keepalive 예약(gui·system)이 없으며
+    로그인 세션 밖일 때만이다(세션 안에서는 hswap 예약이 돌고, 키체인 저장 방식은 세션 밖에서 읽지 못한다). launchctl 을 묻는 세션 확인은 맨 뒤다."""
     if sys.platform != "darwin":
-        return True
-    d = doctor or {}
-    loaded = d.get("keepalive_loaded")
-    if loaded is None:  # doctor 를 모르는 옛 hswap: 예약 상태(schedule)의 답을 쓴다
+        return None
+    if not _version or _key(_version) < _key(DOCTOR_FROM):
+        return "hswap_old"
+    if not doctor or not doctor.get("store"):
+        return "doctor_unknown"
+    if doctor["store"] != "file":
+        return "store_not_file"
+    loaded = doctor.get("keepalive_loaded")
+    if loaded is None:  # doctor 가 예약 상태를 주지 않았다: 예약 상태(schedule)의 답을 쓴다
         loaded = (service or {}).get("loaded") is True
-    return d.get("store") == "file" and not loaded and not in_session()
+    if loaded:
+        return "service_loaded"
+    return "in_session" if in_session() else None
+
+
+def gateway_ticks():
+    return tick_reason() is None
+
+
+def call_log(args, code, ms, kind=None):
+    """hswap 호출 한 번을 게이트웨이 로그에 한 줄로 남긴다: 명령 이름(값·이메일·경로·슬롯 번호는 뺀다), 종료 코드, 걸린 시간, 오류 type(영문자·밑줄만).
+    같은 명령의 같은 결과(종료 코드·type)는 한 시간에 한 번만 남기고, 결과가 바뀌면 바로 남긴다. stdout·stderr 원문은 남기지 않는다."""
+    cmd = " ".join(a for a in args if re.fullmatch(r"(--)?[a-z][a-z-]*", a) and a != "--json")[:80]
+    kind = re.sub(r"[^A-Za-z_]", "", kind)[:40] if isinstance(kind, str) else ""
+    now, prev = _clock(), _logged.get(cmd)
+    if prev and prev[0] == (code, kind) and now - prev[1] < LOG_AGAIN_S:
+        return
+    _logged[cmd] = ((code, kind), now)
+    print(f"[jarvis] hswap: {cmd} 종료 {code if code is not None else '없음(실행 실패·시간 초과)'} {ms:.0f}ms" + (f" {kind}" if kind else ""), flush=True)
+
+
+def _env(caller):
+    """hswap 에게 누가 불렀는지 알린다(hswap 0.3.1 의 logs/events.jsonl caller): 게이트웨이 스스로는 jarvis-gateway, 사람의 버튼은 jarvis-ui."""
+    return {**os.environ, "HSWAP_CALLER": caller}
 
 
 def item_text():
@@ -149,11 +182,14 @@ def installed_version():
     exe = binary()
     if not exe:
         return None
+    start = time.monotonic()
     try:
         p = subprocess.run([exe, "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT_S,
-                           stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                           stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), env=_env("jarvis-gateway"))
     except (OSError, subprocess.TimeoutExpired):
+        call_log(["--version"], None, (time.monotonic() - start) * 1000)
         return None
+    call_log(["--version"], p.returncode, (time.monotonic() - start) * 1000)
     m = re.fullmatch(r"hswap (\d+\.\d+\.\d+)", p.stdout.strip())
     return m.group(1) if m else None
 
@@ -213,6 +249,8 @@ def status():
     behind = _version is None or _key(_version) < _key(VERSION)  # 맞은 뒤에는 지난 실패 문구를 보이지 않는다
     note = {"running": "설치하는 중", "failed": installer.error}.get(installer.state) if behind else None
     out = {"version": _version, "pinned": VERSION, "note": note}
+    if doctor and doctor.get("last_events"):  # hswap 0.3.1 doctor 의 최근 기록(macos_daemon.summary 가 거른 것) 중 3개
+        out["events"] = doctor["last_events"][-3:]
     if doctor:  # macOS: 저장 방식(file·auto)과 hswap doctor 의 문제. 모르는 문제 코드는 코드 그대로(소문자·밑줄만) 보인다
         # 세션 안의 키체인 저장 방식은 흔한 정상이라 not_file_store 는 세션 밖에서만 문제로 보인다.
         # keepalive_service_missing 은 hswap 이 jarvis tick 을 보지 못해 나온다: tick 이 대신 도는 기기에서는 문제가 아니다
@@ -320,20 +358,26 @@ class _HswapError(RuntimeError):
         self.kind = kind
 
 
-def _json(exe, *args, timeout=TIMEOUT_S):
+def _json(exe, *args, timeout=TIMEOUT_S, caller="jarvis-gateway"):
+    start = time.monotonic()
+    took = lambda: (time.monotonic() - start) * 1000
     try:
         p = subprocess.run([exe, "claude", *args, "--json"], capture_output=True, text=True, encoding="utf-8", timeout=timeout,
-                           stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                           stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), env=_env(caller))
     except subprocess.TimeoutExpired:  # 메시지에 실행 경로(홈 디렉터리)가 들어 있어 그대로 내보내지 않는다
+        call_log(["claude", *args], None, took())
         raise RuntimeError(f"hswap 이 {timeout:.0f}초 안에 답하지 않았습니다")
     except OSError as e:
+        call_log(["claude", *args], None, took())
         raise RuntimeError(f"hswap 을 실행하지 못했습니다({type(e).__name__})")
     try:
         body = json.loads(p.stdout)
     except ValueError:
+        call_log(["claude", *args], p.returncode, took())
         raise RuntimeError(f"hswap claude {args[0]} --json 응답을 읽지 못했습니다(종료 코드 {p.returncode})")
+    err = body.get("error") if isinstance(body, dict) else None
+    call_log(["claude", *args], p.returncode, took(), err.get("type") if isinstance(err, dict) else None)
     if not isinstance(body, dict) or body.get("error"):
-        err = body.get("error") if isinstance(body, dict) else None
         raise _HswapError(err.get("type") if isinstance(err, dict) else None)
     return body
 
@@ -358,7 +402,7 @@ def switch(slot):
     if not _lock.acquire(timeout=TIMEOUT_S + 5):  # list 와 겹치지 않게
         return 503, {"error": "hswap 이 응답하지 않습니다"}
     try:
-        body = _json(exe, "switch", slot, timeout=SWITCH_TIMEOUT_S)
+        body = _json(exe, "switch", slot, timeout=SWITCH_TIMEOUT_S, caller="jarvis-ui")
         return 200, {"switched": body.get("switched") is True}
     except Exception as e:
         return 409, {"error": scrub_home(str(e))[:200] or type(e).__name__}
@@ -379,9 +423,11 @@ def remove(slot):
         return 404, {"error": "이 기기에는 hswap 이 없습니다"}
     if not _lock.acquire(timeout=TIMEOUT_S + 5):  # list·switch 와 겹치지 않게
         return 503, {"error": "hswap 이 응답하지 않습니다"}
+    start = time.monotonic()
     try:
         p = subprocess.run([exe, "claude", "remove", slot], input="y\n", capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           timeout=SWITCH_TIMEOUT_S, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                           timeout=SWITCH_TIMEOUT_S, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), env=_env("jarvis-ui"))
+        call_log(["claude", "remove"], p.returncode, (time.monotonic() - start) * 1000)
     except subprocess.TimeoutExpired:
         return 409, {"error": f"hswap 이 {SWITCH_TIMEOUT_S}초 안에 답하지 않았습니다"}
     except OSError as e:

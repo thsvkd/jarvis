@@ -10,7 +10,7 @@
  // 셸이 기억한 core 값이 있으면 확인 전에도 섹션을 연다('불러오는 중…'). 게이트웨이면 load 가 404 로 다시 숨긴다
  if(document.querySelector('[data-sh-sec="usage"][data-core]'))sec.hidden=false;
  const MODE_KEY="jarvis.usage.mode";
- const S={devs:null,hn:{},hnWatch:new Set(),hnTimer:null,prov:"all",hot:false,busy:new Set(),dlg:null,login:null,guide:null,rot:null,
+ const S={devs:null,hn:{},hlog:{},hnWatch:new Set(),hnTimer:null,prov:"all",hot:false,busy:new Set(),dlg:null,login:null,guide:null,rot:null,
   mode:(()=>{try{return localStorage.getItem(MODE_KEY)==="full"?"full":"brief";}catch(e){return "brief";}})()};
  const WIN={session:"5시간",weekly:"주간",fable:"Fable 주간",monthly:"월간"};
  const PROVIDER={claude:"Claude",codex:"Codex",grok:"Grok",antigravity:"Antigravity",gemini:"Gemini",kimi:"Kimi",minimax:"MiniMax",zcode:"Z Code",cursor:"Cursor",opencodeGo:"OpenCode Go"};
@@ -138,7 +138,7 @@
  function devMeta(d){
   const busy=S.busy.has(d.id),unknown=(d.unavailable||[]).filter(id=>!fresh(d).includes(id));
   if(d.status===501)return ""; // 갱신 전 jarvis 는 다시 물어도 같다
-  return html`<p class="ul-meta">${d.fetched_at?html`<span>${P.fmt.ago(d.fetched_at)} 수집</span>`:""}${refBtn(d.id,(d.host||d.id)+" 새로고침",busy)}</p>${unknown.length?html`<span class="ul-muted">확인 불가: ${unknown.map(id=>PROVIDER[id]||id).join(" · ")}</span>`:""}${hswapMeta(d.hswap)}`;
+  return html`<p class="ul-meta">${d.fetched_at?html`<span>${P.fmt.ago(d.fetched_at)} 수집</span>`:""}${refBtn(d.id,(d.host||d.id)+" 새로고침",busy)}</p>${unknown.length?html`<span class="ul-muted">확인 불가: ${unknown.map(id=>PROVIDER[id]||id).join(" · ")}</span>`:""}${hswapMeta(d.hswap)}${hlogBtn(d)}${hlogView(d)}`;
  }
  // 게이트웨이가 확인한 hswap 버전. 고정 버전과 다르거나 설치 중·실패면 그 사실을 붙인다
  // 하네스 갱신: AI 셋업 화면과 같은 harness 모듈(/api/devices/modules)을 읽는다. health degraded 가 갱신 가능이다.
@@ -154,7 +154,30 @@
  // macOS 는 hswap doctor 가 답한 Claude 저장 방식(file·auto)과 문제를 붙인다(USAGE-15)
  const STORE={file:"파일",auto:"키체인(auto)",keychain:"키체인(필수)"};
  const MIGRATE="hswap claude migrate-store --to file --keep keychain"; // jarvis/macos_daemon.py MIGRATE 와 같다(tests/test_claude_accounts.py 가 본다). hswap 은 --keep 없이 거절한다
- const hswapMeta=h=>h?html`<span class="ul-muted">hswap ${h.version||"없음"}${h.version!==h.pinned?` (고정 ${h.pinned})`:""}${h.note?" · "+h.note:""}${h.store?" · 저장 방식 "+(STORE[h.store]||h.store):""}${h.keychain_backups?" · 키체인 백업 "+h.keychain_backups+"개":""}${h.keepalive?" · "+h.keepalive:""}</span>${(h.problems||[]).length?html`<span class="ul-muted">hswap doctor: ${h.problems.join(" · ")}</span>`:""}`:"";
+ const hswapMeta=h=>h?html`<span class="ul-muted">hswap ${h.version||"없음"}${h.version!==h.pinned?` (고정 ${h.pinned})`:""}${h.note?" · "+h.note:""}${h.store?" · 저장 방식 "+(STORE[h.store]||h.store):""}${h.keychain_backups?" · 키체인 백업 "+h.keychain_backups+"개":""}${h.keepalive?" · "+h.keepalive:""}</span>${(h.problems||[]).length?html`<span class="ul-muted">hswap doctor: ${h.problems.join(" · ")}</span>`:""}${(h.events||[]).length?html`<span class="ul-muted">최근 hswap: ${h.events.map(evText).join(" / ")}</span>`:""}`:"";
+ // hswap 0.3.1 의 기록(USAGE-16). 시각은 ISO 문자열이나 epoch 초로 온다. 값은 모두 html`` 이 이스케이프한다
+ const hm=ts=>{const t=typeof ts==="number"?ts*1000:Date.parse(ts);return isFinite(t)?new Date(t).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",hour12:false}):"";};
+ const evText=e=>(hm(e.ts)+" "+[e.cmd,e.caller,e.outcome].filter(x=>x!=null&&x!=="").join(" · ")).trim();
+ const hlogBtn=d=>d.hswap?html`<button type="button" class="seg-action" data-hlog="${d.id}" aria-expanded="${String(!!S.hlog[d.id])}">최근 hswap 로그</button>`:"";
+ const hlogView=d=>{
+  const L=S.hlog[d.id];if(!L)return "";
+  if(L.loading)return html`<p class="ul-muted">hswap 로그를 읽는 중입니다…</p>`;
+  if(L.error)return html`<p class="ul-err">${L.error}</p>`;
+  if(!L.events.length)return html`<p class="ul-muted">최근 1시간에 hswap 기록이 없습니다.</p>`;
+  const td=v=>html`<td>${v==null?"":v}</td>`;
+  return html`<table class="ul-hlog"><caption class="ul-muted">최근 1시간 hswap 기록(새것이 위)</caption><thead><tr><th scope="col">시각</th><th scope="col">명령</th><th scope="col">호출</th><th scope="col">결과</th><th scope="col">종료</th><th scope="col">ms</th><th scope="col">오류</th></tr></thead><tbody>${L.events.slice().reverse().map(e=>html`<tr>${td(hm(e.ts))}${td(e.cmd)}${td(e.caller)}${td(e.outcome)}${td(e.exit)}${td(e.ms)}${td(e.error&&e.error.type)}</tr>`)}</tbody></table>${L.truncated?html`<p class="ul-muted">최근 200줄만 보입니다.</p>`:""}`;
+ };
+ async function hlog(dev){ // 펼치면 그 기기의 1시간 분량을 읽고, 다시 누르면 접는다
+  if(S.hlog[dev]){delete S.hlog[dev];draw();return;}
+  const L=S.hlog[dev]={loading:true};draw();
+  let next;
+  try{
+   const r=await fetch("/api/devices/"+encodeURIComponent(dev)+"/hswap-log?since=1h",{cache:"no-store"}),o=await r.json();
+   next=r.ok?{events:Array.isArray(o.events)?o.events:[],truncated:!!o.truncated}:{error:o.error||("HTTP "+r.status)};
+  }catch(err){next={error:"hswap 로그를 읽지 못했습니다"};}
+  if(S.hlog[dev]!==L)return; // 그사이 접었다
+  S.hlog[dev]=next;draw();
+ }
 
  // ---------------------------------------------------------------- 화면
  function view(){
@@ -474,6 +497,7 @@
   if(t.dataset.use){use(t.dataset.use,t.dataset.slot,t.dataset.label);return;}
   if(t.dataset.hup){hup(t.dataset.hup,t.dataset.tool||"");return;}
   if(t.dataset.rot){rotOpen(t.dataset.rot);return;}
+  if(t.dataset.hlog){hlog(t.dataset.hlog);return;}
   if(t.dataset.mv){rotMove(+t.dataset.i,+t.dataset.mv);return;}
   if(t.dataset.remove){remove(t.dataset.remove,t.dataset.slot,t.dataset.label);return;}
   if(t.dataset.refresh){if(S.login)dlg.close();refreshOne(t.dataset.refresh);return;}

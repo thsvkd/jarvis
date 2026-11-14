@@ -37,7 +37,15 @@ MIN_AHEAD_S = 600
 TICK_S = 300  # 게이트웨이가 keepalive 를 직접 부르는 간격(macOS 의 로그인 세션에서는 hswap 의 LaunchAgent 가 같은 간격으로 부른다)
 ROTATION = "priority-consume-first"  # 계정 priority 높은 것부터, 전환 기준 아래인 계정만 쓴다. 높은 계정이 풀리면 돌아간다(USAGE-14)
 ROTATION_FROM = "0.2.9"  # 이 전략과 `hswap claude priority` 를 확인한 hswap
-DOCTOR_FROM = "0.3.0"  # `hswap claude doctor --json` 을 아는 hswap. 그 전은 config 의 credentials.store 만 읽는다
+UI = "jarvis-ui"  # 사람이 화면에서 누른 버튼이 부른 hswap 의 HSWAP_CALLER
+LOG_FROM = "0.3.1"  # `hswap claude log --since … --json`(logs/events.jsonl)을 아는 hswap
+LOG_MAX = 200  # 원격 로그 조회가 돌려주는 최대 줄 수(최근 것)
+SINCE = re.compile(r"[1-9][0-9]{0,3}[mhd]")  # 로그 조회 기간: 30m·1h·2d 꼴만 hswap 에 넘긴다
+EVENT_KEYS = ("ts", "v", "cmd", "caller", "session", "store", "activeSlot", "outcome", "exit", "ms", "error", "details")  # hswap 0.3.1 events.jsonl
+# 로그 응답에서 한 번 더 가리는 것: Claude 토큰 모양과 절대·홈 경로(Windows 포함)
+SECRET_RE = re.compile(r"sk-ant-[A-Za-z0-9_-]*")
+PATH_RE = re.compile(r"(?:[A-Za-z]:\\|~[/\\]|/)(?:[^\s/\\\"']+[/\\])+[^\s/\\\"']*")
+_said = {}  # _say: 종류 → (값, 남긴 때). 게이트웨이 로그의 같은 줄을 한 시간에 한 번만 남긴다
 _rot_lock = threading.Lock()  # 자동 전환 설정 읽기·쓰기를 한 번에 하나만
 REMOTE = "codex,grok,opencode"  # usage.remote 가 비어 있을 때 정하는 값. Antigravity 는 약관 위험이 커서 넣지 않는다(2026-11-08 사용자 결정)
 # UsageState → (화면 문구, 사람이 손봐야 하는가). detail 원문은 오류 경로가 섞일 수 있어 쓰지 않는다
@@ -117,22 +125,42 @@ def account(row):
             "_prior": state in ("stale", "error")}
 
 
-def _run(exe, *args):
-    """hswap 을 한 번 실행해 (종료 코드, stdout). 실행하지 못했거나 TIMEOUT_S 를 넘기면 (None, "")."""
+def _run(exe, *args, caller="jarvis-gateway"):
+    """hswap 을 한 번 실행해 (종료 코드, stdout). 실행하지 못했거나 TIMEOUT_S 를 넘기면 (None, "").
+    caller: hswap 에 알리는 호출 주체(HSWAP_CALLER). 사람의 버튼이 부른 것은 jarvis-ui. 결과는 claude_accounts.call_log 가 게이트웨이 로그에 남긴다."""
+    start = time.monotonic()
     try:
         # hswap 은 하네스 CLI(codex·grok·opencode)를 PATH 로 찾는다. 서비스의 PATH 에는 사용자 설치 위치가 없어 "not installed" 로 답한다
-        env = {**os.environ, "PATH": tool_path()}
+        env = {**claude_accounts._env(caller), "PATH": tool_path()}
         # 새 세션으로 띄워 시간 초과 때 hswap 이 띄운 하네스 CLI 까지 함께 끝낸다
         proc = subprocess.Popen([exe, *args], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
                                 text=True, encoding="utf-8", errors="replace", env=env, creationflags=_NO_WINDOW, start_new_session=os.name != "nt")
     except OSError:
+        claude_accounts.call_log(args, None, (time.monotonic() - start) * 1000)
         return None, ""
     try:
         out, _ = proc.communicate(timeout=TIMEOUT_S)
     except subprocess.TimeoutExpired:
         _kill(proc)
+        claude_accounts.call_log(args, None, (time.monotonic() - start) * 1000)
         return None, ""
+    err = (_json(out) or {}).get("error")
+    claude_accounts.call_log(args, proc.returncode, (time.monotonic() - start) * 1000, err.get("type") if isinstance(err, dict) else None)
     return proc.returncode, out
+
+
+def _say(kind, value, line, again_s=claude_accounts.LOG_AGAIN_S):
+    """게이트웨이 로그에 `[jarvis] hswap: <line>` 한 줄. 같은 종류의 같은 값은 again_s 에 한 번만(None 이면 값이 바뀔 때만) 남긴다."""
+    now, prev = time.monotonic(), _said.get(kind)
+    if prev and prev[0] == value and (again_s is None or now - prev[1] < again_s):
+        return
+    _said[kind] = (value, now)
+    print(f"[jarvis] hswap: {line}", flush=True)
+
+
+def _note_tick(reason):
+    """tick 의 결정(USAGE-16): None 이면 keepalive 를 불렀고, 아니면 건너뛴 이유 코드(claude_accounts.tick_reason, not_ready)."""
+    _say("tick", reason, "tick keepalive 실행" if reason is None else f"tick 건너뜀({reason})")
 
 
 def _json(out):
@@ -276,10 +304,14 @@ def inspect():
         claude_accounts.doctor = None
         return None
     v = claude_accounts._version
-    new = bool(v) and claude_accounts._key(v) >= claude_accounts._key(DOCTOR_FROM)
+    new = bool(v) and claude_accounts._key(v) >= claude_accounts._key(claude_accounts.DOCTOR_FROM)
     body = _json(_run(exe, "claude", "doctor", "--json")[1]) if new else None  # 문제가 있으면 0 이 아닌 코드로 끝나도 JSON 은 정상이다
-    claude_accounts.doctor = macos_daemon.summary(body, None if macos_daemon.answered(body) else _settings(exe))
-    return claude_accounts.doctor
+    d = claude_accounts.doctor = macos_daemon.summary(body, None if macos_daemon.answered(body) else _settings(exe))
+    if d:  # 바뀔 때만 남긴다(USAGE-16). problems 는 코드뿐이다
+        session = "in" if claude_accounts.in_session() else "out"
+        problems = ",".join(d.get("problems") or []) or "없음"
+        _say("doctor", (d.get("store"), problems, session), f"doctor store={d.get('store') or '모름'} problems={problems} session={session}", again_s=None)
+    return d
 
 
 def _ahead(st):
@@ -288,15 +320,15 @@ def _ahead(st):
     return v if v is not None and v > MIN_AHEAD_S else AHEAD_S
 
 
-def _settings(exe):
+def _settings(exe, caller="jarvis-gateway"):
     """hswap claude config --json 의 {키: 값}. 읽지 못하면 {}."""
-    body = _json(_run(exe, "claude", "config", "--json")[1]) or {}
+    body = _json(_run(exe, "claude", "config", "--json", caller=caller)[1]) or {}
     return {s["key"]: s.get("value") for s in body.get("settings") or [] if isinstance(s, dict) and isinstance(s.get("key"), str)}
 
 
-def _priorities(exe):
+def _priorities(exe, caller="jarvis-gateway"):
     """hswap claude priority(--json 이 없다)의 '  Account-<슬롯>  <이메일>  <tier>' 줄 → {슬롯: tier}. 읽지 못하면 None."""
-    code, out = _run(exe, "claude", "priority")
+    code, out = _run(exe, "claude", "priority", caller=caller)
     if code != 0:
         return None
     return {m[1]: int(m[2]) for m in re.finditer(r"^\s*Account-(\d+)\s+\S+\s+(\d+)\s*$", re.sub(r"\x1b\[[0-9;]*m", "", out), re.M)}
@@ -312,8 +344,8 @@ def rotation():
     if not exe or not v or claude_accounts._key(v) < claude_accounts._key(ROTATION_FROM):
         return 409, {"error": f"이 기기에 hswap {ROTATION_FROM} 이상이 필요합니다"}  # 404 는 core 가 'jarvis 갱신 필요'로 바꾼다
     with _rot_lock:
-        s, pri = _settings(exe), _priorities(exe)
-        st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json")[1]) if sys.platform == "darwin" else None
+        s, pri = _settings(exe, UI), _priorities(exe, UI)
+        st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json", caller=UI)[1]) if sys.platform == "darwin" else None
     if not s or pri is None or (sys.platform == "darwin" and st is None):  # 예약 상태를 모르면 켜짐을 추측하지 않는다
         return 502, {"error": "hswap 설정을 읽지 못했습니다"}
     ordered = s.get("autoswitch.strategy") == ROTATION
@@ -360,15 +392,71 @@ def set_rotation(on, order, threshold):
     steps.append((("claude", "config", "set", "autoswitch.strategy", ROTATION) if on == "1" else ("claude", "config", "unset", "autoswitch.strategy"), "전략 저장"))
     # 데몬 keepalive 는 gui 예약으로 바꿀 수 없다(hswap 이 ServiceConflict 로 거절한다). 적재되지 않아 tick 이 도는 동안은 전략만으로 켜고 끈다
     if sys.platform == "darwin" and (on == "1") != now["on"] and (claude_accounts.doctor or {}).get("keepalive_domain") != "system":
-        st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json")[1]) or {}
+        st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json", caller=UI)[1]) or {}
         ahead = _ahead(st)
         steps.append((("claude", "keepalive", "--install-service", "--ahead", str(int(ahead)), *(["--then-auto"] if on == "1" else []), "--json"), "예약 다시 설치"))
     with _rot_lock:
         for args, what in steps:
-            rc, _ = _run(exe, *args)
+            rc, _ = _run(exe, *args, caller=UI)
             if rc not in ((0, 3) if "--install-service" in args else (0,)):  # 예약 설치의 3 은 GUI 세션이 없어 다음 로그인 때 적재된다는 뜻이다
                 return 409, {"error": f"hswap 이 {what}에 실패했습니다(종료 코드 {rc})"}
     return rotation()
+
+
+def hswap_log(since):
+    """GET /api/usage/hswap-log?since=(USAGE-16): `hswap claude log --since <since> --json` 의 최근 LOG_MAX 줄. (http 상태, 응답).
+    {since, events: [EVENT_KEYS 만, 문자열은 토큰 모양·경로를 가리고 200자까지], truncated}. hswap 이 0.3.1 미만이면 409.
+    hswap 의 출력은 {events: [...]}·배열·JSON Lines 중 어느 것이든 받는다(계약에 모양이 정해지지 않았다)."""
+    if not isinstance(since, str) or not SINCE.fullmatch(since):
+        return 400, {"error": "since 는 30m·1h·2d 꼴이어야 합니다"}
+    exe, v = claude_accounts.binary(), claude_accounts._version
+    if not exe or not v or claude_accounts._key(v) < claude_accounts._key(LOG_FROM):
+        return 409, {"error": f"hswap {LOG_FROM} 이상 필요"}
+    code, out = _run(exe, "claude", "log", "--since", since, "--json", caller=UI)
+    events = _events(out, code)
+    if events is None:
+        return 502, {"error": f"hswap log 를 읽지 못했습니다(종료 코드 {code})"}
+    return 200, {"since": since, "events": [_event(e) for e in events[-LOG_MAX:]], "truncated": len(events) > LOG_MAX}
+
+
+def _events(out, code):
+    """hswap log 출력 → 사건(dict) 목록. 읽지 못하면 None."""
+    try:
+        body = json.loads(out)
+    except ValueError:
+        body = None
+        lines = [x for x in out.splitlines() if x.strip()]
+        try:
+            rows = [json.loads(x) for x in lines]
+        except ValueError:
+            return None
+        if lines or code == 0:
+            return [r for r in rows if isinstance(r, dict)]
+        return None
+    rows = body.get("events") if isinstance(body, dict) else body
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else None
+
+
+def _event(e):
+    """사건 한 줄을 허용한 키만 남기고 가린다. error 는 type 만(영문자·밑줄) 남긴다."""
+    err = e.get("error")
+    kind = err.get("type") if isinstance(err, dict) else err if isinstance(err, str) else None
+    out = {k: _clean(e.get(k)) for k in EVENT_KEYS if k in e and k != "error"}
+    out["error"] = {"type": re.sub(r"[^A-Za-z_]", "", kind)[:40]} if isinstance(kind, str) else None
+    return out
+
+
+def _clean(v, depth=0):
+    """로그 값 하나: 문자열은 홈·경로·토큰 모양을 가리고 200자까지, 객체·배열은 3단·20개까지, 그 밖의 형식은 버린다."""
+    if isinstance(v, str):
+        return PATH_RE.sub("[경로]", SECRET_RE.sub("[가림]", scrub_home(v)))[:200]
+    if v is None or isinstance(v, bool) or (isinstance(v, (int, float)) and math.isfinite(v)):
+        return v
+    if depth < 3 and isinstance(v, dict):
+        return {str(k)[:40]: _clean(x, depth + 1) for k, x in list(v.items())[:20]}
+    if depth < 3 and isinstance(v, list):
+        return [_clean(x, depth + 1) for x in v[:20]]
+    return None
 
 
 def tick():
@@ -381,8 +469,11 @@ def tick():
                 inspect()
             exe = claude_accounts.binary()
             # 저장한 계정이 없으면 유지할 로그인도 없다(로그인하지 않은 기기에 실패 기록을 만들지 않는다)
-            if (claude_accounts.gateway_ticks() and config.CSWAP_INSTALL and exe and which_tool("claude") and claude_accounts.installer.state != "running"
-                    and claude_accounts._store_read()):
+            ready = (config.CSWAP_INSTALL and exe and which_tool("claude") and claude_accounts.installer.state != "running"
+                     and claude_accounts._store_read())
+            reason = claude_accounts.tick_reason() or (None if ready else "not_ready")
+            _note_tick(reason)
+            if reason is None:
                 code, _ = _run(exe, "claude", "keepalive", "--ahead", str(AHEAD_S), "--json")
                 if code == 0 and _settings(exe).get("autoswitch.strategy") == ROTATION:
                     _run(exe, "claude", "auto", "--once", "--json")

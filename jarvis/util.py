@@ -93,12 +93,12 @@ def hide_child_consoles():
     subprocess.Popen.__init__ = no_window
 
 
-def run(args, timeout=6, sudo=False):
-    """(returncode, stdout, stderr). 실패해도 예외를 올리지 않는다."""
+def run(args, timeout=6, sudo=False, env=None):
+    """(returncode, stdout, stderr). 실패해도 예외를 올리지 않는다. env: _ENV 에 더할 환경 변수."""
     if sudo:
         args = ["sudo", "-n"] + list(args)
     try:
-        p = subprocess.run(args, capture_output=True, text=True, timeout=timeout, env=_ENV, errors="replace",
+        p = subprocess.run(args, capture_output=True, text=True, timeout=timeout, env={**_ENV, **(env or {})}, errors="replace",
                            creationflags=_NO_WINDOW)
         return p.returncode, p.stdout, p.stderr
     except (OSError, subprocess.TimeoutExpired) as e:

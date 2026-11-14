@@ -52,6 +52,8 @@ PROBLEMS = {"not_file_store": "저장 방식이 파일이 아닙니다", "keycha
 LOGINWINDOW = "/Library/Preferences/com.apple.loginwindow.plist"  # 자동 로그인 사용자(autoLoginUser). 누구나 읽는다
 MIGRATE = "hswap claude migrate-store --to file --keep keychain"  # hswap 은 --keep 없는 --to file 을 거절한다. 화면(usage.js)도 같은 문자열을 쓴다
 HSWAP_TIMEOUT_S = 60
+CALLER_ENV = lambda: {**os.environ, "HSWAP_CALLER": "jarvis-gateway"}  # hswap 0.3.1 logs/events.jsonl 의 caller. 설치기의 doctor·reconcile 도 jarvis 쪽이다
+EVENT_WORD = r"[A-Za-z][A-Za-z0-9_-]{0,39}"  # lastEvents 의 cmd·caller·outcome
 HINT_MAX = 600  # doctor 의 lastReconcileHint(사람용 영문)를 화면에 보일 최대 길이
 # hswap 0.3.0 의 migrate-store 는 옮겼지만 설치한 예약이 다음 로그인 때 적재되면 3 으로 끝난다
 MIGRATE_EXIT = "종료 코드 3 도 성공입니다(옮겼고, 예약은 다음 로그인 때 적재됩니다)"
@@ -138,7 +140,8 @@ def port(data, home):
 
 def summary(body, settings=None):
     """hswap claude doctor --json(schemaVersion 1) → {store, problems, keychain_item_present, keepalive_loaded, keepalive_domain, reconcile_installed,
-    reconcile_loaded, keychain_backups·last_reconcile_hint·keepalive_ahead(0.3.0 의 뒤 수정에서 생긴 필드. 없으면 None)}.
+    reconcile_loaded, keychain_backups·last_reconcile_hint·keepalive_ahead(0.3.0 의 뒤 수정에서 생긴 필드. 없으면 None),
+    last_events(0.3.1 의 lastEvents 최근 5개 {ts, cmd, caller, outcome, exit}. 모양이 다른 값은 None, 없으면 [])}.
     없는 필드·다른 모양은 모름(None·[])으로 둔다. doctor 를 모르는 옛 hswap 은 settings({키: 값}, hswap claude config --json)의
     credentials.store 만 쓴다(값이 없으면 hswap 기본값 auto). doctor 가 오류로 답했어도(error 봉투) 같다. 둘 다 없으면 None."""
     if not answered(body):
@@ -147,7 +150,7 @@ def summary(body, settings=None):
         store = settings.get("credentials.store")
         return {"store": store if store in ("auto", "file") else "auto", "problems": [], "keychain_item_present": None,
                 "keepalive_loaded": None, "keepalive_domain": None, "reconcile_installed": None, "reconcile_loaded": None, "keychain_backups": None,
-                "last_reconcile_hint": None, "keepalive_ahead": None}
+                "last_reconcile_hint": None, "keepalive_ahead": None, "last_events": []}
     flag = lambda d, k: d.get(k) if isinstance(d.get(k), bool) else None
     obj = lambda k: body.get(k) if isinstance(body.get(k), dict) else {}
     word = lambda v, pat: v if isinstance(v, str) and re.fullmatch(pat, v) else None
@@ -161,7 +164,18 @@ def summary(body, settings=None):
             # 사람용 문자열: 제어 문자를 빼고 한 줄로 잘라 둔다(화면은 이스케이프해 보인다)
             "last_reconcile_hint": " ".join(re.sub(r"[\x00-\x1f\x7f]", " ", h).split())[:HINT_MAX] or None
             if isinstance(h := body.get("lastReconcileHint"), str) else None,
-            "keepalive_ahead": a if isinstance(a := obj("keepaliveService").get("ahead"), (int, float)) and not isinstance(a, bool) and a > 0 else None}
+            "keepalive_ahead": a if isinstance(a := obj("keepaliveService").get("ahead"), (int, float)) and not isinstance(a, bool) and a > 0 else None,
+            "last_events": [_event(e) for e in (body.get("lastEvents") if isinstance(body.get("lastEvents"), list) else []) if isinstance(e, dict)][-5:]}
+
+
+def _event(e):
+    """doctor lastEvents 한 줄 → 화면에 보일 다섯 칸. 시각은 ISO 문자열이나 epoch 초, 나머지는 짧은 영문 낱말과 정수만 받는다."""
+    ts = e.get("ts")
+    ok_ts = (isinstance(ts, str) and re.fullmatch(r"[0-9TZ:.+-]{1,40}", ts)) or (isinstance(ts, (int, float)) and not isinstance(ts, bool) and 0 <= ts < 1e11)
+    word = lambda v: v if isinstance(v, str) and re.fullmatch(EVENT_WORD, v) else None
+    code = e.get("exit")
+    return {"ts": ts if ok_ts else None, "cmd": word(e.get("cmd")), "caller": word(e.get("caller")), "outcome": word(e.get("outcome")),
+            "exit": code if isinstance(code, int) and not isinstance(code, bool) else None}
 
 
 def answered(body):
@@ -174,7 +188,7 @@ def _hswap(exe, *args):
     새 세션으로 띄워 시간 초과 때 hswap 이 띄운 자식까지 함께 끝낸다(hswap_usage._run 과 같은 정리)."""
     try:
         proc = subprocess.Popen([exe, "claude", *args, "--json"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
-                                text=True, errors="replace", start_new_session=True)
+                                text=True, errors="replace", start_new_session=True, env=CALLER_ENV())
     except OSError:
         return None
     try:
@@ -271,7 +285,7 @@ def reconcile(home):
         return 0
     try:
         rc = subprocess.run([_tools(home)[1], "claude", "reconcile", "--install-service", "--json"], capture_output=True, timeout=60,
-                            stdin=subprocess.DEVNULL).returncode
+                            stdin=subprocess.DEVNULL, env=CALLER_ENV()).returncode
     except (OSError, subprocess.SubprocessError):
         rc = None
     if rc == 0:

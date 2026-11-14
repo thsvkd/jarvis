@@ -720,6 +720,153 @@ class MacSessionTest(FakeHswapCase):
             self.assertIsNone(hswap_usage.schedule())  # 데몬 예약 옆에 gui 예약을 만들지 않는다
 
 
+class DebugLogTest(FakeHswapCase):
+    """covers: USAGE-16. 게이트웨이 로그의 hswap 줄, HSWAP_CALLER, 원격 로그 조회."""
+
+    script = KeepTest.script
+
+    def setUp(self):
+        super().setUp()
+        for p in (mock.patch.object(hswap_usage.claude_accounts, "_logged", {}), mock.patch.object(hswap_usage, "_said", {}),
+                  mock.patch.object(hswap_usage.claude_accounts, "doctor", None), mock.patch.object(hswap_usage.claude_accounts, "_aqua", False),
+                  mock.patch.object(hswap_usage.claude_accounts, "_version", "0.3.1")):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def caller_fake(self, out="{}", code=0):
+        """HSWAP_CALLER 와 인자를 남기는 가짜 hswap."""
+        with open(self.exe, "w", encoding="utf-8") as f:
+            f.write(f"#!{sys.executable}\nimport os,sys\n"
+                    f"open({os.path.join(self.dir, 'argv')!r},'a').write(os.environ.get('HSWAP_CALLER','-')+' '+' '.join(sys.argv[1:])+'\\n')\n"
+                    f"print({out!r})\nsys.exit({code})\n")
+        os.chmod(self.exe, stat.S_IRWXU)
+
+    def logs(self, log):
+        return [c.args[0] for c in log.call_args_list if c.args and str(c.args[0]).startswith("[jarvis] hswap:")]
+
+    def test_the_gateway_and_the_ui_name_themselves(self):
+        self.caller_fake()
+        hswap_usage._run(self.exe, "claude", "doctor", "--json")
+        hswap_usage._run(self.exe, "claude", "priority", caller="jarvis-ui")
+        self.assertEqual(self.calls(), ["jarvis-gateway claude doctor --json", "jarvis-ui claude priority"])
+        seen = []
+        real = hswap_usage._run
+        with mock.patch.object(hswap_usage, "_run", side_effect=lambda exe, *a, caller="jarvis-gateway": seen.append(caller) or real(exe, *a, caller=caller)), \
+                mock.patch.object(hswap_usage.sys, "platform", "linux"):
+            hswap_usage.set_rotation("1", "1", "90")
+        self.assertTrue(seen and set(seen) == {"jarvis-ui"}, seen)  # 사람 버튼이 부른 설정 읽기·쓰기
+
+    def test_a_tick_decision_is_logged_once_an_hour_and_at_once_when_it_changes(self):
+        with mock.patch.object(hswap_usage, "print", create=True) as log, \
+                mock.patch.object(hswap_usage.time, "monotonic", side_effect=[0.0, 10.0, 20.0, 30.0, 3700.0]):
+            for reason in (None, None, "in_session", "in_session", "in_session"):
+                hswap_usage._note_tick(reason)
+        self.assertEqual(self.logs(log), ["[jarvis] hswap: tick keepalive 실행", "[jarvis] hswap: tick 건너뜀(in_session)",
+                                          "[jarvis] hswap: tick 건너뜀(in_session)"])
+
+    def test_tick_reasons(self):
+        ca = hswap_usage.claude_accounts
+        file_doc = {"store": "file", "problems": [], "keepalive_loaded": False}
+        cases = (("linux", {}, None), ("win32", {}, None),
+                 ("darwin", {"_aqua": True, "doctor": file_doc}, "in_session"),
+                 ("darwin", {"_version": "0.2.9", "doctor": file_doc}, "hswap_old"),
+                 ("darwin", {"doctor": None}, "doctor_unknown"),
+                 ("darwin", {"doctor": {**file_doc, "store": "auto"}}, "store_not_file"),
+                 ("darwin", {"doctor": {**file_doc, "keepalive_loaded": True}}, "service_loaded"),
+                 ("darwin", {"doctor": file_doc}, None))
+        for platform, state, want in cases:
+            with mock.patch.object(ca.sys, "platform", platform), mock.patch.multiple(ca, **state) if state else mock.patch.object(ca, "doctor", None):
+                self.assertEqual(ca.tick_reason(), want, (platform, state))
+                self.assertEqual(ca.gateway_ticks(), want is None, (platform, state))
+
+    def test_the_linux_tick_logs_that_it_ran_and_reads_no_doctor(self):
+        self.script({f"claude keepalive --ahead {hswap_usage.AHEAD_S} --json": ['{"schemaVersion": 1, "ok": true}', 0]})
+        class Stop(Exception):
+            pass
+        with mock.patch.object(hswap_usage.sys, "platform", "linux"), mock.patch.object(hswap_usage, "which_tool", side_effect=lambda n: "/x/" + n), \
+                mock.patch.object(hswap_usage.claude_accounts, "_store_read", return_value={"accounts": [{}]}), \
+                mock.patch.object(hswap_usage, "print", create=True) as log, mock.patch.object(hswap_usage.claude_accounts, "print", create=True) as call_log, \
+                mock.patch.object(hswap_usage.time, "sleep", side_effect=Stop):
+            with self.assertRaises(Stop):
+                hswap_usage.tick()
+        self.assertEqual(self.logs(log), ["[jarvis] hswap: tick keepalive 실행"])
+        self.assertTrue(any(line.startswith("[jarvis] hswap: claude keepalive --ahead 종료 0 ") for line in self.logs(call_log)), self.logs(call_log))
+        self.assertNotIn("claude doctor --json", self.calls())
+
+    def test_each_call_is_logged_with_its_type_only_and_repeats_once_an_hour(self):
+        leak = "sk-ant-oat01-SECRET /Users/alice/.claude/.credentials.json"
+        self.caller_fake(json.dumps({"schemaVersion": 1, "error": {"type": "CredentialReadError", "message": leak}}), 1)
+        with mock.patch.object(hswap_usage.claude_accounts, "print", create=True) as log, \
+                mock.patch.object(hswap_usage.claude_accounts, "_clock", side_effect=[0.0, 5.0, 4000.0]):
+            for _ in range(3):
+                hswap_usage._run(self.exe, "claude", "switch", "2", "--email", "a@example.com", "--json")
+        lines = self.logs(log)
+        self.assertEqual(len(lines), 2, lines)  # 같은 결과는 한 시간에 한 번
+        self.assertRegex(lines[0], r"^\[jarvis\] hswap: claude switch --email 종료 1 \d+ms CredentialReadError$")
+        for bad in ("SECRET", "alice", "example.com", " 2 "):
+            self.assertNotIn(bad, "".join(lines))
+
+    def test_doctor_changes_are_logged_once(self):
+        doc = lambda store: [json.dumps({"schemaVersion": 1, "store": store, "problems": ["keepalive_service_missing"],
+                                          "keepaliveService": {"loaded": False}, "reconcileService": {"installed": True}}), 2]
+        with mock.patch.object(hswap_usage.sys, "platform", "darwin"), mock.patch.object(hswap_usage, "which_tool", side_effect=lambda n: "/x/" + n), \
+                mock.patch.object(hswap_usage, "print", create=True) as log:
+            for store in ("file", "file", "auto"):
+                self.script({"claude doctor --json": doc(store)})
+                hswap_usage.inspect()
+        self.assertEqual([x for x in self.logs(log) if "doctor" in x], [
+            "[jarvis] hswap: doctor store=file problems=keepalive_service_missing session=out",
+            "[jarvis] hswap: doctor store=auto problems=keepalive_service_missing session=out"])
+
+    LOG = "claude log --since 1h --json"
+
+    def event(self, i, **kw):
+        return {"ts": f"2026-11-14T14:{i % 60:02d}:00Z", "v": "0.3.1", "cmd": "keepalive", "caller": "jarvis-gateway", "session": "none", "store": "file",
+                "activeSlot": 1, "outcome": "ok", "exit": 0, "ms": 120, "error": None, "details": {"n": i}, **kw}
+
+    def test_the_log_api_needs_hswap_0_3_1(self):
+        self.script({})
+        with mock.patch.object(hswap_usage.claude_accounts, "_version", "0.3.0"):
+            self.assertEqual(hswap_usage.hswap_log("1h"), (409, {"error": "hswap 0.3.1 이상 필요"}))
+        with mock.patch.object(hswap_usage.claude_accounts, "binary", return_value=None):
+            self.assertEqual(hswap_usage.hswap_log("1h")[0], 409)
+        for bad in ("", "1y", "abc", "99999h", "1h;rm"):
+            self.assertEqual(hswap_usage.hswap_log(bad)[0], 400, bad)
+        self.assertEqual(self.calls(), [])
+
+    def test_the_log_api_returns_at_most_200_newest_lines(self):
+        events = [self.event(i) for i in range(250)]
+        for out in (json.dumps({"schemaVersion": 1, "events": events}), json.dumps(events), "\n".join(json.dumps(e) for e in events)):
+            self.script({self.LOG: [out, 0]})
+            code, body = hswap_usage.hswap_log("1h")
+            self.assertEqual(code, 200)
+            self.assertEqual((len(body["events"]), body["truncated"], body["since"]), (200, True, "1h"))
+            self.assertEqual(body["events"][-1]["details"], {"n": 249})
+
+    def test_the_log_api_filters_secrets_and_paths_again(self):
+        leak = self.event(1, error={"type": "CredentialReadError", "message": "sk-ant-oat01-ABCdef_123 at /Users/alice/.claude/.credentials.json"},
+                          details={"note": "token sk-ant-ort01-ZZZ in C:\\Users\\bob\\x.json and ~/.claude/x", "deep": [{"p": "/home/carol/.local/share/claude-swap/x"}]},
+                          extra="dropped")
+        self.script({self.LOG: [json.dumps({"schemaVersion": 1, "events": [leak]}), 0]})
+        code, body = hswap_usage.hswap_log("1h")
+        text = json.dumps(body, ensure_ascii=False)
+        self.assertEqual(code, 200)
+        for bad in ("sk-ant", "ABCdef", "alice", "bob", "carol", "~/.claude", "dropped"):
+            self.assertNotIn(bad, text)
+        self.assertEqual(body["events"][0]["error"], {"type": "CredentialReadError"})
+
+    def test_the_log_is_read_as_the_ui(self):
+        self.caller_fake(json.dumps({"schemaVersion": 1, "events": []}))
+        self.assertEqual(hswap_usage.hswap_log("30m"), (200, {"since": "30m", "events": [], "truncated": False}))
+        self.assertEqual(self.calls(), ["jarvis-ui claude log --since 30m --json"])
+
+    def test_a_failed_log_read_is_502(self):
+        self.script({self.LOG: ["not json", 1]})
+        code, body = hswap_usage.hswap_log("1h")
+        self.assertEqual(code, 502)
+        self.assertIn("종료 코드 1", body["error"])
+
+
 if __name__ == "__main__":
     unittest.main()
 
