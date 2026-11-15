@@ -39,7 +39,10 @@ Bash 툴(POSIX 셸·Git Bash)과 PowerShell 툴 양쪽을 대상으로 한다. �
      되돌려 주는 rebase·branch -D·commit --amend·filter-branch·gc 와, gc 유예기간 안에서
      `git fsck --unreachable` 로 살릴 수 있는 stash drop/clear 는 다루지 않는다.
      오탐의 대가가 '쓸데없는 백업 ref 한 개'뿐이라 패턴을 느슨하게 잡아도 안전하다.
-  3) deny 는 없다. 위험이 자명한 셋만 ask 로 사람에게 묻고 나머지는 판정하지 않는다.
+  3) deny 는 하나뿐이다 — Claude Code 내장 rm 검사가 '권한 규칙으로도 넘길 수 없는 확인 창'을
+     띄울 꼴(아래 redirect_reason). 이 꼴은 bypass 모드에서도 사람을 붙잡으므로, 먼저 거부하고
+     사유로 고쳐 쓰는 법을 알려 모델이 스스로 다시 실행하게 한다(CC 2.1.325 의 조건을 좁게 옮겼다).
+     그 밖에는 위험이 자명한 셋만 ask 로 사람에게 묻고 나머지는 판정하지 않는다.
        - 루트/홈 전체 삭제 (rm 으로 / · /* · ~ · $HOME ; Remove-Item 류로 드라이브 루트·홈)
        - 디스크 파괴 (mkfs*·newfs*·wipefs -a, dd of=<디스크>, > <디스크>, /dev/ 대상 파티션 편집기
          (-l·-p 같은 목록 보기는 뺀다), diskutil erase*, format <드라이브>:, diskpart, Clear-Disk 류)
@@ -425,6 +428,53 @@ def ask_reason(tool_name, command, cwd):
     return None
 
 
+# --- deny: 내장 rm 검사의 '허용 불가 확인 창'을 모델 쪽 재시도로 돌린다 -----------------------
+#
+# Claude Code 의 rm 검사(2.1.325 바이너리에서 확인)는 아래 꼴을 "cannot be auto-allowed by permission
+# rules" 로 묻는다 — bypass 모드·allow 규칙·훅 allow 로도 못 넘긴다. 실사용 기록에서 세 꼴이 거의 전부였다.
+# 내장 조건보다 좁게 잡는다: 놓치면 지금처럼 확인 창이 뜰 뿐이고, 넓게 잡으면 멀쩡한 명령을 거부한다.
+SKIP_VARS = {"HOME", "USERPROFILE", "TMPDIR", "TMP", "TEMP"}  # 홈 변수는 루트/홈 ask 가 맡는다
+# 비면 `/`·`/*`·최상위 경로가 되는 대상: `$L` · `$L/*` · `$L/data` · `$S/$h`. `${L:?}` 가드는 걸리지 않는다.
+EMPTY_VAR_TARGET_RE = re.compile(r"^\$\{?([A-Za-z_]\w*)\}?(?:/[^/$]*|/\$.*)?/*$")
+# 명령 자리의 rm 이 `$(…)`·백틱 출력(뒤에 `/*`·`.` 만 붙은)을 지운다. 중첩 괄호는 다루지 않는다(놓칠 뿐).
+CMDSUB_RM_RE = re.compile(
+    r"""(?:^|[;&|\n(]|\bsudo)\s*rm\b[^;&|\n]*?\s["']?(?:\$\([^()]*\)|`[^`]*`)["']?[/*.]*["']?(?=\s|$|[;&|)])""")
+REDIRECT_FIX = (" Rewrite this rm so Claude Code can check it statically, then run it again: use a literal absolute "
+                "path (no cd before a relative glob, no $VAR or $(...) target), or `find DIR -mindepth 1 -delete`, "
+                "or `rm -rf DIR && mkdir DIR`.")
+
+
+def redirect_reason(command):
+    """(로그 판정 이름, 모델에게 보일 거부 사유) 또는 None."""
+    text = _clean(command, False)
+    if CMDSUB_RM_RE.search(text):
+        return "deny-rm-cmdsub", "Blocked before Claude Code's rm check prompts the user: the rm target is a command substitution." + REDIRECT_FIX
+    after_cd, words = False, []
+    for t in _tokens(command, False) + [";"]:
+        if not _is_op(t):
+            words.append(t)
+            continue
+        argv, words = _argv(words), []
+        if not argv:
+            continue
+        name = _base(argv[0])
+        if name in ("cd", "pushd"):
+            after_cd = True
+        if name not in ("rm", "rmdir"):
+            continue
+        for a in argv[1:]:
+            if a.startswith("-"):
+                continue
+            m = EMPTY_VAR_TARGET_RE.match(a)
+            if m and m.group(1) not in SKIP_VARS:
+                return ("deny-rm-empty-var", "Blocked before Claude Code's rm check prompts the user: '%s' becomes `/` "
+                        "or a top-level path if the variable is empty." % a + REDIRECT_FIX)
+            if after_cd and not a.startswith(("/", "~", "$")) and (a == "*" or a.endswith("/*")):
+                return ("deny-rm-glob-after-cd", "Blocked before Claude Code's rm check prompts the user: relative glob "
+                        "'%s' after cd cannot be resolved statically." % a + REDIRECT_FIX)
+    return None
+
+
 # --- git 스냅샷 백업 -------------------------------------------------------------
 
 
@@ -659,6 +709,11 @@ def main():
         sys.exit(0)
 
     cwd = data.get("cwd") or os.getcwd()
+
+    redirected = redirect_reason(command) if tool_name == "Bash" else None
+    if redirected:
+        log({"tool": tool_name, "command": command, "decision": redirected[0]})
+        emit("deny", redirected[1])
 
     notes = git_snapshot(command, cwd)
     context = "\n".join(notes) if notes else None

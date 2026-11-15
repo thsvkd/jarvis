@@ -32,11 +32,13 @@ SELF_TESTS = [
     ("rm -rf temp/", {"tool_name": "Bash", "tool_input": {"command": "rm -rf temp/"}}, False),
     ("rm -rf ~", {"tool_name": "Bash", "tool_input": {"command": "rm -rf ~"}}, True),
     ("ls -la", {"tool_name": "Bash", "tool_input": {"command": "ls -la"}}, False),
+    # 내장 rm 검사가 허용 불가로 묻는 꼴은 훅이 먼저 deny 한다(docs/guard-policy.md)
+    ("cd x && rm -f out/*", {"tool_name": "Bash", "tool_input": {"command": "cd x && rm -f out/*"}}, True),
 ] + ([
     ("PowerShell Remove-Item", {"tool_name": "PowerShell", "tool_input": {"command": "Remove-Item -Recurse -Force .\\build"}}, True),
     ("Remove-Item C:\\", {"tool_name": "PowerShell", "tool_input": {"command": "Remove-Item -Recurse -Force C:\\"}}, True),
 ] if WINDOWS else [
-    ("rm -rf \"$V/x\"", {"tool_name": "Bash", "tool_input": {"command": "rm -rf \"$V/x\""}}, False),
+    ("rm -rf \"$V/x/y\"", {"tool_name": "Bash", "tool_input": {"command": "rm -rf \"$V/x/y\""}}, False),
     ("find -exec rm", {"tool_name": "Bash", "tool_input": {"command": "find . -name x -exec rm -f {} +"}}, False),
 ])
 _merge = None

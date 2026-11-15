@@ -1,7 +1,8 @@
 """danger_guard.py 정책 테스트 (Bash + PowerShell 툴 공용).
 
 이 훅의 계약은 둘뿐이다.
-  1) deny 는 없다. 위험이 자명한 셋만 ask — 루트/홈 전체 삭제, 디스크 파괴, main/master force push·삭제
+  0) deny 는 Claude Code 내장 rm 검사가 허용 불가 확인 창을 띄울 꼴에만 — 거부 사유로 모델이 고쳐 쓴다
+  1) 위험이 자명한 셋만 ask — 루트/홈 전체 삭제, 디스크 파괴, main/master force push·삭제
      (push 는 tests/test_git_snapshot.py). 명령 자리의 실제 낱말만 보고 따옴표·heredoc 안은 데이터다.
   2) 그 외에는 명령을 '한 글자도 바꾸지 않고' 통과시킨다. Bash 셰임 PATH 는 SessionStart 가
      CLAUDE_ENV_FILE 로 설정하고, PowerShell 삭제에만 모듈 Import 선행 한 줄을 붙인다.
@@ -186,9 +187,9 @@ NOT_BLOCKED = [
     # 체이닝/멀티라인에 삭제가 섞였다고 ask 하던 것
     "make bridge\nrm -f /tmp/x.pid\necho done",
     "rm -f ./.shot.mjs && ls",
-    # 변수·글로브 확장을 훅이 깨뜨리던 것
-    'rm -rf "$FOO/bar"',
-    'rm -rf "$DIR"/*',
+    # 변수·글로브 확장을 훅이 깨뜨리던 것(`"$FOO/bar"`·`"$DIR"/*` 는 이제 deny 다 — RM_REDIRECT)
+    'rm -rf "$FOO/a/b"',
+    'rm -rf "$DIR"/sub/*',
     # 그 밖에 ask 였던 것들
     "chmod 777 /tmp/x",
     "shred -u secret.txt",
@@ -235,6 +236,71 @@ NOT_BLOCKED = [
     "cat <<'EOF-1' > t.sh\nrm -rf /\nEOF-1",
     "cat <<\\EOF\nrm -rf ~\nEOF",
 ]
+
+
+# --- deny: 내장 rm 검사의 허용 불가 확인 창을 모델 쪽 재시도로 ------------------------------
+# 이 꼴은 Claude Code 가 bypass 모드에서도 사람에게 묻는다(docs/guard-policy.md). 훅이 먼저 거부하고 고쳐 쓰는 법을 알린다.
+
+RM_REDIRECT = {
+    "cd /x && rm -f shots/*": "deny-rm-glob-after-cd",
+    "cd /x; rm -rf *": "deny-rm-glob-after-cd",
+    'cd /x && rm -f "shots"/*': "deny-rm-glob-after-cd",
+    "pushd /x && rm -f out/*": "deny-rm-glob-after-cd",
+    "rm -f $L/*": "deny-rm-empty-var",
+    "rm -rf $S/$h": "deny-rm-empty-var",
+    'rm -rf "$FOO/bar"': "deny-rm-empty-var",
+    'rm -rf "$DIR"/*': "deny-rm-empty-var",
+    "sudo rm -rf ${D}": "deny-rm-empty-var",
+    "rm -rf $(mktemp -d)": "deny-rm-cmdsub",
+    'rm -rf "$(git rev-parse --show-toplevel)"/*': "deny-rm-cmdsub",
+    "ls && rm `cat list`": "deny-rm-cmdsub",
+}
+
+
+@pytest.mark.parametrize("cmd", list(RM_REDIRECT))
+def test_unresolvable_rm_is_denied_with_fix_hint(cmd):
+    p = payload_of(bash(cmd))["hookSpecificOutput"]
+    assert p["permissionDecision"] == "deny"
+    assert "literal absolute path" in p["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize("cmd", list(RM_REDIRECT))
+def test_unresolvable_rm_redirect_names(cmd):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("danger_guard_mod", HOOK_PATH)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.redirect_reason(cmd)[0] == RM_REDIRECT[cmd]
+
+
+# 내장 조건보다 좁게 — 아래는 판정하지 않는다(놓치면 확인 창이 뜰 뿐, 넓으면 멀쩡한 명령을 거부한다)
+RM_NOT_REDIRECTED = [
+    "rm -f shots/*",
+    "rm -f /abs/shots/*",
+    "cd /x && rm -f /abs/*",
+    "cd /x && rm -rf build",
+    "cd /x && rm -f shots/a.png",
+    "cd /x && find shots -mindepth 1 -delete",
+    "rm -rf ${L:?}/*",
+    "rm -rf $TMPDIR/foo",
+    "rm -rf /tmp/$x",
+    "rm -rf $L/a/b",
+    "rm -rf $(pwd)/build",
+    'echo "cd x && rm $L/*"',
+    "cat <<EOF\ncd /x && rm -f shots/*\nEOF",
+    "git rm -f $L/*",
+    "grep 'rm $(x)' f",
+]
+
+
+@pytest.mark.parametrize("cmd", RM_NOT_REDIRECTED)
+def test_resolvable_rm_is_not_redirected(cmd):
+    assert decision_of(bash(cmd)) != "deny"
+
+
+@pytest.mark.parametrize("cmd", ["cd /x && Remove-Item out/*", "rm -f $L/*"])
+def test_powershell_is_not_redirected(cmd):
+    assert decision_of(ps(cmd)) != "deny"
 
 
 @pytest.mark.parametrize("cmd", NOT_BLOCKED)
@@ -306,7 +372,7 @@ def test_bash_rm_is_not_rewritten():
     """Bash 명령은 건드리지 않는다. 명령을 바꾸면 권한 규칙이 바뀐 명령에 대해 평가돼
     `Bash(rm *)` 같은 사용자 허용 규칙이 맞지 않게 되고(실측), 그렇다고 allow 를 붙이면
     권한 체계를 통째로 우회한다. 셰임 PATH 는 SessionStart 가 맡는다."""
-    assert payload_of(bash('rm -rf "$FOO/bar" && echo done')) is None
+    assert payload_of(bash('rm -rf "$FOO/bar/baz" && echo done')) is None
 
 
 def _session_start(env_file):
