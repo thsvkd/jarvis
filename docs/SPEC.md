@@ -318,3 +318,21 @@ POSIX SSH 기기의 `GET /api/devices/<id>/jarvis/update`(갱신 진행)는 ssh 
 - 연결 공유 마스터는 setsid 로 살아남지만, ProxyJump 의 점프 프로세스는 마스터를 만든 조회 호출의 프로세스 그룹에 남는다. 그 조회가 시간 초과로 끝나면 마스터 연결이 끊기고 다음 조회가 다시 만든다. 조작은 연결을 공유하지 않으므로 영향이 없다.
 - 판 차이: 게이트는 서비스의 판(스냅샷)을 보지만 원격 CLI 는 `current.json` 이 가리키는 판으로 돈다. 받아만 두고 재시작하지 않은 기기는 둘이 다를 수 있다.
 - `_confirm` 경합: 원격 update 가 원격 기동 후 60초 안의 `_confirm` 과 겹치면 `current.json` 을 서로 덮어쓸 수 있다. 다음 갱신에서 회복된다.
+
+## 세션 수집 (core 전용)
+
+> 2026-11-16 사용자 승인으로 더했다. 옛 `~/.local/share/session-vault/vault.py`(sync·verify·self-test)와 `nightly.sh`(restic backup·check)를 `jarvis/session_vault.py` 로 옮겼다. 수용 케이스는 `TEST_SPEC.md` 의 VAULT-1~10.
+
+- 켜는 조건: core(`devices` 가 있다)이고 설정 파일에 `[session_vault] enabled = true`. 기본은 꺼짐이고 Windows core 와 root 로 도는 게이트웨이에서는 켜지지 않는다. 설정 키는 `configuration.md` 의 "세션 수집".
+- 경로(바꾸지 않는다. AgentsView 색인이 가리킨다): 사본 `~/session-vault/mirror/<기기>`, 마지막 성공 `~/session-vault/state.json`(`{기기: 시작 epoch 초}`), 로그 `~/session-vault/logs/nightly-YYYYMMDD.log`.
+- 수집: core 가 SSH(BatchMode, 연결 공유·전달 없음)로 표준 라이브러리 python 페이로드를 표준 입력으로 보내 tar 를 받는다. 원격에는 설치하지 않고, 각 기기의 게이트웨이(`:9300`)로는 세션을 주고받지 않는다. 기기 4개씩 병렬, 기기 하나 2시간·20 GiB 상한, 사본 디스크 여유 5 GiB 미만이면 멈춘다. 게이트웨이의 '지금 수집'·예약은 수집을 자식 프로세스(`python -m jarvis session-vault sync`)로 띄운다(원격 데이터를 게이트웨이 프로세스 밖에서 푼다).
+- 사본 규칙: 정규 파일만, 사본 폴더 밖 경로(이미 있는 디렉터리 링크 경유 포함)는 거부, 임시 파일에 쓴 뒤 교체, 지우지 않는다. 자격 증명 파일은 원격에서부터 보내지 않는다.
+- 백업: 수집 뒤 `restic backup` 과 `restic check --read-data-subset=2%`. forget·prune 은 하지 않는다. 저장소는 설정 `restic_repository`, 비밀번호는 `~/.config/session-vault/restic-password` 파일에서만.
+- 동시 실행: `~/session-vault/.jarvis.lock`(flock)을 쥔 실행 하나만 쓴다. 옛 `session-vault/vault.py`·`nightly.sh` 프로세스가 돌면 시작하지 않는다(전환하는 날 두 작업이 같은 사본에 쓰지 않게).
+- 예약: 설정 `schedule = "HH:MM"` 이면 그 시각부터 6시간 안에 하루 한 번(`~/session-vault/.jarvis-scheduled` 에 날짜).
+
+| 경로 | 권한 | 응답 |
+| --- | --- | --- |
+| `GET /api/devices/session-vault` | tailnet(기존 `/api/devices*` 규칙) | `{available, error, run: {name, started, ended, rc}, devices: [{id, last_ok, stale, missing, last: {ok, files, bytes, seconds, failed(개수), error(마지막 줄 200자)}}], running, progress, schedule, stale_s}`. 꺼져 있으면 404. 사본 파일 목록·원문·실패 파일 경로는 내보내지 않는다. viewers 가 아니면 오류의 따옴표 안 값을 가린다 |
+| `POST /api/devices/session-vault/sync` | viewers 만, `X-Jarvis-Action: session-vault` | 202 `{started, trigger}`, 이미 도는 중이면 409. 꺼져 있으면 404 |
+| CLI `python -m jarvis session-vault sync\|verify [기기…]` | core 의 셸 | sync 는 수집·백업 후 rc 가 모두 0 이면 0. verify 는 원본 sha256 과 사본을 대조해 기기마다 JSON 한 줄 |

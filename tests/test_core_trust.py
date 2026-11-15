@@ -328,6 +328,7 @@ class EntryPoint(unittest.TestCase):
                 mock.patch("jarvis.module.cli", return_value=12), \
                 mock.patch.object(m, "agentsmd", return_value=13), \
                 mock.patch.object(core_trust, "cli", return_value=14), \
+                mock.patch("jarvis.session_vault.cli", return_value=15), \
                 contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
             return m.main(), err.getvalue()
 
@@ -338,7 +339,7 @@ class EntryPoint(unittest.TestCase):
             self.assertEqual(code, 1, typo)
             self.assertIn("사용법", err)
         for argv, code in ((["update"], 11), (["module", "hooks", "plan"], 12), (["agentsmd"], 13),
-                           (["core-trust", "plan"], 14), (["--version"], 0)):
+                           (["core-trust", "plan"], 14), (["session-vault", "sync"], 15), (["--version"], 0)):
             self.assertEqual(self.main(*argv)[0], code, argv)
         with self.assertRaisesRegex(RuntimeError, "게이트웨이 기동"):
             self.main()

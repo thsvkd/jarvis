@@ -1,6 +1,6 @@
 # TEST_SPEC
 
-> 상태: 확정(2026-10-30 사용자 확인 K1). 2026-11-07 사용자 결정으로 Orca 절(ORCA-1~15)과 DOCTOR-8·9 를 지우고 SETUP-2·14·SSH-4·5 와 USAGE 항목을 Orca 없이 고쳤다(SETUP-2 의 페어링 링크 요구는 일반 비밀 요구로 바꿨다). 모듈 계약 절(MODULE-1~3)은 2026-11-08 사용자 승인으로 더했다. 셋업·하네스 갱신·AGENTS.md 절과 BOOT-2·3 은 2026-11-01 사용자가 확정했다. 실행본 이전 절(RELOC)과 CORE-8 의 `relocate` 는 2026-11-05 손팡님 A안으로 더했다. macOS LaunchDaemon 절(DAEMON)은 2026-11-06 작업 승인으로 더했다. 목록의 추가·수정·삭제는 사용자만 닫는다.
+> 상태: 확정(2026-10-30 사용자 확인 K1). 2026-11-07 사용자 결정으로 Orca 절(ORCA-1~15)과 DOCTOR-8·9 를 지우고 SETUP-2·14·SSH-4·5 와 USAGE 항목을 Orca 없이 고쳤다(SETUP-2 의 페어링 링크 요구는 일반 비밀 요구로 바꿨다). 모듈 계약 절(MODULE-1~3)은 2026-11-08 사용자 승인으로 더했다. 셋업·하네스 갱신·AGENTS.md 절과 BOOT-2·3 은 2026-11-01 사용자가 확정했다. 실행본 이전 절(RELOC)과 CORE-8 의 `relocate` 는 2026-11-05 손팡님 A안으로 더했다. macOS LaunchDaemon 절(DAEMON)은 2026-11-06 작업 승인으로 더했다. 세션 수집 절(VAULT)과 CORE-8 의 `session-vault` 는 2026-11-16 사용자 승인으로 더했다. 목록의 추가·수정·삭제는 사용자만 닫는다.
 > 모든 케이스는 격리된 임시 HOME 과 대체한 명령으로 검증한다. 실제 사용자 홈, 실제 서비스, 실제 설치기는 쓰지 않는다.
 > 테스트는 docstring·주석에 `covers: USAGE-n` 을 적는다. ai-setup 에서 옮긴 테스트는 괄호 안에 원래 ID(AI-n)를 남긴다.
 
@@ -102,7 +102,7 @@
 | CORE-5 | WHEN `core-trust` 가 계획·결과·오류를 출력하면 THE SYSTEM SHALL `proxy_key` 는 설정 여부만 내고 그 값과 `core` 외 설정 값을 표준 출력·표준 오류·예외 메시지 어디에도 내지 않으며, 출력하는 `sha256`·plan_id 는 proxy_key 값이 달라도 같고, 백업 파일을 만들지 않는다 | `tests/test_core_trust.py` | GREEN (단위) |
 | CORE-6 | WHEN core·viewer 가 어떤 HTTP 요청을 보내도 THE SYSTEM SHALL 게이트웨이 설정 파일을 쓰지 않는다(`core-trust` 는 `module.MODULES` 와 서버 라우트에 없다) | `tests/test_core_trust.py` | GREEN (단위; `jarvis/*.py` 소스 정적 검사) |
 | CORE-7 | WHEN 실행 중인 게이트웨이의 설정 파일에서 `core` 목록이 바뀌면 THE SYSTEM SHALL 재시작 없이 다음 설정 확인(`config.reload_if_changed`) 뒤 `config.CORE` 를 새 목록으로 바꾸고, `CONFIG_RESTART_REQUIRED` 에 `CORE` 를 넣지 않는다 | `tests/test_discovery.py::ReloadConfig` | GREEN (단위) |
-| CORE-8 | WHEN `python -m jarvis` 의 첫 인자가 알려진 하위 명령(`update`·`module`·`agentsmd`·`core-trust`·`relocate`·`--version`)이 아니면(오타 포함) THE SYSTEM SHALL 게이트웨이를 기동하지 않고(수집기·복구 스레드·core·서버를 시작하지 않는다) 사용법을 표준 오류에 내고 종료 코드 1 로 끝나며, 인자 없음은 그대로 게이트웨이를 기동하고 알려진 하위 명령은 지금처럼 동작한다 | `tests/test_core_trust.py` | GREEN (단위) |
+| CORE-8 | WHEN `python -m jarvis` 의 첫 인자가 알려진 하위 명령(`update`·`module`·`agentsmd`·`core-trust`·`relocate`·`session-vault`·`--version`)이 아니면(오타 포함) THE SYSTEM SHALL 게이트웨이를 기동하지 않고(수집기·복구 스레드·core·서버를 시작하지 않는다) 사용법을 표준 오류에 내고 종료 코드 1 로 끝나며, 인자 없음은 그대로 게이트웨이를 기동하고 알려진 하위 명령은 지금처럼 동작한다 | `tests/test_core_trust.py` | GREEN (단위) |
 
 ## SSH 기기
 
@@ -231,6 +231,23 @@ ai-setup 의 update-ai(`res/update/update_ai.py`)를 옮긴 것이다. 아래 HA
 | ID | 케이스 | 테스트 | 상태 |
 | --- | --- | --- | --- |
 | AGENTSMD-1 | WHEN `python -m jarvis agentsmd [--harness L] [--force] [--dry-run]` 를 실행하면 THE SYSTEM SHALL 지금 폴더에 ai-setup 의 setup_agentsmd 워커와 같은 결과(고른 하네스의 AGENTS.md·CLAUDE.md, 있는 파일은 --force 없이 두기)를 만든다 | `tests/test_setup_module.py::AgentsMdCliTest`, bats `setup_agentsmd.sh …` 10건, Pester `project instructions harness selection` | GREEN (단위. kgolf(Windows) 임시 폴더 실측: dry-run 은 아무것도 쓰지 않음, claude,codex 는 AGENTS.md·CLAUDE.md(`@AGENTS.md`), 모르는 하네스는 종료 코드 1) |
+
+## 세션 수집
+
+> 2026-11-16 사용자 승인으로 더했다(옛 `~/.local/share/session-vault/vault.py`·`nightly.sh` 를 core 로 옮김). 원격은 이 python 으로 도는 '이 기기' 경로와 임시 HOME, restic 은 인자·환경을 기록하는 가짜 실행 파일로 검증한다. 실제 홈·ssh·restic·launchd 는 쓰지 않는다.
+
+| ID | 케이스 | 테스트 | 상태 |
+| --- | --- | --- | --- |
+| VAULT-1 | WHEN 기기를 수집하면 THE SYSTEM SHALL 원격은 `ssh BatchMode=yes … ControlMaster=no … -a -x ClearAllForwardings=yes -- <대상> <python 낱말…> -I -` 로, 이 기기(`ssh = ""`)는 게이트웨이의 python 으로 표준 입력의 페이로드를 돌리고, ssh 대상은 `[사용자@]호스트` 형식, python 명령은 셸 특수 문자 없는 낱말(첫 낱말이 `-` 로 시작하지 않음)만 받는다. 형식이 아니면 그 기기를 빼고 설정 오류로 보고한다 | `tests/test_session_vault.py` | GREEN (단위) |
+| VAULT-2 | WHEN 원격이 보낸 tar 를 풀면 THE SYSTEM SHALL 정규 파일만 `~/session-vault/mirror/<기기>` 안에 임시 파일로 쓴 뒤 교체하고, 절대 경로·`..` 로 그 폴더를 벗어나는 항목은 거부(그 기기 실패)하며, 링크는 만들지 않고 사본 폴더 안에 이미 있는 링크(기기 폴더 자체 포함)는 따라가지도, 그 밖에 폴더를 만들지도 않는다. PAX·GNU 긴 이름 헤더는 1 MiB 까지만 받는다. 기기 하나가 한 번에 보내는 tar 는 `MAX_DEVICE_BYTES`(20 GiB)까지, 사본 디스크 여유는 `MIN_FREE_BYTES`(5 GiB) 이상일 때만 쓴다. 기기 이름은 영숫자로 시작해야 한다(`.`·`..` 거부) | `tests/test_session_vault.py` | GREEN (단위) |
+| VAULT-3 | WHEN 페이로드가 세션 파일을 고르면 THE SYSTEM SHALL vault.py 와 같은 뿌리(`.claude/projects`·`.codex/sessions`·`.codex/archived_sessions`·Hermes·Orca)의 정규 파일만 보내고, Orca 쪽에서는 `SKIP_DIRS`·`skip_file`(자격 증명·키·소켓·잠금·secret·credential·token) 파일을 빼며, 증분 기준은 `max(st_mtime, st_ctime)` 이다 | `tests/test_session_vault.py` | GREEN (단위) |
+| VAULT-4 | WHEN 수집 대상을 정하면 THE SYSTEM SHALL 설정 `devices` 의 `ssh` 또는 `url` 호스트를 대상으로, `python3` 을 명령으로 쓰고, `[session_vault.devices.<기기>]` 의 `ssh`·`python` 이 덮어쓴다. 그 표에만 있는 기기는 `ssh` 가 있을 때만 더하고, 닿을 곳을 모르는 `devices` 항목은 뺀다 | `tests/test_session_vault.py` | GREEN (단위) |
+| VAULT-5 | WHEN 수집을 실행하면 THE SYSTEM SHALL 기기마다 `state.json` 의 마지막 성공 시작 시각에서 `MARGIN_S`(1일)를 뺀 값부터 받고, 성공한 기기만 `state.json` 을 원자적으로 갱신하며, 사본의 파일은 지우지 않고, 옛 nightly.sh 와 같은 형식(`== 시작`·`<기기> {json}`·`== 끝 … sync= backup= check=`)으로 `logs/nightly-YYYYMMDD.log` 에 덧붙인다 | `tests/test_session_vault.py` | GREEN (단위) |
+| VAULT-6 | WHEN core 화면이 `GET /api/devices/session-vault` 로 상태를 물으면 THE SYSTEM SHALL `state.json` 과 가장 최근 nightly 로그의 마지막 실행(`\n` 으로만 나눈 줄의 마지막 `== 시작` 뒤)만 읽어 기기마다 마지막 성공·3일 초과(`stale`)·기록 없음(`missing`)·최근 결과(파일 수·용량·실패 파일 수·오류 마지막 줄 200자)를 주고, 사본 폴더는 열거나 나열하지 않으며 실패 파일 경로는 내보내지 않는다. 기록하는 오류에서 OSError 는 경로를 빼고 이유만 남기고, viewers 가 아니면 응답의 오류에서 따옴표 안의 값(잘려서 닫히지 않은 것 포함)을 `'…'` 로 가린다 | `tests/test_session_vault.py` | GREEN (단위) |
+| VAULT-7 | WHEN 다른 수집(jarvis 의 다른 실행이 쥔 `~/session-vault/.jarvis.lock`, 또는 옛 `session-vault/vault.py`·`nightly.sh` 프로세스)이 도는 중이면 THE SYSTEM SHALL 사본에 쓰지 않고 Busy(HTTP 409)로 끝낸다. 게이트웨이의 '지금 수집'·예약은 수집을 자식 프로세스 `python -m jarvis session-vault sync` 로 띄우고, 그 자식이나 잠금이 살아 있는 동안 `running` 이 참이다 | `tests/test_session_vault.py` | GREEN (단위) |
+| VAULT-8 | WHEN 수집 뒤 백업하면 THE SYSTEM SHALL `restic backup --tag nightly --quiet <mirror>` 와 `restic check --read-data-subset=2% --quiet` 만 돌리고(forget·prune 없음), 비밀번호는 `RESTIC_PASSWORD_FILE=~/.config/session-vault/restic-password` 로만 넘기며(그 밖의 `RESTIC_*` 환경 변수는 지운다), 저장소 설정·실행 파일·비밀번호 파일이 없으면 backup·check 를 1 로 기록한다 | `tests/test_session_vault.py` | GREEN (단위) |
+| VAULT-9 | WHEN `[session_vault] schedule = "HH:MM"` 이 있고 그 시각부터 6시간 안이며 그날 예약 실행을 아직 시작하지 않았으면 THE SYSTEM SHALL 한 번 시작하고, 띄운 수집이 잠금을 잡은 뒤에 날짜를 `~/session-vault/.jarvis-scheduled` 에 적는다. 시작하지 못했거나(409) 수집이 Busy 로 끝났으면 다음 분에 다시 본다 | `tests/test_session_vault.py` | GREEN (단위) |
+| VAULT-10 | WHEN 설정에 `[session_vault] enabled = true` 가 없거나 core(`devices`)가 아니거나 root(euid 0)로 돌면 THE SYSTEM SHALL 상태·지금 수집 경로를 404 로, CLI `session-vault sync\|verify` 를 종료 코드 1 로 끝낸다. 켜져 있으면 `POST /api/devices/session-vault/sync` 는 `X-Jarvis-Action: session-vault` 와 viewers 일 때만 시작한다(아니면 403) | `tests/test_session_vault.py` | GREEN (단위) |
 
 ## 네트워크 맵
 

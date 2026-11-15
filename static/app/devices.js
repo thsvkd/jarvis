@@ -47,7 +47,51 @@
    if(x.reachable&&x.version)vers.set(x.id,x.version);
   }
   setTimeout(load,10000);
+  if(!svOn){svOn=true;svLoad();}
  }
+ // 세션 수집(jarvis/session_vault.py): 기기별 마지막 성공·최근 결과를 1분마다(수집 중이면 5초마다) 읽는다.
+ // 설정에서 꺼져 있으면 API 가 404 이고 패널을 숨긴다. '지금 수집'은 viewers 만 된다(서버가 막는다)
+ const sv=$("#svault");let svOn=false,svMsg="",svBad=false,svT;
+ function svCheck(d){
+  if(d.missing)return["crit","수집 기록 없음"];
+  if(d.stale)return["crit","3일 넘게 성공 없음"];
+  if(d.last&&!d.last.ok)return["warn","최근 실패"];
+  if(d.last&&d.last.failed)return["warn","일부 파일 실패"];
+  return["ok","정상"];
+ }
+ function svView(o){
+  const now=Date.now()/1000,run=o.run,rc=run&&run.rc;
+  const bad=o.devices.filter(d=>svCheck(d)[0]!=="ok").length,runBad=!run||!run.ended||!rc||Object.values(rc).some(v=>v!==0);
+  const runText=!run?"실행 기록 없음":`마지막 실행 ${run.started||"?"}${run.ended?" ~ "+run.ended.slice(11):" · 끝 기록 없음(실행 중이거나 중단됨)"}${rc?" · "+Object.entries(rc).map(([k,v])=>k+"="+v).join(" "):""}`;
+  const last=d=>!d.last?html`<span class="ul-muted">이번 실행 기록 없음</span>`:d.last.ok?`성공 · 파일 ${fmt.num(d.last.files)} · ${fmt.bytes(d.last.bytes)}${d.last.failed?" · 실패 파일 "+d.last.failed:""}`:"실패: "+(d.last.error||"이유 없음");
+  return html`<header class="tile-head"><h3 class="tile-title" id="h-svault">세션 수집</h3><span class="badge" data-tone="${bad||runBad?(bad?"crit":"warn"):"ok"}">${bad?"주의 "+bad:runBad?"실행 확인 필요":"정상"}</span></header>
+<p class="dev-stats">${runText} · ${o.schedule?"예약 매일 "+o.schedule:"예약 꺼짐"}</p>
+<p class="dev-acts"><button type="button" class="seg-action" data-sv-sync>${o.running?`수집 중 ${(o.progress||[0,0])[0]}/${(o.progress||[0,0])[1]||"?"}`:"지금 수집"}</button><span class="dev-note${svBad?" dev-err":""}" role="status">${svMsg}</span></p>
+${o.error?html`<p class="dev-stats dev-err">${o.error}</p>`:""}
+<div class="table-wrap"><table class="tbl"><thead><tr><th scope="col">기기</th><th scope="col">상태</th><th scope="col">마지막 성공</th><th scope="col">최근 실행</th></tr></thead><tbody>${o.devices.map(d=>{const[t,s]=svCheck(d);return html`<tr><td class="host">${d.id}</td><td><span class="badge" data-tone="${t}">${s}</span></td><td class="nw ${d.missing||d.stale?"c":""}" title="${d.last_ok?fmt.datetime(d.last_ok):""}">${d.missing?"없음":fmt.ago(d.last_ok,now)}</td><td class="${d.last&&!d.last.ok?"c":""}">${last(d)}</td></tr>`;})}</tbody></table></div>`;
+ }
+ async function svLoad(){
+  clearTimeout(svT);let wait=60000;
+  try{
+   const r=await fetch("/api/devices/session-vault",{cache:"no-store"});
+   if(r.status===404)sv.hidden=true;
+   else if(r.ok){
+    const o=await r.json();sv.hidden=!o.available;
+    if(o.available){P.render(sv,svView(o));sv.querySelector("[data-sv-sync]").disabled=!!o.running;}
+    if(o.running)wait=5000;
+   }
+  }catch(e){}
+  svT=setTimeout(svLoad,wait);
+ }
+ sv.addEventListener("click",async e=>{
+  const b=e.target.closest("[data-sv-sync]");if(!b)return;
+  b.disabled=true;
+  try{
+   const r=await fetch("/api/devices/session-vault/sync",{method:"POST",headers:{"X-Jarvis-Action":"session-vault"},cache:"no-store"}),o=await r.json().catch(()=>({}));
+   [svMsg,svBad]=r.ok?["수집을 시작했습니다",false]:[o.error||("HTTP "+r.status),true];
+  }catch(err){[svMsg,svBad]=[err.message||String(err),true];}
+  svLoad();
+ });
  // 카드의 빈 곳을 눌러도 상세 보기로 간다. 조작 요소·글자 선택은 제외한다
  list.addEventListener("click",e=>{
   const t=e.target.closest(".dev-tile");

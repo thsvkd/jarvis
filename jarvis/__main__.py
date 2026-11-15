@@ -1,6 +1,6 @@
 """python3 -m jarvis · python3 -m jarvis update [--check] · python3 -m jarvis module <이름> <동작> --json
 · python3 -m jarvis agentsmd · python3 -m jarvis core-trust <plan|apply> · python3 -m jarvis relocate [--dry-run] [--json]
-· python3 -m jarvis bridge · python3 -m jarvis --version"""
+· python3 -m jarvis session-vault <sync|verify> [기기...] · python3 -m jarvis bridge · python3 -m jarvis --version"""
 
 import os
 import signal
@@ -75,9 +75,12 @@ def main():
         return core_trust.cli(sys.argv[2:])
     if sys.argv[1:2] == ["relocate"]:
         return relocate.cli(sys.argv[2:])
+    if sys.argv[1:2] == ["session-vault"]:
+        from . import session_vault
+        return session_vault.cli(sys.argv[2:])
     if sys.argv[1:]:  # 오타를 게이트웨이 기동으로 받지 않는다(같은 포트에 게이트웨이를 하나 더 띄우지 않게)
         print("사용법: python -m jarvis [update [--check] | module <이름> <동작> --json | agentsmd [인자] "
-              "| core-trust <plan|apply> … | relocate [--dry-run] [--json] | --version]", file=sys.stderr)
+              "| core-trust <plan|apply> … | relocate [--dry-run] [--json] | session-vault <sync|verify> [기기…] | --version]", file=sys.stderr)
         return 1
     sigs = {signal.SIGTERM, signal.SIGINT}
     masked = os.environ.get("JARVIS_TRAY") == "1" and hasattr(signal, "pthread_sigmask")
@@ -96,6 +99,8 @@ def main():
     core = Core(devices) if devices else None
     if core:
         core.start()
+        from . import session_vault  # 기본 꺼짐: 예약 확인 루프는 돌지만 설정 [session_vault] 가 켜져야 실행한다
+        threading.Thread(target=session_vault.schedule_loop, name="jarvis-session-vault-schedule", daemon=True).start()
     httpd = serve(col, core)
     threading.Thread(target=_confirm, name="jarvis-confirm", daemon=True).start()
 

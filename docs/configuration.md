@@ -34,6 +34,27 @@ core 홈(`/`) 위쪽에 기기 목록이 생기고, `/?device=<id>`·`/map/?devi
 30초마다, 종료 시 저장한다. 최초 관측은 기준선으로 잡으며 수집 실패는 대량 삭제로 기록하지 않는다.
 명령줄·환경 변수·임의 Docker label은 저장하지 않는다. 기기 제거는 관측 목록에서 빠졌다는 의미다.
 
+## 세션 수집 (core 전용)
+
+core 가 기기별 세션 원본(`.claude/projects`·`.codex/sessions` 등)을 SSH 로 받아 `~/session-vault/mirror/<기기>` 에 모으고 restic 으로 백업한다(`jarvis/session_vault.py`, 계약은 `docs/SPEC.md` 의 "세션 수집").
+기본은 꺼짐이다. core 의 설정 파일에만 적는다(저장소는 공개이므로 기기 주소·계정은 코드에 두지 않는다). 재시작 없이 반영한다.
+
+```toml
+[session_vault]
+enabled = true
+schedule = "05:00"                 # 매일 이 시각(현지)에 수집·백업. 없으면 '지금 수집' 버튼과 CLI 로만
+restic_repository = "sftp:<호스트>:session-vault/restic"   # 비밀번호는 ~/.config/session-vault/restic-password 파일
+
+# devices 와 다른 기기만: ssh 대상(""= core 자신)·원격 python 명령. devices 에 없는 기기도 ssh 를 주면 모은다
+[session_vault.devices]
+core-host = { ssh = "" }
+win-pc = { python = "py -3" }
+pi = { ssh = "pi@pi-host" }
+```
+
+수동: `python -m jarvis session-vault sync [기기…]`(백업까지) · `python -m jarvis session-vault verify [기기…]`(원본 sha256 대조).
+원격 기기에는 아무것도 설치하지 않는다. core 에서 각 기기로 키 기반 SSH(BatchMode)가 되어야 한다.
+
 ## SSH 기기
 
 core 의 tailnet 으로는 닿지 않고 SSH 로만 닿는 기기(예: 다른 tailnet 의 회사 기기에 ProxyJump 로 닿는 경우)는 core 설정에 `ssh` 로 적는다. 계약은 `docs/SPEC.md` 의 "SSH 기기" 절이다.

@@ -20,7 +20,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from . import __version__, claude_accounts, cli_login, config, fleet, hswap_usage, independent_usage, ipc, modules_api, self_update
+from . import __version__, claude_accounts, cli_login, config, fleet, hswap_usage, independent_usage, ipc, modules_api, self_update, session_vault
 from .core import why
 from .util import client_kind
 
@@ -292,7 +292,7 @@ def make_handler(collector, core=None):
                 return self._text(421, "misdirected request", head)
             # 맞춤 헤더를 요구해 다른 사이트가 브라우저로 대신 보내지 못하게 한다(맞춤 헤더가 있으면 교차 출처 요청은
             # preflight 가 필요한데, 이 서버는 OPTIONS 에 답하지 않는다).
-            if post and self.headers.get("X-Jarvis-Action") not in ("jarvis-update", "usage-login", "usage-account", "module-apply"):
+            if post and self.headers.get("X-Jarvis-Action") not in ("jarvis-update", "usage-login", "usage-account", "module-apply", "session-vault"):
                 return self._json({"error": "X-Jarvis-Action 헤더가 필요합니다"}, head, 403)
             u = urlsplit(self.path)
             path = unquote(u.path)
@@ -367,6 +367,11 @@ def make_handler(collector, core=None):
                         if body.get("restart"):  # 응답을 보낸 뒤 끝낸다(shutdown 은 이 요청 스레드에서 부르면 안 된다)
                             threading.Thread(target=self_update.restart, args=(self.server,), daemon=True).start()
                         return self._json(body, head, code)
+                    if core and path == "/api/devices/session-vault/sync" and session_vault.enabled():
+                        if not self._trusted(config.VIEWERS, config.PROXIES):
+                            return self._json({"error": "지금 수집은 허용된 기기(viewers)에서만 할 수 있습니다"}, head, 403)
+                        code, body = session_vault.start()
+                        return self._json(body, head, code)
                     if core and path == "/api/devices/jarvis/update":
                         if not self._trusted(config.VIEWERS, config.PROXIES):
                             return self._json({"error": "업데이트는 허용된 기기(viewers)에서만 할 수 있습니다"}, head, 403)
@@ -435,6 +440,8 @@ def make_handler(collector, core=None):
                     if force is None:
                         return self._json({"error": "X-Jarvis-Action 헤더가 필요합니다"}, head, 403)
                     return self._json(core.usage_all(force), head)
+                if core and path == "/api/devices/session-vault" and session_vault.enabled():
+                    return self._json(session_vault.status(full=self._trusted(config.VIEWERS, config.PROXIES)), head)
                 if core and path.startswith("/api/devices/"):
                     return self._device(path, u, head)
                 if path == "/api/health":
