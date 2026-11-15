@@ -10,6 +10,9 @@ from .util import parse_iso
 
 EMAIL = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 SUPPORTED = ("codex", "grok", "cursor")
+# 사용량 계정 행의 failure 닫힌 코드(USAGE-17). 뜻은 static/shared/API.md 의 "사용량 계정 행의 failure" 표, 화면은 usage.js 의 CODES 가 같은 키를 쓴다
+FAILURES = ("auth", "expiring", "rate", "limit", "wait", "keychain", "perm", "net", "server", "unsupported", "unknown")
+LIMIT_NOTE = "사용 한도에 도달했습니다(리셋 시각에 풀립니다)."  # 한도 창 소진(limit)은 리셋 시각에 풀려 attention 이 아니다
 
 
 def _email(ident):
@@ -41,7 +44,8 @@ def _account(row, ident, provider):
                         "resets_at": _time(window.get("resets_at"))})
     health = ident.get("health") if isinstance(ident.get("health"), dict) else {}
     login = health.get("login_required") is True
-    restricted = bool(usage.get("limit_stage")) or usage.get("quota_status") in ("degraded", "unavailable")
+    limited = bool(usage.get("limit_stage"))
+    degraded = usage.get("quota_status") in ("degraded", "unavailable")
     label = _email(ident.get("identity"))
     observed = _email({"email": usage.get("account_id")})
     mismatch = label != "이름 없는 계정" and observed != "이름 없는 계정" and label.lower() != observed.lower()
@@ -49,13 +53,14 @@ def _account(row, ident, provider):
         label = "이름 없는 계정"
     if provider == "grok" and label == "이름 없는 계정":
         label = "기본 계정"
-    attention = login or restricted or mismatch
+    attention = login or degraded or mismatch
     note = ("사용량과 계정 정보가 일치하지 않습니다." if mismatch else "다시 로그인이 필요할 수 있습니다." if login
-            else "프로바이더가 한도 상태를 완전히 확인하지 못했습니다.")
+            else "프로바이더가 한도 상태를 완전히 확인하지 못했습니다." if degraded else LIMIT_NOTE if limited else None)
+    failure = ("auth" if login else "unknown" if mismatch else "limit" if limited else "unknown" if degraded or not windows else None)
     return {"label": label, "org": None, "active": ident.get("active") is True,
             "status": "ok" if windows else "error", "error": None if windows else "사용량을 확인할 수 없습니다.",
-            "note": note if attention and windows else None, "attention": attention,
-            "failure": None, "plan": None, "updated_at": _time(usage.get("fetched_at")),
+            "note": note if windows else None, "attention": attention,
+            "failure": failure, "plan": None, "updated_at": _time(usage.get("fetched_at")),
             "windows": windows, "buckets": [], "extra": None, "credits": None, "source": "caam"}
 
 

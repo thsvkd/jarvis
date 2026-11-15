@@ -1,0 +1,47 @@
+{
+  "_fixture": {
+    "hswap": "0.3.1",
+    "collected_at": 1794761439,
+    "argv": "hswap list codex --json --cached",
+    "device": "pit5"
+  },
+  "schemaVersion": 1,
+  "harnesses": [
+    {
+      "harness": "codex",
+      "accounts": [
+        {
+          "provider": "openai",
+          "active": true,
+          "authMode": "chatgpt",
+          "label": "user1@example.com",
+          "usage": {
+            "state": "stale",
+            "measuredAt": "2026-11-12T15:20:42Z",
+            "plan": "plus",
+            "balance": {
+              "hasCredits": false,
+              "unlimited": false,
+              "balance": "0"
+            },
+            "detail": "",
+            "windows": [
+              {
+                "name": "5h",
+                "usedPercent": 3.0,
+                "windowSeconds": 18000,
+                "resetsAt": "2026-11-12T17:27:27Z"
+              },
+              {
+                "name": "7d",
+                "usedPercent": 20.0,
+                "windowSeconds": 604800,
+                "resetsAt": "2026-11-18T10:13:38Z"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

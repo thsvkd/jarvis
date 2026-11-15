@@ -77,7 +77,7 @@ assert.match(rendered(), /주의 필요 계정<\/span><b>1<\/b>/);
 
 // 요약 카드의 인증 실패 계정에는 메시지와 함께 다시 로그인 버튼이 나온다(상세 acct 와 같다)
 devices[1].providers[1].accounts[0] = { ...devices[1].providers[1].accounts[0], status: "error",
-  failure: "delegated-refresh-required", error: "401 unauthorized", windows: [], buckets: [] };
+  failure: "delegated-refresh-required", error: "401 unauthorized", windows: [], buckets: [], active: true }; // failure 가 코드 표에 없는 옛 행은 정규식으로 auth
 click({ prov: "all" });
 assert.match(summary(), /로그인이 만료되었거나 풀렸습니다/);
 assert.doesNotMatch(summary(), /data-login/); // 이 기기는 로그인할 CLI 목록을 아직 안 줬다
@@ -85,26 +85,56 @@ devices[1].logins = ["codex", "grok"];
 click({ prov: "all" });
 assert.match(summary(), /data-login="second" data-lp="codex"/);
 assert.match(summary(), /Codex 다시 로그인/);
-// covers: USAGE-3, USAGE-8. hswap 의 값 없는 행은 상태 문구(고정 한국어)를 접지 않고 보이고, 요약 카드의 다시 로그인 버튼은 .ul-acts 묶음 안에 있다
+// covers: USAGE-17. 쉬는 같은 행은 버튼 없이 안내만 낸다
+devices[1].providers[1].accounts[0].active = false;
+click({ prov: "all" });
+assert.doesNotMatch(summary(), /data-login/);
+assert.match(summary(), /<p class="ul-muted">사용 중이 아닌 계정이라 다시 로그인 버튼을 내지 않습니다/);
+// covers: USAGE-3, USAGE-8, USAGE-17. hswap 의 값 없는 행은 상태 문구(고정 한국어)를 접지 않고 보이고, 배지·버튼은 failure 코드 표로 정한다. 요약 카드의 다시 로그인 버튼은 .ul-acts 묶음 안에 있다
 {
   const codex = devices[1].providers[1].accounts, prev = codex[0];
   const relogBtn = /<div class="ul-acts"><button type="button" class="seg-action" data-login="second" data-lp="codex">Codex 다시 로그인<\/button><\/div>/;
+  const row = extra => { codex[0] = { ...prev, source: "hswap", active: true, ...extra }; click({ prov: "all" }); };
   devices[1].logins = ["codex"];
-  codex[0] = { ...prev, source: "hswap", failure: "authentication_required", error: "다시 로그인해야 합니다.", attention: true };
+  // 새 코드와 옛 게이트웨이의 상태 이름은 같은 배지·버튼을 낸다
+  for (const failure of ["auth", "authentication_required"]) {
+    row({ failure, error: "다시 로그인해야 합니다.", attention: true });
+    assert.match(summary(), /<span class="badge" data-tone="crit">로그인 만료<\/span>/, failure);
+    assert.match(summary(), /<p class="ul-err">다시 로그인해야 합니다\.<\/p>/, failure);
+    assert.doesNotMatch(summary(), /원문 보기/, failure);
+    assert.match(summary(), relogBtn, failure);
+  }
+  for (const failure of ["wait", "stale"]) {
+    row({ failure, error: "아직 잰 값이 없습니다(hswap 이 지금은 재지 않았습니다).", attention: true });
+    assert.match(summary(), /<span class="badge" data-tone="crit">갱신 대기<\/span>/, failure);
+    assert.match(summary(), /<p class="ul-err">아직 잰 값이 없습니다\(hswap 이 지금은 재지 않았습니다\)\.<\/p><p class="ul-why">hswap 이 토큰 갱신이나/, failure);
+    assert.match(summary(), relogBtn, failure); // 사용 중 hswap 행의 wait + attention
+  }
+  // wait 이어도 attention 이 아니거나 hswap 행이 아니거나 쉬는 계정이면 버튼이 없다
+  for (const extra of [{ attention: false }, { source: "cswap-cache" }, { active: false }]) {
+    row({ failure: "wait", error: "이전 값입니다.", attention: true, ...extra });
+    assert.doesNotMatch(summary(), /data-login/, JSON.stringify(extra));
+  }
+  // 값이 있는 한도 도달 행: 배지도 버튼도 없다. 한도 사실은 note 가 보인다
+  row({ status: "ok", failure: "limit", attention: false, error: null, note: "사용 한도에 도달했습니다(리셋 시각에 풀립니다).", windows: [{ key: "session", used: 100, resets_at: null }] });
+  assert.doesNotMatch(summary(), /class="badge" data-tone="crit"|data-login/);
+  assert.match(summary(), /<p class="ul-note">사용 한도에 도달했습니다/);
+  // 쉬는 Claude 의 rate + attention: 배지는 있고 다시 로그인은 없다. auth 가 아니라 안내도 없다
+  codex[0] = { ...prev, active: false, status: "ok", failure: "rate", attention: true, note: "사용량을 읽지 못했습니다(http-429).", windows: [{ key: "session", used: 3, resets_at: null }] };
   click({ prov: "all" });
-  assert.match(summary(), /<span class="badge" data-tone="crit">로그인 만료<\/span>/);
-  assert.match(summary(), /<p class="ul-err">다시 로그인해야 합니다\.<\/p>/);
-  assert.doesNotMatch(summary(), /원문 보기/);
+  assert.match(summary(), /<span class="badge" data-tone="crit">요청 제한<\/span>/);
+  assert.doesNotMatch(summary(), /data-login|사용 중이 아닌 계정/);
+  // 사용 중 expiring(값 있음): 버튼이 있다. 쉬는 계정은 버튼 없이 안내만
+  row({ status: "ok", failure: "expiring", attention: true, error: null, note: "로그인 기한이 3일 안에 끝납니다.", windows: [{ key: "session", used: 3, resets_at: null }] });
+  assert.match(summary(), /<span class="badge" data-tone="crit">로그인 만료 임박<\/span>/);
   assert.match(summary(), relogBtn);
-  codex[0] = { ...prev, source: "hswap", failure: "stale", error: "아직 잰 값이 없습니다(hswap 이 지금은 재지 않았습니다).", attention: true };
-  click({ prov: "all" });
-  assert.match(summary(), /<span class="badge" data-tone="crit">측정 전<\/span>/);
-  assert.match(summary(), /<p class="ul-err">아직 잰 값이 없습니다\(hswap 이 지금은 재지 않았습니다\)\.<\/p><p class="ul-why">다시 로그인하거나/);
-  assert.match(summary(), relogBtn);
-  // 다른 수집기 원문의 stale 은 '측정 전' 이 아니고 원문은 계속 접힌다
+  row({ status: "ok", failure: "expiring", attention: true, error: null, active: false, windows: [{ key: "session", used: 3, resets_at: null }] });
+  assert.doesNotMatch(summary(), /data-login/);
+  assert.match(summary(), /<p class="ul-muted">사용 중이 아닌 계정이라/);
+  // 다른 수집기 원문의 stale 은 '갱신 대기' 가 아니고 원문은 계속 접힌다
   codex[0] = { ...prev, source: "caam", failure: null, error: "stale file handle", attention: false };
   click({ prov: "all" });
-  assert.doesNotMatch(summary(), /측정 전/);
+  assert.doesNotMatch(summary(), /갱신 대기/);
   assert.match(summary(), /<summary>원문 보기<\/summary><pre>stale file handle<\/pre>/);
   codex[0] = prev;
   devices[1].logins = ["codex", "grok"];
@@ -377,6 +407,40 @@ assert.match(rendered(), /<td data-label="Claude" class="ul-nil">–<\/td>/);
   click({ prov: "all" });
   devices[2].providers.pop();
   click({ prov: "all" });
+}
+
+// covers: USAGE-17. 쉬는 계정의 auth 안내는 버튼 줄(.ul-acts) 밖에 있고, 그 줄에는 다시 로그인 버튼이 없다(계정 삭제는 남는다)
+{
+  const row = devices[1].providers[0].accounts[0], prev = { ...row };
+  Object.assign(row, { active: false, status: "error", failure: "auth", error: "사용량을 6시간 넘게 읽지 못했습니다(http-429).", attention: true, slot: "3", windows: [], buckets: [] });
+  devices[1].logins = ["claude"];
+  click({ mode: "full" });
+  const cell = rendered().match(/<tr aria-busy="false"><th scope="row"><b>second<\/b>[\s\S]*?<\/tr>/)?.[0] || "";
+  assert.match(cell, /<p class="ul-muted">사용 중이 아닌 계정이라[^<]*<\/p><div class="ul-acts">/);
+  assert.match(cell, /data-remove="second" data-slot="3"/);
+  assert.doesNotMatch(cell.match(/<div class="ul-acts">[\s\S]*?<\/div>/g)?.join("") || "", /다시 로그인/);
+  for (const k of Object.keys(row)) delete row[k];
+  Object.assign(row, prev);
+  delete devices[1].logins;
+  click({ mode: "brief" });
+}
+// covers: USAGE-19. Codex login(state stalled)은 Claude 와 같은 칸 줄로 보이고 'Codex 다시 로그인' 만 낸다. 안내 버튼·예약 안내는 없고, 주의는 기기마다 하나로 센다
+{
+  const codexP = devices[1].providers[1], base = hotNow();
+  codexP.login = { state: "stalled", text: "Codex 로그인 갱신 멈춤", note: "접근 토큰이 3시간 전에 만료됐습니다.", attention: true, slot: null, other: false, store: null };
+  devices[1].logins = ["codex"];
+  for (const mode of ["brief", "full"]) {
+    click({ mode });
+    const row = rendered().match(/<tr aria-busy="false"><th scope="row"><b>second<\/b>[\s\S]*?<\/tr>/)?.[0] || "";
+    const cell = row.match(/<td data-label="Codex"[\s\S]*?<\/td>/)?.[0] || "";
+    assert.ok(cell.includes('<div class="ul-st" data-tone="crit"><p class="ul-st-t">Codex 로그인 갱신 멈춤</p><p class="ul-why">접근 토큰이 3시간 전에 만료됐습니다.</p><div class="ul-acts"><button type="button" class="seg-action" data-login="second" data-lp="codex">Codex 다시 로그인</button></div></div>'), mode);
+    assert.equal((cell.match(/Codex 다시 로그인/g) || []).length, 1, mode); // 계정 카드의 버튼은 숨는다
+    assert.doesNotMatch(rendered(), /data-guide|keepalive --install-service/, mode);
+    assert.equal(hotNow(), base + 1, mode);
+  }
+  delete codexP.login; delete devices[1].logins;
+  click({ mode: "brief" });
+  assert.equal(hotNow(), base);
 }
 
 // 탭과 섹션은 사용량 모으기(기기마다 프로바이더를 불러 수십 초)를 기다리지 않고 core 확인(/api/devices)만으로 뜬다.

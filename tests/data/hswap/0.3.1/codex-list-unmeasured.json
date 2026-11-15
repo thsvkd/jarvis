@@ -1,0 +1,30 @@
+{
+  "_fixture": {
+    "hswap": "0.3.1",
+    "collected_at": 1794761443,
+    "argv": "hswap list codex --json --cached",
+    "device": "thsvkd-kgolf-macmini"
+  },
+  "schemaVersion": 1,
+  "harnesses": [
+    {
+      "harness": "codex",
+      "accounts": [
+        {
+          "provider": "openai",
+          "active": true,
+          "authMode": "chatgpt",
+          "label": "user1@example.com",
+          "usage": {
+            "state": "stale",
+            "measuredAt": null,
+            "plan": null,
+            "balance": null,
+            "detail": "",
+            "windows": []
+          }
+        }
+      ]
+    }
+  ]
+}

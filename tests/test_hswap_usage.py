@@ -41,7 +41,8 @@ class FakeHswapCase(unittest.TestCase):
         self.exe = os.path.join(self.dir, "hswap")
         for p in (mock.patch.dict(os.environ, {"HOME": self.dir}),
                   mock.patch.object(hswap_usage.claude_accounts, "binary", return_value=self.exe),
-                  mock.patch.object(hswap_usage, "_jobs", {}), mock.patch.object(hswap_usage, "_last", {})):
+                  mock.patch.object(hswap_usage, "_jobs", {}), mock.patch.object(hswap_usage, "_last", {}),
+                  mock.patch.object(hswap_usage, "_skipped", {})):
             p.start()
             self.addCleanup(p.stop)
 
@@ -121,20 +122,41 @@ class ReadTest(FakeHswapCase):
         empty = hswap_usage.account(acct("grok", state="stale", measuredAt=None, detail="the active login's token is due for refresh"))
         self.assertEqual((empty["status"], empty["error"]), ("error", "아직 잰 값이 없습니다(hswap 이 지금은 재지 않았습니다)."))
 
-    def test_rows_without_values_carry_the_state_code_as_failure(self):
-        """covers: USAGE-3, USAGE-8. 값 없는 행만 상태 코드를 failure 로 싣고, 한 번도 재지 못한 stale 은 사람이 손봐야 한다"""
+    def test_rows_carry_the_state_code_as_failure(self):
+        """covers: USAGE-3, USAGE-8, USAGE-17. 상태는 값 유무와 상관없이 닫힌 코드로 싣고, 한 번도 재지 못한 사용 중 stale 은 사람이 손봐야 한다"""
         auth = hswap_usage.account(acct("codex", state="authentication_required", measuredAt=None, detail="401 token_expired"))
-        self.assertEqual((auth["status"], auth["failure"], auth["attention"]), ("error", "authentication_required", True))
+        self.assertEqual((auth["status"], auth["failure"], auth["attention"]), ("error", "auth", True))
         empty = hswap_usage.account(acct("codex", state="stale", measuredAt=None, detail="the active login's token is due for refresh"))
-        self.assertEqual((empty["status"], empty["failure"], empty["attention"]), ("error", "stale", True))
+        self.assertEqual((empty["status"], empty["failure"], empty["attention"]), ("error", "wait", True))
         idle = hswap_usage.account({**acct("codex", state="stale", measuredAt=None), "active": False})
-        self.assertEqual((idle["failure"], idle["attention"]), ("stale", False))  # 쉬는 계정에 다시 로그인을 내면 지금 로그인이 바뀐다
+        self.assertEqual((idle["failure"], idle["attention"]), ("wait", False))  # 쉬는 계정에 다시 로그인을 내면 지금 로그인이 바뀐다
         prior = hswap_usage.account(acct("codex", state="stale", measuredAt=None, windows=[CODEX_7D]))
-        self.assertEqual((prior["status"], prior["failure"], prior["attention"]), ("ok", None, False))  # 이전 값이 있으면 오류가 아니다
+        self.assertEqual((prior["status"], prior["failure"], prior["attention"]), ("ok", "wait", False))  # 이전 값이 있으면 오류가 아니다
+        self.assertIsNone(hswap_usage.account(acct("codex", windows=[CODEX_7D]))["failure"])  # available
         for state in ("not_a_state", {"x": 1}):
             row = hswap_usage.account(acct("codex", state=state, measuredAt=None, detail="/Users/someone"))
-            self.assertEqual((row["status"], row["failure"]), ("error", None), state)
+            self.assertEqual((row["status"], row["failure"]), ("error", "unknown"), state)
             self.assertNotIn("/Users/someone", json.dumps(row))  # detail 원문은 failure 로도 내보내지 않는다
+        self.assertIsNone(hswap_usage.account(acct("codex", state="not_a_state", windows=[CODEX_7D]))["failure"])  # 값이 있으면 오류가 아니다
+        self.assertEqual(set(hswap_usage.CODES), set(hswap_usage.STATES))
+
+    def test_rate_limited_is_a_reached_limit(self):
+        """covers: USAGE-17. 한도 창 소진은 값 유무와 상관없이 limit 이고 attention 이 아니다"""
+        for windows in ([CODEX_7D], []):
+            row = hswap_usage.account(acct("codex", state="rate_limited", windows=windows))
+            self.assertEqual((row["failure"], row["attention"], row["note"] or row["error"]),
+                             ("limit", False, "사용 한도에 도달했습니다(리셋 시각에 풀립니다)."), windows)
+
+    def test_active_stale_over_six_hours_needs_attention(self):
+        """covers: USAGE-18. 사용 중 계정의 이전 값이 6시간보다 오래되면 attention, 쉬는 계정과 6시간 안은 이전 값으로 둔다"""
+        def row(hours, active=True):
+            return hswap_usage.account({**acct("codex", state="stale", measuredAt=iso(time.time() - hours * 3600), windows=[CODEX_7D]), "active": active})
+        old = row(7)
+        self.assertEqual((old["status"], old["failure"], old["attention"]), ("ok", "wait", True))
+        self.assertIn("7시간째 새로 재지 못했습니다", old["note"])
+        self.assertIn("다시 로그인해야 할 수 있습니다", old["note"])
+        for fresh in (row(5), row(7, active=False)):
+            self.assertEqual((fresh["failure"], fresh["attention"], fresh["note"]), ("wait", False, hswap_usage.STATES["stale"][0]))
 
     def test_grok_without_credit_percent_is_zero_percent(self):
         """covers: USAGE-3, USAGE-8"""
@@ -442,6 +464,32 @@ class KeepTest(FakeHswapCase):
         self.assertEqual(done, {"codex": "오류(UnsupportedOperation)", "grok": "실패 1개"})  # 원문(message·result)은 쓰지 않는다
         self.assertEqual(self.calls(), ["config get usage.remote", "codex status --json", "codex refresh --json",
                                         "grok status --json", "grok refresh --json"])
+
+    def test_skipped_refresh_is_counted_apart(self):
+        """covers: USAGE-9, USAGE-19. 건너뜀(ok:true, result 가 skipped:)은 확인함이 아니고, 원문 없이 개수만 남긴다"""
+        # hswap 0.3.1 harness_swap/adapters/codex.py:469,471 의 문장 원문
+        skip = [{"ok": True, "result": "skipped: Codex is running and refreshes the active login itself"},
+                {"ok": True, "result": "skipped: a running session keeps it fresh"}]
+        answers = {"codex status --json": self.status([{"slot": 1}]), "grok status --json": self.status([{"slot": 1}]),
+                   "codex refresh --json": [json.dumps({"schemaVersion": 1, "accounts": skip[:1]}), 0],
+                   "grok refresh --json": [json.dumps({"schemaVersion": 1, "accounts": [skip[1], {"ok": False, "result": "x"}]}), 1]}
+        self.script(answers)
+        self.assertEqual(self.keep({"codex", "grok"}), {"codex": "건너뜀 1개", "grok": "실패 1개 · 건너뜀 1개"})
+        self.assertEqual(hswap_usage._skipped, {"codex": True, "grok": True})
+        answers["codex refresh --json"] = [json.dumps({"schemaVersion": 1, "accounts": [{"ok": True, "result": "refreshed"}]}), 0]
+        self.script(answers)
+        self.assertEqual(self.keep({"codex"}), {"codex": "확인함"})
+        self.assertIs(hswap_usage._skipped["codex"], False)
+        with mock.patch.object(hswap_usage, "_said", {}), mock.patch.object(hswap_usage, "print", create=True) as log, \
+                mock.patch.object(hswap_usage.claude_accounts.installer, "state", None), \
+                mock.patch.object(hswap_usage, "which_tool", side_effect=lambda n: f"/x/{n}" if n == "codex" else None):
+            answers["codex refresh --json"] = [json.dumps({"schemaVersion": 1, "accounts": skip[:1]}), 0]
+            self.script(answers)
+            hswap_usage._keep_once()
+            hswap_usage._keep_once()  # 같은 요약은 다시 남기지 않는다
+        lines = [c.args[0] for c in log.call_args_list]
+        self.assertEqual(lines, ["[jarvis] hswap: 로그인 유지: {'codex': '건너뜀 1개'}"])
+        self.assertNotIn("running", " ".join(lines))
 
     def test_once_waits_for_install_and_missing_hswap(self):
         """covers: USAGE-9"""

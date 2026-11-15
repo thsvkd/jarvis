@@ -1,0 +1,35 @@
+{
+  "_fixture": {
+    "hswap": "0.3.1",
+    "collected_at": 1794761433,
+    "argv": "hswap list grok --json --cached",
+    "device": "s2"
+  },
+  "schemaVersion": 1,
+  "harnesses": [
+    {
+      "harness": "grok",
+      "accounts": [
+        {
+          "provider": "xai",
+          "active": true,
+          "authMode": "oidc",
+          "label": "user1@example.com",
+          "usage": {
+            "state": "unknown",
+            "measuredAt": "2026-11-15T16:47:57Z",
+            "plan": "Free",
+            "balance": {
+              "currency": "USD",
+              "prepaidBalance": 0.0,
+              "onDemandCap": 0.0,
+              "onDemandUsed": 0.0
+            },
+            "detail": "Grok reported no included-credit usage",
+            "windows": []
+          }
+        }
+      ]
+    }
+  ]
+}

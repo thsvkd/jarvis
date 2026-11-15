@@ -18,6 +18,10 @@ class IndependentUsageTest(unittest.TestCase):
             p = mock.patch.object(independent_usage.claude_accounts, name, **kw)
             p.start()
             self.addCleanup(p.stop)
+        # 로그인 유지가 돈 적 없는 상태로 둔다: Codex login(USAGE-19)이 이 기기의 ~/.codex/auth.json 을 읽지 않게 한다
+        p = mock.patch.object(independent_usage.hswap_usage, "_skipped", {})
+        p.start()
+        self.addCleanup(p.stop)
 
     def tearDown(self):
         independent_usage._tasks.clear()
@@ -194,6 +198,27 @@ class IndependentUsageTest(unittest.TestCase):
         """covers: USAGE-3"""
         account = independent_usage.claude_accounts.account({"usageStatus": "other", "usageError": "Bearer synthetic-secret"})
         self.assertNotIn("synthetic-secret", str(account))
+
+    def test_stalled_codex_login_keeps_the_provider_without_accounts(self):
+        """covers: USAGE-19. Codex 계정이 0개여도 갱신이 멈춘 로그인을 보일 칸이 남는다"""
+        empty = {"status": "unavailable", "accounts": []}
+        stalled = {"state": "stalled", "text": "Codex 로그인 갱신 멈춤", "note": "n", "attention": True, "slot": None, "other": False, "store": None}
+        independent_usage.hswap_usage._skipped["codex"] = True
+        with mock.patch.object(independent_usage, "_claude", return_value={"accounts": []}), \
+                mock.patch.object(independent_usage, "_codex", return_value=[]), \
+                mock.patch.object(independent_usage, "_caam", return_value=[]), \
+                mock.patch.object(independent_usage.hswap_usage, "read", side_effect=lambda h, fallback, force=False: fallback()), \
+                mock.patch.object(independent_usage, "_opencode", return_value=empty), \
+                mock.patch.object(independent_usage.antigravity_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.gemini_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.kimi_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.minimax_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.zcode_usage, "read", return_value=empty), \
+                mock.patch.object(independent_usage.codex_native_usage, "login", return_value=stalled) as login:
+            data = independent_usage.read(force=True)
+        login.assert_called_once_with(True)
+        codex = [p for p in data["providers"] if p["id"] == "codex"]
+        self.assertEqual(codex, [{"id": "codex", "name": "Codex", "accounts": [], "login": stalled}])
 
     def test_codex_falls_back_to_native_when_caam_absent(self):
         """covers: USAGE-3"""

@@ -15,6 +15,7 @@ import subprocess
 import time
 import urllib.request
 import urllib.parse
+from . import provider_usage
 from .util import parse_iso
 
 
@@ -193,8 +194,8 @@ def read(exe, use_service=False):
         if not windows:
             return unavailable
         account = {"label": "기본 계정", "org": None, "active": True, "status": "ok", "error": None,
-                   "note": "프로바이더가 요청을 제한하고 있습니다." if limited else None, "attention": limited,
-                   "failure": None, "plan": None, "updated_at": time.time(), "windows": windows, "buckets": [],
+                   "note": provider_usage.LIMIT_NOTE if limited else None, "attention": False,
+                   "failure": "limit" if limited else None, "plan": None, "updated_at": time.time(), "windows": windows, "buckets": [],
                    "extra": None, "credits": None, "source": "opencode"}
         return {"status": "ok", "accounts": [account]}
     except (OSError, sqlite3.Error, subprocess.TimeoutExpired, ValueError, TypeError):

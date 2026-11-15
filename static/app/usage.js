@@ -36,16 +36,21 @@
  };
  const at=ts=>ts?new Date(ts*1000).toLocaleString("ko-KR",{month:"numeric",day:"numeric",weekday:"short",hour:"2-digit",minute:"2-digit",hour12:false})+" 리셋":"";
  const isErr=a=>a.status==="error";
- // 확인 실패의 종류. 원문(프로바이더 응답·스택)은 접어 두고 종류와 할 일만 보인다
- const KINDS=[
-  ["auth","로그인 만료","로그인이 만료되었거나 풀렸습니다. 다시 로그인하세요.",/delegated-refresh|auth|401|unauthori[sz]ed|sign[- ]?in|log ?in|token|credential/i],
-  ["rate","요청 제한","프로바이더가 잠시 요청을 막았습니다. 잠시 뒤 새로고침하세요.",/429|rate.?limit|too many/i],
-  ["perm","권한 문제","이 기기에서 사용량을 읽을 권한이 없습니다.",/관리자 권한|permission|denied|403/i],
-  ["net","네트워크 오류","프로바이더에 닿지 못했습니다. 잠시 뒤 새로고침하세요.",/time.?out|timed out|network|connect|ENOTFOUND|EAI_|DNS|fetch failed|socket/i],
-  ["server","프로바이더 오류","프로바이더 서버가 오류를 냈습니다. 잠시 뒤 새로고침하세요.",/\b5\d\d\b|server error|unavailable|bad gateway/i],
-  ["wait","측정 전","다시 로그인하거나 그 하네스를 한 번 쓰면 hswap 이 다시 잽니다.",/^stale /], // failure 가 hswap 의 stale 일 때만(다른 수집기 원문의 stale 은 아니다)
+ // 사용량 행의 닫힌 failure 코드(provider_usage.FAILURES 와 같은 키) -> [배지, 힌트]. 문구는 코드로만 정한다(USAGE-17)
+ const CODES={auth:["로그인 만료","로그인이 만료되었거나 풀렸습니다. 다시 로그인하세요."],expiring:["로그인 만료 임박","로그인 기한이 곧 끝납니다. 그 계정으로 다시 로그인하세요."],rate:["요청 제한","프로바이더가 잠시 요청을 막았습니다. 잠시 뒤 새로고침하세요."],limit:["한도 도달","사용 한도에 도달했습니다. 리셋 시각에 풀립니다."],wait:["갱신 대기","hswap 이 토큰 갱신이나 다음 측정을 기다립니다. 계속되면 다시 로그인하세요(상주 하네스가 있으면 먼저 끝냅니다)."],keychain:["키체인 문제","키체인을 읽지 못했습니다. 다시 로그인 방법을 확인하세요."],perm:["권한·설정 문제","이 기기의 권한이나 hswap 설정을 확인하세요."],net:["네트워크 오류","프로바이더에 닿지 못했습니다. 잠시 뒤 새로고침하세요."],server:["프로바이더 오류","프로바이더 서버가 오류를 냈습니다. 잠시 뒤 새로고침하세요."],unsupported:["측정 안 함","hswap 이 이 계정의 사용량을 재지 않습니다(usage.remote 설정을 확인하세요)."],unknown:["알 수 없는 오류","사용량을 읽지 못했습니다."]};
+ // 옛 게이트웨이는 failure 에 hswap 상태 이름을 싣는다
+ const OLD={authentication_required:"auth",stale:"wait",rate_limited:"limit"};
+ // failure 가 표에 없는 오류 행(옛 게이트웨이·다른 수집기)만 failure·error 문자열로 종류를 짐작한다
+ const LEGACY=[
+  ["auth",/delegated-refresh|auth|401|unauthori[sz]ed|sign[- ]?in|log ?in|token|credential/i],
+  ["rate",/429|rate.?limit|too many/i],
+  ["perm",/관리자 권한|permission|denied|403/i],
+  ["net",/time.?out|timed out|network|connect|ENOTFOUND|EAI_|DNS|fetch failed|socket/i],
+  ["server",/\b5\d\d\b|server error|unavailable|bad gateway/i],
  ];
- const kind=a=>{const t=(a.failure||"")+" "+(a.error||"");return KINDS.find(k=>k[3].test(t))||["unknown","알 수 없는 오류","사용량을 읽지 못했습니다.",null];};
+ const known=a=>Object.hasOwn(CODES,a.failure??"")?a.failure:Object.hasOwn(OLD,a.failure??"")?OLD[a.failure]:undefined; // 코드 표(새 이름·옛 이름)에 있는 failure 만
+ const kind=a=>{const c=known(a)||isErr(a)&&(LEGACY.find(k=>k[1].test((a.failure||"")+" "+(a.error||"")))||[])[0]||"unknown";return [c,...CODES[c]];}; // [코드,배지,힌트]
+ const RELOG=new Set(["auth","expiring"]); // 사용 중 계정이 이 코드면 다시 로그인 버튼을 낸다
  const peak=a=>{const v=[...a.windows,...a.buckets].map(cur).filter(u=>u!=null);return isErr(a)||!v.length?null:Math.max(...v);};
  const isHot=a=>isErr(a)||a.attention===true||(peak(a)??0)>=75; // attention: 재로그인 등 사람이 손봐야 다시 읽힌다
  const loginHot=p=>!!(p.login&&p.login.attention); // 기기 단위 로그인 상태(Claude). 계정이 아니라 기기마다 센다
@@ -106,8 +111,8 @@
   return "";
  }
  function body(a){
-  // hswap 의 error 는 상태별 고정 한국어 문구(STATES)라 접지 않고 그대로 보인다
-  if(isErr(a)){const k=kind(a);if(a.source==="hswap"&&a.error)return html`<p class="ul-err">${a.error}</p>${k[0]==="wait"&&a.attention?html`<p class="ul-why">${k[2]}</p>`:""}`;return html`<p class="ul-err">${k[2]}</p>${a.error?html`<details class="ul-raw"><summary>원문 보기</summary><pre>${a.error}</pre></details>`:""}`;}
+  // 코드 표에 있는 행의 error 는 서버가 정한 고정 한국어 문구라 접지 않고 그대로 보인다
+  if(isErr(a)){const k=kind(a);if(known(a)&&a.error)return html`<p class="ul-err">${a.error}</p>${k[0]==="wait"&&a.attention?html`<p class="ul-why">${k[2]}</p>`:""}`;return html`<p class="ul-err">${k[2]}</p>${a.error?html`<details class="ul-raw"><summary>원문 보기</summary><pre>${a.error}</pre></details>`:""}`;}
   const note=a.note?html`<p class="${a.attention?"ul-why":"ul-note"}">${a.note}</p>`:""; // 마지막으로 읽은 값에 붙는 이유
   // 창 없이 요금제·잔액만 있는 계정(hswap 의 Grok)은 잔액 줄을 함께 보인다
   if(!a.windows.length&&!a.buckets.length)return (note||a.extra)?html`${note}${extra(a.extra)}`:html`<p class="ul-muted">${a.status==="fetching"?"사용량을 읽는 중입니다.":"아직 사용량을 읽지 않았습니다."}</p>`;
@@ -115,7 +120,7 @@
   const no5h=/^cswap/.test(a.source||"")&&a.windows.some(w=>w.key==="weekly")&&!a.windows.some(w=>w.key==="session");
   return html`${note}<div class="ul-wins">${a.windows.map(w=>win(w,a))}</div>${no5h?html`<p class="ul-extra">5시간 한도 없음 · 주간 한도만 적용</p>`:""}${a.buckets.length?html`<p class="ul-extra">세부 한도 · ${a.buckets.map((b,i)=>html`${i?" · ":""}${b.name} <b>${pct(cur(b))}</b>`)}</p>`:""}${extra(a.extra)}${a.credits?html`<p class="ul-extra">한도 리셋 크레딧 ${a.credits}개</p>`:""}`;
  }
- const head=a=>html`<div class="ul-ah"><b class="ul-email">${a.label}</b>${a.plan?html`<span class="ul-plan">${a.plan}</span>`:""}${a.org?html`<span class="ul-plan">${a.org}</span>`:""}${a.active?html`<span class="badge" data-tone="info">사용 중</span>`:""}${isErr(a)||a.attention?html`<span class="badge" data-tone="crit">${isErr(a)?kind(a)[1]:"조치 필요"}</span>`:""}</div>`;
+ const head=a=>html`<div class="ul-ah"><b class="ul-email">${a.label}</b>${a.plan?html`<span class="ul-plan">${a.plan}</span>`:""}${a.org?html`<span class="ul-plan">${a.org}</span>`:""}${a.active?html`<span class="badge" data-tone="info">사용 중</span>`:""}${isErr(a)||a.attention?html`<span class="badge" data-tone="crit">${isErr(a)?kind(a)[1]:CODES[known(a)]?.[0]||"조치 필요"}</span>`:""}</div>`;
  const relog=(d,id,again=true)=>html`<button type="button" class="seg-action" data-login="${d.id}" data-lp="${id}">${LOGIN[id]} ${again?"다시 로그인":"로그인"}</button>`;
  // 계정이 이미 있는 칸에서 다른 계정을 하나 더 저장한다(같은 로그인 경로. 저장은 hswap 이 한다)
  const addBtn=(d,id)=>(d.login_adds||[]).includes(id)?html`<button type="button" class="seg-action" data-login="${d.id}" data-lp="${id}" data-add="1">${LOGIN[id]} 계정 추가</button>`:"";
@@ -125,17 +130,18 @@
  // 기기마다 Claude 계정(hswap 슬롯)을 쓸 순서와 넘어갈 시점을 정한다(USAGE-14). 슬롯이 둘 이상일 때만 순서가 뜻이 있다
  const rotBtn=(d,p)=>p.id==="claude"&&p.accounts.filter(a=>a.slot).length>1?html`<button type="button" class="seg-action" data-rot="${d.id}">전환 순서</button>`:"";
  const rmBtn=(a,d)=>a.slot&&!a.active?html`<button type="button" class="seg-action" data-remove="${d.id}" data-slot="${a.slot}" data-label="${a.label}" aria-disabled="${String(S.busy.has(d.id))}">계정 삭제</button>`:"";
- // 인증 실패·조치 필요 계정에는 그 기기에서 다시 로그인할 버튼을 함께 낸다(요약 카드도 상세와 같다)
- const relogIf=(a,d,p)=>(isErr(a)&&kind(a)[0]==="auth"||a.attention)&&(d.logins||[]).includes(p.id)?relog(d,p.id):"";
+ // 다시 로그인 버튼은 그 기기에 로그인 경로가 있고 사용 중인 계정에만 낸다(USAGE-17): auth·expiring, 또는 hswap 이 오래 못 잰 wait. 쉬는 계정에 누르면 이 기기의 지금 로그인이 바뀐다
+ const relogIf=(a,d,p)=>{const c=kind(a)[0];return a.active&&(RELOG.has(c)||c==="wait"&&a.attention&&a.source==="hswap")&&(d.logins||[]).includes(p.id)?relog(d,p.id):"";};
+ const restNote=a=>!a.active&&RELOG.has(kind(a)[0])?html`<p class="ul-muted">사용 중이 아닌 계정이라 다시 로그인 버튼을 내지 않습니다(누르면 이 기기의 지금 로그인이 바뀝니다). 그 계정으로 직접 다시 로그인해 저장하거나, 쓰지 않으면 계정을 삭제하세요.</p>`:"";
  // 기기 단위 로그인 상태 한 줄. 정상이면 작게, 이상이면 주의 색과 로그인(게이트웨이가 낼 수 있는 기기만)·안내 버튼
  // 자동 갱신 예약이 없거나 멈춘 것은 다시 로그인으로 고쳐지지 않는다: 게이트웨이가 한 시간마다 다시 설치하고, 바로 고칠 명령을 보인다
  const SCHED={unscheduled:"게이트웨이가 한 시간마다 예약 설치를 시도합니다. 계속되면 그 기기의 화면 터미널에서 실행하세요:",stopped:"그 기기에 GUI 로그인하면 시작됩니다. 로그인돼 있는데도 계속되면 화면 터미널에서 실행하세요:"};
- const loginLine=(d,p)=>!p.login?"":p.login.attention&&SCHED[p.login.state]?html`<div class="ul-st" data-tone="warn"><p class="ul-st-t">${p.login.text}</p><p class="ul-why">${SCHED[p.login.state]} <code>hswap claude keepalive --install-service --ahead 7200</code></p></div>`
+ const loginLine=(d,p)=>!p.login?"":p.login.attention&&p.id==="claude"&&SCHED[p.login.state]?html`<div class="ul-st" data-tone="warn"><p class="ul-st-t">${p.login.text}</p><p class="ul-why">${SCHED[p.login.state]} <code>hswap claude keepalive --install-service --ahead 7200</code></p></div>`
   :!p.login.attention?html`<p class="ul-age">${p.login.text}${p.login.note?" · "+p.login.note:""}</p>`
-  :html`<div class="ul-st" data-tone="crit"><p class="ul-st-t">${p.login.text}</p>${p.login.note?html`<p class="ul-why">${p.login.note}</p>`:""}<div class="ul-acts">${(d.logins||[]).includes("claude")?relog(d,"claude"):""}<button type="button" class="seg-action" data-guide="${d.id}">다시 로그인 방법</button></div></div>`;
+  :html`<div class="ul-st" data-tone="crit"><p class="ul-st-t">${p.login.text}</p>${p.login.note?html`<p class="ul-why">${p.login.note}</p>`:""}<div class="ul-acts">${(d.logins||[]).includes(p.id)?relog(d,p.id):""}${p.id==="claude"?html`<button type="button" class="seg-action" data-guide="${d.id}">다시 로그인 방법</button>`:""}</div></div>`;
  // 계정 카드의 버튼은 한 줄 묶음으로(버튼끼리 붙지 않게). 버튼이 없으면 줄도 없다
  const acts=(...bs)=>bs.some(Boolean)?html`<div class="ul-acts">${bs}</div>`:"";
- const acct=(a,d,p)=>html`<div class="ul-acct">${head(a)}${body(a)}${acts(useBtn(a,d),rmBtn(a,d),p.login&&p.login.attention?"":relogIf(a,d,p))}${a.updated_at?html`<p class="ul-age">${P.fmt.ago(a.updated_at)} 확인</p>`:""}</div>`;
+ const acct=(a,d,p)=>html`<div class="ul-acct">${head(a)}${body(a)}${restNote(a)}${acts(useBtn(a,d),rmBtn(a,d),p.login&&p.login.attention?"":relogIf(a,d,p))}${a.updated_at?html`<p class="ul-age">${P.fmt.ago(a.updated_at)} 확인</p>`:""}</div>`;
  const badge=d=>{const [t,l]=state(d);return html`<span class="badge" data-tone="${t}">${l}</span>`;};
  function devMeta(d){
   const busy=S.busy.has(d.id),unknown=(d.unavailable||[]).filter(id=>!fresh(d).includes(id));
@@ -191,7 +197,7 @@
   const soon=wins.length?html`<div class="tile ul-soon"><h3 class="sub-h">곧 풀리는 한도 (50% 이상)</h3><ol>${wins.slice(0,6).map(({a,p,w})=>html`<li><span class="ul-when" title="${at(w.resets_at)}">${left(w.resets_at)}</span>${dot(p.id)}<span class="ul-email">${a.label}</span><span class="ul-wl">${p.name} ${WIN[w.key]||w.key}</span>${meter(w.used)}<b class="ul-wp" data-tone="${tone(w.used)}">${pct(w.used)}</b></li>`)}</ol></div>`:"";
   const summaryAccounts=uniq(false).filter(({a})=>!S.hot||isHot(a)); // 최신 값을 고른 뒤 주의 필터를 적용한다
   const groups=columns(false).map(p=>({p,accounts:summaryAccounts.filter(x=>x.p.id===p.id)})).filter(g=>g.accounts.length);
-  const summary=groups.length?html`<div class="ul-summary"><h3 class="sub-h">프로바이더별 계정 사용량</h3><p class="ul-muted">같은 계정은 사용량이 있는 최근 값으로 한 번 표시합니다.</p>${groups.map(({p,accounts})=>html`<section class="tile ul-group"><h4>${dot(p.id)} ${p.name} <span class="ul-muted">${accounts.length}개 계정</span></h4><div class="ul-summary-grid">${accounts.map(({a,p,d})=>html`<div class="ul-summary-account">${head(a)}${body(a)}${acts(relogIf(a,d,p))}<p class="ul-age">${d.host||d.id} · ${a.updated_at?P.fmt.ago(a.updated_at)+" 확인":"확인 시각 모름"}</p></div>`)}</div></section>`)}</div>`:"";
+  const summary=groups.length?html`<div class="ul-summary"><h3 class="sub-h">프로바이더별 계정 사용량</h3><p class="ul-muted">같은 계정은 사용량이 있는 최근 값으로 한 번 표시합니다.</p>${groups.map(({p,accounts})=>html`<section class="tile ul-group"><h4>${dot(p.id)} ${p.name} <span class="ul-muted">${accounts.length}개 계정</span></h4><div class="ul-summary-grid">${accounts.map(({a,p,d})=>html`<div class="ul-summary-account">${head(a)}${body(a)}${restNote(a)}${acts(relogIf(a,d,p))}<p class="ul-age">${d.host||d.id} · ${a.updated_at?P.fmt.ago(a.updated_at)+" 확인":"확인 시각 모름"}</p></div>`)}</div></section>`)}</div>`:"";
   const rows=S.devs.filter(visible),cols=columns(S.hot).filter(c=>S.prov==="all"||c.id===S.prov);
   if(!rows.length)return html`${kpi}${soon}<div class="tile ul-none"><p>${filtering()?"조건에 맞는 계정이 없습니다.":"사용량을 보여 줄 기기가 없습니다."}</p>${filtering()?html`<button type="button" class="seg-action" data-clear>필터 해제</button>`:""}</div>`;
   const cell=(d,c)=>{

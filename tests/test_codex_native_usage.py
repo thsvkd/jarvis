@@ -1,7 +1,9 @@
 """현재 Codex 로그인에서 갱신 없이 사용량을 읽는다."""
+import base64
 import json
 import os
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -53,6 +55,54 @@ class NativeCodexTest(unittest.TestCase):
                 mock.patch.object(codex_native_usage, "_http") as http:
             self.assertEqual(codex_native_usage.read(), [])
         http.assert_not_called()
+
+
+class LoginTest(unittest.TestCase):
+    """USAGE-19: 로그인 유지가 돈 뒤 auth.json 의 접근 토큰이 2시간 넘게 만료된 채면 기기 단위 login."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.path = os.path.join(tmp.name, "auth.json")
+        p = mock.patch.dict(os.environ, {"CODEX_HOME": tmp.name})
+        p.start()
+        self.addCleanup(p.stop)
+
+    def write(self, claims, mode=0o600, access=None):
+        enc = lambda o: base64.urlsafe_b64encode(json.dumps(o).encode()).decode().rstrip("=")
+        token = access or enc({"alg": "none"}) + "." + enc(claims) + ".synthetic-signature"
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump({"tokens": {"access_token": token, "account_id": "private-account", "id_token": token},
+                       "last_refresh": "2026-11-13T00:00:00Z", "pwd_auth_time": 1762000000}, f)
+        os.chmod(self.path, mode)
+
+    def test_stalled_login_is_reported_with_elapsed_time_only(self):
+        """covers: USAGE-19"""
+        self.write({"exp": time.time() - 3 * 3600, "pwd_auth_time": 1762000000})
+        login = codex_native_usage.login(True)
+        self.assertEqual({k: login[k] for k in ("state", "text", "attention", "slot", "other", "store")},
+                         {"state": "stalled", "text": "Codex 로그인 갱신 멈춤", "attention": True, "slot": None, "other": False, "store": None})
+        self.assertTrue(login["note"].startswith("접근 토큰이 3시간 전에 만료됐습니다. 다시 로그인하세요."), login["note"])
+        self.assertIn("건너뜁니다", login["note"])
+        text = json.dumps(login, ensure_ascii=False)
+        for secret in ("synthetic-signature", "private-account", "1762000000", "eyJ"):
+            self.assertNotIn(secret, text)
+        self.assertNotIn("건너뜁니다", codex_native_usage.login(False)["note"])
+
+    def test_nothing_to_report(self):
+        """covers: USAGE-19. 유지가 돈 적 없음, 만료 2시간 안, 안전하지 않은 파일, exp 없음·깨진 JWT, 파일 없음"""
+        self.assertIsNone(codex_native_usage.login(True))  # 파일 없음(키링 저장 방식 포함)
+        self.write({"exp": time.time() - 3 * 3600})
+        self.assertIsNone(codex_native_usage.login(None))
+        self.write({"exp": time.time() - 3600})
+        self.assertIsNone(codex_native_usage.login(True))
+        self.write({"exp": time.time() - 3 * 3600}, mode=0o644)
+        self.assertIsNone(codex_native_usage.login(True))
+        for claims in ({}, {"exp": "x"}, {"exp": True}, {"exp": float("nan")}, {"exp": 10 ** 400}):
+            self.write(claims)
+            self.assertIsNone(codex_native_usage.login(True), claims)
+        self.write({}, access="not-a-jwt")
+        self.assertIsNone(codex_native_usage.login(True))
 
 
 if __name__ == "__main__":

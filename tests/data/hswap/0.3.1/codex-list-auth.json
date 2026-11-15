@@ -1,0 +1,30 @@
+{
+  "_fixture": {
+    "hswap": "0.3.1",
+    "collected_at": 1794761424,
+    "argv": "hswap list codex --json --cached",
+    "device": "s2"
+  },
+  "schemaVersion": 1,
+  "harnesses": [
+    {
+      "harness": "codex",
+      "accounts": [
+        {
+          "provider": "openai",
+          "active": true,
+          "authMode": "chatgpt",
+          "label": "user1@example.com",
+          "usage": {
+            "state": "authentication_required",
+            "measuredAt": null,
+            "plan": null,
+            "balance": null,
+            "detail": "",
+            "windows": []
+          }
+        }
+      ]
+    }
+  ]
+}

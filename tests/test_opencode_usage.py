@@ -236,6 +236,19 @@ class OpenCodeUsageTest(unittest.TestCase):
         self.assertNotIn("private-id", json.dumps(result))
         self.assertNotIn("private-name", json.dumps(result))
 
+    def test_reached_go_limit_is_a_limit_not_attention(self):
+        """covers: USAGE-17. 한도 창 소진(limited)은 리셋 시각에 풀리므로 limit 이고 attention 이 아니다"""
+        data = {"data": {"go": {"rolling": {"percent": 100, "limited": True, "resetsAt": 1800000000000},
+                                "weekly": {"percent": 40, "limited": False, "resetsAt": 1800000000000}}}}
+        status = mock.Mock(returncode=0, stdout="http://127.0.0.1:4321\n")
+        for body, want in ((data, ("limit", False, "사용 한도에 도달했습니다(리셋 시각에 풀립니다).")),
+                           ({"data": {"go": {"weekly": {"percent": 40, "limited": False}}}}, (None, False, None))):
+            with mock.patch.object(opencode_usage.subprocess, "run", return_value=status), \
+                    mock.patch.object(opencode_usage, "_registration", return_value=None), \
+                    mock.patch.object(opencode_usage, "_request", return_value=body):
+                account = opencode_usage.read("/fake/opencode", use_service=True)["accounts"][0]
+            self.assertEqual((account["failure"], account["attention"], account["note"]), want)
+
     def test_stopped_or_remote_service_is_not_started_or_contacted(self):
         """covers: USAGE-3"""
         for text in ("stopped", "http://example.com:1234", "http://127.0.0.1:1234@evil.example", "http://127.0.0.1:1234/path"):

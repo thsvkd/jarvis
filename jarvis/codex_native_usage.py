@@ -9,7 +9,9 @@ import os
 import time
 import urllib.request
 
-from . import caam_usage, opencode_usage, provider_usage
+from . import caam_usage, claude_accounts, opencode_usage, provider_usage
+
+STALL_S = 7200  # 접근 토큰이 만료된 뒤 이만큼 지나도 그대로면 갱신이 멈춘 것으로 본다(USAGE-19)
 
 
 def _http(token, account):
@@ -39,11 +41,35 @@ def _email(tokens, account):
     return "기본 계정"
 
 
+def _home():
+    return os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
+
+
+def login(skipped):
+    """USAGE-19: 로그인 유지가 돌았는데(skipped 가 None 이 아님) auth.json 의 접근 토큰이 STALL_S 넘게 만료된 채면 기기 단위 login.
+    skipped: 마지막 hswap codex refresh 가 건너뛰었는가(hswap_usage._skipped). exp 에서 계산한 경과 시간만 내보낸다(토큰·계정 ID 는 내보내지 않는다).
+    파일이 없거나(키링 저장 방식 포함) 읽지 못했거나 exp 가 없으면 None."""
+    if skipped is None:
+        return None
+    try:
+        part = opencode_usage._private_json(os.path.join(_home(), "auth.json"))["tokens"]["access_token"].split(".")[1]
+        exp = json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))["exp"]
+        if isinstance(exp, bool) or not isinstance(exp, (int, float)) or not math.isfinite(exp) or exp <= 0:
+            return None
+        late = time.time() - exp
+    except Exception:  # 형식이 어긋난 파일 하나가 사용량 응답을 막지 않게 하고, 메시지(경로·값)는 남기지 않는다
+        return None
+    if late <= STALL_S:
+        return None
+    note = (f"접근 토큰이 {claude_accounts._span(late)} 전에 만료됐습니다. 다시 로그인하세요. 상주 Codex(데몬·앱)가 있으면 먼저 끝내야 새 로그인을 씁니다."
+            + (" hswap 은 실행 중인 Codex 때문에 갱신을 건너뜁니다." if skipped else ""))
+    return {"state": "stalled", "text": "Codex 로그인 갱신 멈춤", "note": note, "attention": True, "slot": None, "other": False, "store": None}
+
+
 def read():
     """현재 자격이 없거나 만료되면 빈 목록. 갱신 토큰은 사용하지 않는다."""
     try:
-        home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
-        body = opencode_usage._private_json(os.path.join(home, "auth.json"))
+        body = opencode_usage._private_json(os.path.join(_home(), "auth.json"))
         tokens = body.get("tokens") if isinstance(body, dict) else None
         token = tokens.get("access_token") if isinstance(tokens, dict) else None
         account = tokens.get("account_id") if isinstance(tokens, dict) else None

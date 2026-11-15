@@ -1,0 +1,189 @@
+{
+  "_fixture": {
+    "hswap": "0.3.1",
+    "collected_at": 1794761385,
+    "argv": "hswap claude list --json",
+    "device": "thsvkd-macmini"
+  },
+  "schemaVersion": 1,
+  "accounts": [
+    {
+      "number": 1,
+      "active": true,
+      "usageStatus": "ok",
+      "usage": {
+        "sevenDay": {
+          "pct": 56.0,
+          "resetsAt": "2026-11-17T00:59:59.619358+00:00",
+          "countdown": "1d 8h",
+          "clock": "Nov 17 09:59",
+          "expectedPct": 80.8,
+          "aheadOfPace": false,
+          "projectedExhaustionAt": "2026-11-20T03:28:51Z",
+          "willLastToReset": true
+        },
+        "scoped": [
+          {
+            "pct": 6.0,
+            "resetsAt": "2026-11-17T00:59:59.619542+00:00",
+            "countdown": "1d 8h",
+            "clock": "Nov 17 09:59",
+            "expectedPct": 80.8,
+            "aheadOfPace": false,
+            "projectedExhaustionAt": "2027-02-12T08:09:20Z",
+            "willLastToReset": true,
+            "name": "Fable"
+          }
+        ]
+      },
+      "usageFetchedAt": "2026-11-15T16:47:21Z",
+      "loginExpiresAt": "2026-12-08T18:27:21Z",
+      "plan": "max",
+      "rateLimitTier": "default_claude_max_20x",
+      "email": "user1@example.com",
+      "organizationName": "user1@example.com's Organization",
+      "organizationUuid": "00000000-0000-4000-8000-000000000001"
+    },
+    {
+      "number": 2,
+      "active": false,
+      "usageStatus": "keychain_unavailable",
+      "usage": null,
+      "lastGoodUsage": {
+        "sevenDay": {
+          "pct": 78.0,
+          "resetsAt": "2026-11-19T05:00:00.105100+00:00",
+          "countdown": "3d 12h",
+          "clock": "Nov 19 14:00",
+          "expectedPct": 26.3,
+          "aheadOfPace": true,
+          "projectedExhaustionAt": "2026-11-14T13:38:36Z",
+          "willLastToReset": false
+        },
+        "scoped": [
+          {
+            "pct": 38.0,
+            "resetsAt": "2026-11-19T05:00:00.105247+00:00",
+            "countdown": "3d 12h",
+            "clock": "Nov 19 14:00",
+            "expectedPct": 26.3,
+            "aheadOfPace": false,
+            "projectedExhaustionAt": "2026-11-17T01:16:04Z",
+            "willLastToReset": false,
+            "name": "Fable"
+          }
+        ]
+      },
+      "lastGoodFetchedAt": "2026-11-14T01:10:54Z",
+      "loginExpiresAt": "2026-12-04T07:11:46Z",
+      "email": "user2@example.com",
+      "organizationName": "user2@example.com's Organization",
+      "organizationUuid": "00000000-0000-4000-8000-000000000002"
+    },
+    {
+      "number": 3,
+      "active": false,
+      "usageStatus": "keychain_unavailable",
+      "usage": null,
+      "lastGoodUsage": {
+        "fiveHour": {
+          "pct": 0.0
+        },
+        "sevenDay": {
+          "pct": 95.0,
+          "resetsAt": "2026-11-17T15:59:59.710932+00:00",
+          "countdown": "1d 23h",
+          "clock": "Nov 18 00:59",
+          "expectedPct": 71.9,
+          "aheadOfPace": true,
+          "projectedExhaustionAt": "2026-11-15T23:09:19Z",
+          "willLastToReset": false
+        },
+        "scoped": [
+          {
+            "pct": 57.0,
+            "resetsAt": "2026-11-17T15:59:59.711131+00:00",
+            "countdown": "1d 23h",
+            "clock": "Nov 18 00:59",
+            "expectedPct": 71.9,
+            "aheadOfPace": false,
+            "projectedExhaustionAt": "2026-11-19T11:55:32Z",
+            "willLastToReset": true,
+            "name": "Fable"
+          }
+        ]
+      },
+      "lastGoodFetchedAt": "2026-11-15T16:47:51Z",
+      "loginExpiresAt": "2026-12-02T21:11:57Z",
+      "email": "user2@example.com",
+      "organizationName": "Org 1",
+      "organizationUuid": "00000000-0000-4000-8000-000000000003"
+    },
+    {
+      "number": 4,
+      "active": false,
+      "usageStatus": "keychain_unavailable",
+      "usage": null,
+      "lastGoodUsage": {
+        "sevenDay": {
+          "pct": 70.0,
+          "resetsAt": "2026-11-17T14:00:00.070196+00:00",
+          "countdown": "1d 21h",
+          "clock": "Nov 17 23:00",
+          "expectedPct": 73.1,
+          "aheadOfPace": false,
+          "projectedExhaustionAt": "2026-11-17T21:25:30Z",
+          "willLastToReset": true
+        },
+        "scoped": [
+          {
+            "pct": 33.0,
+            "resetsAt": "2026-11-17T14:00:00.070379+00:00",
+            "countdown": "1d 21h",
+            "clock": "Nov 17 23:00",
+            "expectedPct": 73.1,
+            "aheadOfPace": false,
+            "projectedExhaustionAt": "2026-11-26T02:06:49Z",
+            "willLastToReset": true,
+            "name": "Fable"
+          }
+        ]
+      },
+      "lastGoodFetchedAt": "2026-11-15T16:47:51Z",
+      "email": "user3@example.com",
+      "organizationName": "user3@example.com's Organization",
+      "organizationUuid": "00000000-0000-4000-8000-000000000004"
+    },
+    {
+      "number": 5,
+      "active": false,
+      "usageStatus": "keychain_unavailable",
+      "usage": null,
+      "lastGoodUsage": {
+        "fiveHour": {
+          "pct": 0.0
+        },
+        "sevenDay": {
+          "pct": 0.0,
+          "resetsAt": "2026-11-22T11:00:00+00:00",
+          "countdown": "6d 18h",
+          "clock": "Nov 22 20:00"
+        },
+        "scoped": [
+          {
+            "pct": 0.0,
+            "resetsAt": "2026-11-22T11:00:00+00:00",
+            "countdown": "6d 18h",
+            "clock": "Nov 22 20:00",
+            "name": "Fable"
+          }
+        ]
+      },
+      "lastGoodFetchedAt": "2026-11-15T16:47:21Z",
+      "loginExpiresAt": "2026-12-03T15:10:04Z",
+      "email": "user3@example.com",
+      "organizationName": "Org 1",
+      "organizationUuid": "00000000-0000-4000-8000-000000000003"
+    }
+  ]
+}

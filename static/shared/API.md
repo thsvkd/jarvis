@@ -11,7 +11,7 @@
 | `GET /api/devices` | core 전용(설정 `devices`). 기기별 요약 `{generated_at, devices:[{id, url, reachable, ok_at, error, fails, host, version, status, alerts, services, model, os, cpu_pct, mem_pct, disk_pct}]}` | 10초마다 각 게이트웨이 `/api/snapshot` 을 pull. 게이트웨이(core 가 아닌 jarvis)는 404. SSH 기기(설정 `{id, ssh}`)는 `url` 이 `ssh://<별칭>` 이고 `ssh -W` 로 받는다 |
 | `GET /api/devices/<id>/inbound` | core 전용. 다른 기기의 Caddy 라우트가 SSH 터널(그 기기 `ssh_tunnels`) 또는 tailnet 주소로 이 기기 포트에 닿는 길 `{generated_at, device, paths:[{from, host, public, via: "ssh"|"tailnet", port(ssh 일 때 출발 기기의 로컬 포트), to_port, service_id, guess, status}]}`. 기기는 각 스냅샷의 tailnet 이름·IP·설정 id·ssh 별칭으로 맞춘다. `guess`: 포트 주인이 OrbStack 같은 대리 프로세스라 주소 첫 칸과 이름이 맞는 컨테이너로 추정했다 | 스냅샷과 같다. 캐시 없음(요청마다 core 가 들고 있는 스냅샷을 맞댄다) |
 | `GET /api/devices/<id>/snapshot` · `/history?range=` · `/changes` | core 전용. 그 기기 응답 그대로. snapshot 은 마지막 성공본(없으면 503), 나머지는 요청 시 전달(실패 502) | |
-| `GET /api/usage/independent` | 이 기기 AI 구독 사용량 `{mode: "independent", providers: [{id, name, accounts, login}], unavailable, fetched_at}`. `login` 은 Claude 프로바이더에만 붙는다(아래 "사용량의 login"). 게이트웨이가 확인한 hswap 은 `hswap: {version, pinned, note}` 이고, macOS 는 hswap doctor 의 `store`("file"·"auto"·"keychain"), `problems`(화면 문구 목록. `not_file_store` 는 로그인 세션 밖에서만), `keychain_backups`(키체인에 남은 hswap 백업 개수, 모르면 null)가 더해지고, 게이트웨이 tick 이 keepalive 를 대신 돌리면 `keepalive`("jarvis 가 5분마다 keepalive 를 돌립니다", 이때 `keepalive_service_missing` 은 problems 에서 빠진다)가 붙는다(USAGE-15). hswap 0.3.1 doctor 의 최근 기록이 있으면 `events`(최근 3개 `{ts, cmd, caller, outcome, exit}`)가 붙는다(USAGE-16). 조직 UUID 가 있는 Claude 행에는 `org_key`(조직 UUID 해시)와 `org_at`(hswap 슬롯 등록 시각)이 붙고, core 가 같은 조직의 이름을 가장 늦은 것으로 맞춘 뒤 지운다 | 설정 `core`. core 는 `GET /api/devices/usage` 로 모은다 |
+| `GET /api/usage/independent` | 이 기기 AI 구독 사용량 `{mode: "independent", providers: [{id, name, accounts, login}], unavailable, fetched_at}`. `login` 은 Claude 와 Codex 프로바이더에 붙는다(아래 "사용량의 login", Codex 는 USAGE-19). 계정 행의 `failure` 는 닫힌 코드다(아래 "사용량 계정 행의 failure"). 게이트웨이가 확인한 hswap 은 `hswap: {version, pinned, note}` 이고, macOS 는 hswap doctor 의 `store`("file"·"auto"·"keychain"), `problems`(화면 문구 목록. `not_file_store` 는 로그인 세션 밖에서만), `keychain_backups`(키체인에 남은 hswap 백업 개수, 모르면 null)가 더해지고, 게이트웨이 tick 이 keepalive 를 대신 돌리면 `keepalive`("jarvis 가 5분마다 keepalive 를 돌립니다", 이때 `keepalive_service_missing` 은 problems 에서 빠진다)가 붙는다(USAGE-15). hswap 0.3.1 doctor 의 최근 기록이 있으면 `events`(최근 3개 `{ts, cmd, caller, outcome, exit}`)가 붙는다(USAGE-16). 조직 UUID 가 있는 Claude 행에는 `org_key`(조직 UUID 해시)와 `org_at`(hswap 슬롯 등록 시각)이 붙고, core 가 같은 조직의 이름을 가장 늦은 것으로 맞춘 뒤 지운다 | 설정 `core`. core 는 `GET /api/devices/usage` 로 모은다 |
 | `POST /api/usage/login?provider=` · `GET /api/usage/login?provider=` | CLI 다시 로그인 시작(로그인 URL·일회용 코드)과 진행 상태. Claude(`provider=claude`)는 코드가 없고 응답이 `{url, code: null, paste: true, expires_at}` 이며, 사람이 받은 인증 코드를 같은 POST 의 헤더 `X-Jarvis-Login-Code`(`[A-Za-z0-9_#.~-]{8,256}`)로 보내면 `{submitted: true}` 다(틀리면 400, 기다리는 로그인이 없으면 409). core 는 `/api/devices/<id>/login` 으로 전달하고, 그 경로가 없는 옛 게이트웨이(404)는 501 `{error}` 다 | 설정 `core`. core 경로는 `viewers`. POST 는 헤더 `X-Jarvis-Action: usage-login` 필수 |
 | `POST /api/usage/account?slot=` | Claude 계정 전환(hswap 슬롯). core 는 `/api/devices/<id>/account` 로 전달하고, 옛 게이트웨이(404)는 501 `{error}` 다 | 설정 `core`. core 경로는 `viewers`. 헤더 `X-Jarvis-Action: usage-account` 필수 |
 | `POST /api/usage/account/remove?slot=` | Claude 계정 삭제(`hswap claude remove <슬롯>`). 성공 `{removed: true}`, hswap 이 거절하면 409 `{error}`. core 는 `/api/devices/<id>/account/remove` 로 전달하고, 옛 게이트웨이(404)는 501 `{error}` 다 | 설정 `core`. core 경로는 `viewers`. 헤더 `X-Jarvis-Action: usage-account` 필수 |
@@ -295,6 +295,28 @@ login: {
 ```
 
 여럿에 해당하면 위에서부터 고른다: `headless`(macOS 에서 게이트웨이가 로그인 세션 밖(`launchctl managername` 이 Aqua 가 아님)이고 hswap doctor 의 `store` 가 file 이 아님. 키체인을 읽지 못해 다른 판정이 모두 그 결과라 기록이 없어도 붙는다. USAGE-15) · `config_conflict`·`keychain_item_present`(같은 이름의 `error.type` 또는 hswap 최상위 오류 type, 또는 `store` 가 file 이고 `keychainItemPresent` 가 true. `keychain_item_present` 는 항목이 있을 때와 hswap 이 확인하지 못했을 때 모두 온다. 재로그인보다 먼저 고쳐야 한다) · `relogin`(keepalive `error.type` 이나 hswap 최상위 오류 type 이 relogin_required, 또는 사용 중 계정이 재로그인 필요) · `keychain`(`error.type` keychain_unavailable, 또는 hswap 의 `keychainUnavailable`. `store` 가 file 이면 둘 다 보지 않는다) · `expiring`(`loginExpiresAt` 3일 안이거나 지남) · `unscheduled`(macOS 에서 `checkedAt` 이 없거나 오래됐고 hswap 이 keepalive 예약이 없다고 답함. 기록 파일이 없어도 붙는다) · `stopped`(같은 조건에서 hswap 이 만든 예약이 적재되지 않음) · `stalled`(`checkedAt` 이 없거나 `claude_keepalive_stale_s` 보다 오래됨. 사람이 만든 예약이거나 예약 상태를 모를 때) · `other_account`(`activeSlot` 이 지금 로그인의 슬롯과 다른 번호. `no_credentials` 는 제외) · `unconfirmed`(`store` 가 file 이고 `ok:false` 인 `error.type` keychain_unavailable. 성공 문구를 쓰지 않고, `claude_keepalive_stale_s` 동안 계속되면 attention 이다) · `failed`(그 밖의 `ok:false`. `error.type` 을 고정 문구로 바꿔 보이고, 모르는 type 은 "알 수 없는 오류"다) · `ok`. `activeSlot` 이 지금 로그인과 다른 번호이면 `relogin`·`expiring`·`failed` 판정과 `note` 에 keepalive 값을 쓰지 않는다(`error.type` 이 relogin_required 여도 그렇다). 다만 `no_credentials` 는 기기의 자격 부재라 `/login` 안내로 이어지는 `failed` 로 둔다. `activeSlot` 이 없거나(null·누락) 지금 로그인을 읽지 못하면 맞는지 알 수 없으므로 판정은 그대로 두고 `slot` 만 null 이다. `cache/keepalive.json` 이 없거나 소유자·권한·크기·심볼릭 링크 검사를 통과하지 못하거나 모르는 `schemaVersion` 이면 파일이 없는 것으로 본다.
+
+Codex 프로바이더에는 USAGE-19 의 한 가지 상태만 붙는다. 같은 키를 쓰되 `state` 는 `"stalled"`, `text` 는 "Codex 로그인 갱신 멈춤", `attention` 은 true, `slot`·`store` 는 null, `other` 는 false 다. `note` 는 `CODEX_HOME/auth.json`(기본 `~/.codex/auth.json`)의 접근 토큰 만료 시각(JWT `exp`)에서 계산한 경과 시간만 담고(토큰·계정 ID·`pwd_auth_time` 은 내보내지 않는다), 마지막 로그인 유지에서 hswap 이 갱신을 건너뛰었으면 그 사실을 덧붙인다. 접근 토큰이 만료된 지 2시간이 넘었고 로그인 유지가 이 프로세스에서 Codex 에 대해 한 번 이상 돌았을 때만 붙고, 파일이 없거나 읽지 못하거나 `exp` 가 없으면 키가 없다. 계정이 0개여도 `{id: "codex", accounts: [], login}` 으로 프로바이더가 남는다.
+
+## 사용량 계정 행의 failure
+
+계정 행(`providers[].accounts[]`)의 `failure` 는 행에 문제가 있으면(값이 있어도) 아래 코드 중 하나이고, 문제가 없으면 null 이다(USAGE-17). 상태는 정상인데 값의 나이만 기준보다 오래된 행(USAGE-6)도 null 이며 나이는 `note` 와 `attention` 이 맡는다. hswap 상태 이름, Claude `usageStatus`·`usageError` 원문, `detail` 원문은 담지 않는다. 화면은 이 코드로 배지 문구와 다시 로그인 버튼을 정한다(`static/app/usage.js` 의 `CODES`, 키 집합이 `provider_usage.FAILURES` 와 같다는 것을 `tests/test_hswap_fixtures.py` 가 확인한다). 코드가 없는 옛 게이트웨이의 행은 화면이 옛 hswap 상태 이름(`authentication_required`·`stale`·`rate_limited`)이나 문구로 읽는다.
+
+| 코드 | 뜻 | attention 기본값 | 다시 로그인 버튼 |
+| --- | --- | --- | --- |
+| `auth` | 로그인이 죽었거나 풀림. 다시 로그인해야 풀린다 | true | 사용 중 계정만. 쉬는 계정은 안내 문구 |
+| `expiring` | 로그인 기한이 3일 안. 일시 코드(`rate`·`net`·`server`·`wait`)보다 앞선다 | true | 사용 중 계정만. 쉬는 계정은 안내 문구 |
+| `rate` | 프로바이더가 요청을 막음(HTTP 429). 일시적 | false | 없음 |
+| `limit` | 사용 한도 창 소진. 리셋 시각에 풀린다(hswap `rate_limited`, OpenCode Go `limited`, caam `limit_stage`) | false (모든 수집기) | 없음 |
+| `wait` | 토큰 갱신이나 다음 측정을 기다림(hswap `stale` 은 값 유무와 무관하게 이 코드) | false. 사용 중 hswap 행이 측정 전이거나 6시간이 넘으면 true(USAGE-18) | 사용 중 hswap 행이면서 attention 일 때만 |
+| `keychain` | 키체인·로그인 세션 문제 | true | 없음(기기 줄 안내가 맡는다) |
+| `perm` | 권한·설정이 어긋남(설정 충돌, 다른 계정 로그인, HTTP 403) | true. 403 은 false | 없음 |
+| `net` | 네트워크 오류·시간 초과 | false | 없음 |
+| `server` | 프로바이더 5xx | false | 없음 |
+| `unsupported` | hswap 이 이 계정을 재지 않음 | false | 없음 |
+| `unknown` | 그 밖의 실패 | false (caam 불일치는 true) | 없음 |
+
+다시 로그인 버튼은 그 기기의 `logins` 에 그 프로바이더가 있을 때만 나오고, 쉬는 계정에는 어떤 코드여도 나오지 않는다(누르면 이 기기의 지금 로그인이 바뀐다). Claude 계정(쉬는 계정 포함)이 6시간 넘게 `http-429`·`refresh-failed` 로 읽히지 않으면(마지막 성공 `lastGoodFetchedAt` 기준) 일시 제한이 아니라 죽은 자격으로 보고 `auth` 로 올린다(USAGE-7).
 
 ## 화면 URL 계약
 

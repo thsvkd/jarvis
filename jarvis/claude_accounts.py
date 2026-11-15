@@ -65,6 +65,20 @@ STATUS = {
     "no_credentials": ("자격 증명이 없습니다.", True),
     "no_saved_usage": ("저장된 사용량이 없습니다.", False),  # 저장소 캐시 어댑터만 쓴다
 }
+# usageStatus → failure 코드(USAGE-17, provider_usage.FAILURES). unavailable 은 usageError 가 USAGE_ERRORS 로 정하고, 표에 없는 상태는 unknown 이다
+CODES = {"ok": None, "api_key": None, "token_expired": "wait", "no_saved_usage": "wait", "relogin_required": "auth",
+         "keychain_unavailable": "keychain", "keychain_item_present": "keychain", "config_conflict": "perm", "foreign_credential": "perm",
+         "no_credentials": "auth", "unavailable": "unknown"}
+# unavailable 의 usageError(정확히 일치) → (코드, note 의 괄호 문구, 그 문구·attention 을 대신 쓸 STATUS 키). http-NNN 은 account() 가 따로 읽는다.
+# 출처: harness-swap 0.3.1 claude_swap/oauth.py. 목록 밖 토큰(stores-disagree·store-unmirrored·stash-unreadable·stash_manifest_corrupt·
+# required_mode_unsupported·invalid_client·bad-response)은 실측 사례가 없어 처방 문구 근거가 없으므로 의도적으로 unknown 이다
+USAGE_ERRORS = {**{k: ("auth", None, "relogin_required") for k in ("relogin_required", "invalid_grant", "no_refresh_token", "no-access-token")},
+                "keychain_item_present": ("keychain", None, "keychain_item_present"),
+                "refresh-failed": ("wait", "토큰 갱신 실패", None), "consume-busy": ("wait", "다른 hswap 작업이 슬롯을 쓰는 중", None),
+                "timeout": ("net", "시간 초과", None), "network": ("net", "네트워크 오류", None)}
+# 이만큼 마지막 성공 값이 오래된 429·refresh-failed 는 일시 제한이 아니라 죽은 자격으로 본다(USAGE-7).
+# hswap 최장 측정 백오프(1시간 이하)·유지 주기(1시간)보다 충분히 길다. 실측 죽은 슬롯은 21시간~10일이었다
+DEAD_S = 6 * 3600
 # macOS 로그인 세션 밖(LaunchDaemon·SSH)인데 hswap 이 키체인 저장 방식이면 모든 슬롯이 실패한다. 슬롯마다의 실패 대신 이 한 문구를 보인다
 HEADLESS = f"로그인 세션 밖에서 실행 중 — 키체인을 읽을 수 없습니다. 파일 저장 방식으로 바꾸세요({macos_daemon.MIGRATE})"
 HEADLESS_KINDS = ("CredentialReadError", "keychain_unavailable", "no_credentials")  # 세션 밖 키체인 저장 방식에서 HEADLESS 로 바꾸는 hswap 오류
@@ -327,21 +341,35 @@ def account(row, source="cswap", headless=False):
     usage, fetched = row.get("usage"), row.get("usageFetchedAt")
     if status != "ok" and isinstance(row.get("lastGoodUsage"), dict):
         usage, fetched = row["lastGoodUsage"], row.get("lastGoodFetchedAt")
-    raw_reason = row.get("usageError")
-    reason = raw_reason if isinstance(raw_reason, str) and re.fullmatch(r"http-[1-5][0-9]{2}", raw_reason) else ""
-    note, attention = STATUS.get(status, (None, False))
+    raw = row.get("usageError") if isinstance(row.get("usageError"), str) else ""
+    # 사유는 http-NNN 꼴이나 USAGE_ERRORS 의 정확 일치만 받는다. 원문은 note 에 쓰지 않는다
+    if re.fullmatch(r"http-[1-5][0-9]{2}", raw):
+        code, reason, like = {"401": "auth", "403": "perm", "429": "rate"}.get(raw[5:], "server" if raw[5] == "5" else "unknown"), raw, None
+    else:
+        code, reason, like = USAGE_ERRORS.get(raw, ("unknown", None, None))
+    if status != "unavailable":
+        code, like = CODES.get(status, "unknown"), None
+    note, attention = STATUS.get(like or status, (None, False))
+    attention = attention or code == "auth"  # http-401 도 로그인 문제다(코드 표의 auth 는 attention)
     if headless and status in ("no_credentials", "keychain_unavailable"):
-        note, attention = HEADLESS, True
-    elif status == "keychain_item_present":
+        note, attention, code = HEADLESS, True, "keychain"
+    elif (like or status) == "keychain_item_present":
         note = item_text() + "."
     if status == "api_key":
         note = "API 키 계정이라 구독 한도가 없습니다."
     elif status != "ok" and not note:
         note = "사용량을 읽지 못했습니다" + (f"({reason})" if reason else "") + "."
+    good = _sec(row.get("lastGoodFetchedAt"))
+    if status == "unavailable" and raw in ("http-429", "refresh-failed") and good is not None and time.time() - good > DEAD_S:
+        code, attention = "auth", True
+        note = (f"사용량을 6시간 넘게 읽지 못했습니다({reason}). 다시 로그인해야 합니다: 그 계정으로 Claude Code 에서 /login 한 뒤 "
+                "hswap claude add 를 실행하거나, 쓰지 않는 사본이면 계정을 삭제하세요.")
     left = (parse_iso(row.get("loginExpiresAt") or "") or 0) - time.time()
     if status not in ("relogin_required", "api_key") and 0 < left <= LOGIN_WARN_S:
         soon = f"로그인 만료 {_span(left)} 남음. 그 계정으로 다시 /login 하세요."
         note, attention = (note + " " + soon if note else soon), True
+        if code in (None, "rate", "net", "server", "wait"):  # 일시 코드보다 만료 임박이 앞선다
+            code = "expiring"
     windows, buckets = _windows(usage)
     plan = " · ".join(x for x in (_plan_label(row), str(row.get("alias") or "")[:40], "자동 전환 제외" if row.get("disabled") is True else "") if x)
     email = str(row.get("email") or "")[:200]
@@ -354,7 +382,7 @@ def account(row, source="cswap", headless=False):
             "status": "ok" if windows or buckets or status in ("ok", "api_key") else "error",
             "error": None if windows or buckets or status == "api_key" else note,
             "note": note if windows or buckets or status == "api_key" else None, "attention": attention,
-            "failure": None, "plan": plan or None, "updated_at": _sec(fetched),
+            "failure": code, "plan": plan or None, "updated_at": _sec(fetched),
             "windows": windows, "buckets": buckets[:12], "extra": None, "credits": None, "source": source}
 
 
@@ -766,7 +794,7 @@ def _judge_rows(out, store, hswap, now):
         if a.get("slot") not in dead or _is_relogin(a) or not same(a):
             return a
         has = a.get("windows") or a.get("buckets")
-        return {**a, "attention": True, **({"note": relogin, "error": None} if has else {"status": "error", "note": None, "error": relogin})}
+        return {**a, "attention": True, "failure": "auth", **({"note": relogin, "error": None} if has else {"status": "error", "note": None, "error": relogin})}
 
     def shown(a, why):
         org_id = stored.get("orgs", {}).get(a.get("slot"), {}) if same(a) else {}

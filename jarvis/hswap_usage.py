@@ -56,9 +56,11 @@ STATES = {
     "unknown": ("사용률을 확인하지 못했습니다.", False),
     "unsupported": ("hswap 이 이 계정의 사용량을 재지 않습니다(usage.remote 설정을 확인하세요).", False),
     "authentication_required": ("다시 로그인해야 합니다.", True),
-    "rate_limited": ("프로바이더가 요청을 제한하고 있습니다.", True),
+    "rate_limited": (provider_usage.LIMIT_NOTE, False),  # 한도 창 소진. 리셋 시각에 풀린다(USAGE-17)
     "error": ("사용량을 읽지 못했습니다.", False),
 }
+# UsageState → failure 코드(USAGE-17, provider_usage.FAILURES). 키 집합은 STATES 와 같다. available 은 null 이다
+CODES = {"stale": "wait", "unknown": "unknown", "unsupported": "unsupported", "authentication_required": "auth", "rate_limited": "limit", "error": "unknown"}
 # Grok 은 포함 크레딧 사용률이 0 이면 creditUsagePercent 를 생략한다(protobuf 기본값). 요금제·측정 시각이 있는 이 답은 0% 다.
 # 2026-11-09 s2 실측: 같은 답에서 Grok 의 /usage 가 "Weekly limit (SuperGrok) 0%" 를 보였다
 NO_CREDIT_USAGE = "Grok reported no included-credit usage"
@@ -70,6 +72,7 @@ _lock = threading.Lock()
 _jobs = {}  # 하네스 → 마지막으로 띄운 Future
 _forced = {}  # 하네스 → refresh 를 앞세워 띄운 Future(그 하네스의 _jobs 와 같으면 새로고침이 이미 들어 있다)
 _last = {}  # 하네스 → (monotonic, 마지막으로 끝난 읽기의 행 또는 None)
+_skipped = {}  # 하네스 → 마지막 refresh 가 계정을 건너뛰었는가. keep 이 그 하네스에 대해 돌았다는 표시를 겸한다(USAGE-19)
 
 
 def _num(v):
@@ -109,22 +112,29 @@ def account(row):
     extra, at = _extra(u.get("balance")), claude_accounts._sec(u.get("measuredAt"))
     state = _str(u.get("state"))
     note, attention = STATES.get(state, (None, False))
+    failure = CODES.get(state)
     plan = (_str(u.get("plan")) or "")[:40]  # 별칭(alias)은 사람이 붙인 이름이라 내보내지 않는다
     if not windows and state == "unknown" and _str(u.get("detail")) == NO_CREDIT_USAGE and plan and at:
         # shortcut: hswap 이 기간 종류와 리셋 시각을 넘기지 않아 주간·리셋 미상으로 둔다. hswap 이 period 를 내보내면 그 값을 쓴다
-        windows, note = [{"key": "weekly", "used": 0, "resets_at": None}], None
+        windows, note, failure = [{"key": "weekly", "used": 0, "resets_at": None}], None, None
     has = bool(windows or extra or (plan and at))
+    if state not in STATES and state != "available" and not has:  # 모르는 상태 이름은 값이 없을 때만 오류다
+        failure = "unknown"
     if not has and state == "stale":  # 이전 값을 줄 측정이 아직 한 번도 없었다(토큰 갱신 대기 등)
         note = "아직 잰 값이 없습니다(hswap 이 지금은 재지 않았습니다)."
         # 사용 중 계정을 한 번도 재지 못했으면 hswap 이 스스로 풀지 못할 수 있다(Codex 가 실행 중이면 갱신을 건너뛴다): 다시 로그인하거나 하네스를 써야 한다.
         # 쉬는 계정에 다시 로그인을 내면 지금 로그인을 바꾸게 되므로 사용 중 계정만 주의로 둔다
         attention = row.get("active") is True
+    elif state == "stale" and row.get("active") is True and at and time.time() - at > claude_accounts.DEAD_S:
+        # USAGE-18: 정상 stale(최장 백오프·유지 주기 1시간, Grok 의 만료 직전 거부)은 6시간을 넘지 않는다
+        note, attention = (f"{claude_accounts._span(time.time() - at)}째 새로 재지 못했습니다. 다시 로그인해야 할 수 있습니다. "
+                           "그 하네스가 데몬·앱으로 상주하면 먼저 끝내야 새 로그인을 씁니다."), True
     label = row.get("label")
     return {"label": label if isinstance(label, str) and len(label) <= 200 and provider_usage.EMAIL.fullmatch(label)
             else "API 키 계정" if row.get("authMode") in ("api_key", "key") else "이름 없는 계정",
             "org": None, "active": row.get("active") is True,
             "status": "ok" if has else "error", "error": None if has else note or "사용량을 확인할 수 없습니다.",
-            "note": note if has else None, "attention": attention, "failure": state if not has and state in STATES else None, "plan": plan or None, "updated_at": at,
+            "note": note if has else None, "attention": attention, "failure": failure, "plan": plan or None, "updated_at": at,
             "windows": windows, "buckets": [], "extra": extra, "credits": None, "source": "hswap",
             # stale·error 행은 마지막 측정값을 싣고 온다. merge 가 판정에만 쓰고 지운다
             "_prior": state in ("stale", "error")}
@@ -265,9 +275,14 @@ def keep(exe):
         body = _json(_run(exe, h, "refresh", "--json")[1]) or {}
         err = body.get("error") if isinstance(body.get("error"), dict) else None
         # 계정별 실패는 accounts[].ok=false 로 온다(result 는 오류 문장이라 쓰지 않는다)
-        bad = sum(1 for r in body.get("accounts") or [] if isinstance(r, dict) and r.get("ok") is False)
-        done[h] = (f"오류({re.sub(r'[^A-Za-z_]', '', str(err.get('type')))[:40]})" if err else f"실패 {bad}개" if bad
-                   else "확인함" if body else "답 없음")
+        rows = [r for r in body.get("accounts") or [] if isinstance(r, dict)]
+        bad = sum(1 for r in rows if r.get("ok") is False)
+        # 건너뜀도 ok:true 다. hswap 0.3.1 harness_swap/adapters/codex.py:469,471 의 keep_alive 가 돌려주는 두 문장
+        # "skipped: a running session keeps it fresh"·"skipped: {display_name} is running and refreshes the active login itself" 의 접두어로 가른다
+        skipped = sum(1 for r in rows if r.get("ok") is True and str(r.get("result") or "").startswith("skipped:"))
+        _skipped[h] = skipped > 0
+        done[h] = (f"오류({re.sub(r'[^A-Za-z_]', '', str(err.get('type')))[:40]})" if err
+                   else " · ".join(x for x in (bad and f"실패 {bad}개", skipped and f"건너뜀 {skipped}개") if x) or ("확인함" if body else "답 없음"))
     return done
 
 
@@ -564,8 +579,7 @@ def _keep_once():
     if not exe or claude_accounts.installer.state == "running":  # 설치하는 동안에는 hswap 을 띄우지 않는다
         return
     done = keep(exe)
-    if any(v != "확인함" for v in done.values()):
-        print(f"[jarvis] hswap 로그인 유지: {done}", flush=True)
+    _say("keep", done, f"로그인 유지: {done}", again_s=None)  # 상주 하네스로 늘 건너뛰는 기기에 매시간 같은 줄이 쌓이지 않게 바뀔 때만
 
 
 def read(harness, fallback, force=False):

@@ -635,12 +635,59 @@ class LoginStateTest(StoreCase):
                         self.assertNotIn(s, text, (kind, slot))
                 self.assertIn("사용량을 읽지 못했습니다.", mine["accounts"][0]["note"])
 
-    def test_usage_error_only_passes_as_an_http_code(self):
-        """covers: USAGE-3, USAGE-7. hswap 의 usageError 는 http-NNN 꼴만 받는다"""
+    def test_usage_error_takes_http_codes_and_listed_tokens(self):
+        """covers: USAGE-3, USAGE-7, USAGE-17. hswap 의 usageError 는 http-NNN 꼴과 정확히 일치하는 허용 토큰만 받는다"""
         row = lambda err: hswap_row(usageStatus="unavailable", usage=None, usageError=err, lastGoodUsage={"sevenDay": {"pct": 1}}, lastGoodFetchedAt=iso(time.time() - 60))
-        self.assertIn("(http-429)", claude_accounts.account(row("http-429"))["note"])
-        for bad in ("http-429 Bearer abc", "Bearer abc", "http-999", "http-42", "\nhttp-429", ["http-429"], 429):
-            self.assertEqual(claude_accounts.account(row(bad))["note"], "사용량을 읽지 못했습니다.", bad)
+        a = claude_accounts.account(row("http-429"))
+        self.assertEqual((a["failure"], a["attention"]), ("rate", False))
+        self.assertIn("(http-429)", a["note"])
+        for err, code in (("http-401", "auth"), ("http-503", "server"), ("http-403", "perm"), ("http-418", "unknown")):
+            a = claude_accounts.account(row(err))
+            self.assertEqual((a["failure"], a["note"], a["attention"]), (code, f"사용량을 읽지 못했습니다({err}).", code == "auth"), err)
+        for err in ("relogin_required", "invalid_grant", "no_refresh_token", "no-access-token"):
+            a = claude_accounts.account(row(err))
+            self.assertEqual((a["failure"], a["attention"], a["note"]), ("auth", True, claude_accounts.STATUS["relogin_required"][0]), err)
+        a = claude_accounts.account(row("keychain_item_present"))
+        self.assertEqual((a["failure"], a["attention"]), ("keychain", True))
+        for err, code, text in (("timeout", "net", "시간 초과"), ("network", "net", "네트워크 오류"),
+                                ("refresh-failed", "wait", "토큰 갱신 실패"), ("consume-busy", "wait", "다른 hswap 작업이 슬롯을 쓰는 중")):
+            a = claude_accounts.account(row(err))
+            self.assertEqual((a["failure"], a["attention"], a["note"]), (code, False, f"사용량을 읽지 못했습니다({text})."), err)
+        for bad in ("http-429 Bearer abc", "Bearer abc", "http-999", "http-42", "\nhttp-429", ["http-429"], 429, "stores-disagree", "Relogin_required", None):
+            a = claude_accounts.account(row(bad))
+            self.assertEqual((a["note"], a["failure"]), ("사용량을 읽지 못했습니다.", "unknown"), bad)
+
+    def test_long_unreadable_slot_is_a_relogin(self):
+        """covers: USAGE-7. 마지막 성공 값이 6시간보다 오래된 429·refresh-failed 는 일시 제한이 아니라 죽은 자격이다"""
+        def row(err, hours):
+            good = {} if hours is None else {"lastGoodFetchedAt": iso(time.time() - hours * 3600)}
+            return claude_accounts.account(hswap_row(usageStatus="unavailable", usage=None, usageError=err, active=False, lastGoodUsage={"sevenDay": {"pct": 78}}, **good))
+        for err, why in (("http-429", "http-429"), ("refresh-failed", "토큰 갱신 실패")):
+            a = row(err, 7)
+            self.assertEqual((a["status"], a["failure"], a["attention"]), ("ok", "auth", True), err)
+            self.assertTrue(a["note"].startswith(f"사용량을 6시간 넘게 읽지 못했습니다({why}). 다시 로그인해야 합니다"), a["note"])
+            self.assertNotEqual(a["note"], claude_accounts.STATUS["relogin_required"][0])  # 묶음 모습(_is_relogin)은 바꾸지 않는다
+        self.assertEqual((row("consume-busy", 7)["failure"], row("consume-busy", 7)["attention"]), ("wait", False))
+        for hours in (5, None):  # 6시간 안이거나 마지막 성공 시각을 모르면 올리지 않는다
+            a = claude_accounts.account(hswap_row(usageStatus="unavailable", usage=None, usageError="http-429", active=False)) if hours is None else row("http-429", hours)
+            self.assertEqual((a["failure"], a["attention"]), ("rate", False), hours)
+
+    def test_every_status_has_a_failure_code(self):
+        """covers: USAGE-17. usageStatus 의 모든 키가 닫힌 코드로 가고, 만료 임박은 일시 코드보다 앞선다"""
+        want = {"ok": None, "api_key": None, "token_expired": "wait", "no_saved_usage": "wait", "relogin_required": "auth",
+                "keychain_unavailable": "keychain", "keychain_item_present": "keychain", "config_conflict": "perm",
+                "foreign_credential": "perm", "no_credentials": "auth", "something_new": "unknown"}
+        self.assertLessEqual(set(claude_accounts.STATUS), set(want))
+        for status, code in want.items():
+            self.assertEqual(claude_accounts.account(hswap_row(usageStatus=status))["failure"], code, status)
+        soon = iso(time.time() + 86400)
+        self.assertEqual(claude_accounts.account(hswap_row(loginExpiresAt=soon))["failure"], "expiring")
+        rate = claude_accounts.account(hswap_row(usageStatus="unavailable", usageError="http-429", loginExpiresAt=soon))
+        self.assertEqual((rate["failure"], rate["attention"]), ("expiring", True))
+        self.assertEqual(claude_accounts.account(hswap_row(usageStatus="relogin_required", loginExpiresAt=soon))["failure"], "auth")
+        self.assertEqual(claude_accounts.account(hswap_row(usageStatus="no_credentials"), headless=True)["failure"], "keychain")
+        dead = store_value(shown_row(active=True, note=RELOGIN, attention=True))
+        self.assertEqual(claude_accounts._judge_rows(cli_answer(shown_row(failure=None)), dead, True, NOW)[0][0]["failure"], "auth")
 
     def test_record_of_another_account_says_only_that(self):
         """covers: USAGE-7. 전환 뒤에는 이전 슬롯의 만료·오류·접근 토큰을 붙이지 않고, 옛 슬롯을 덮어쓰게 안내하지 않는다"""

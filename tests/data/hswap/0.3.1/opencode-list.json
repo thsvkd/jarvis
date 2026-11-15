@@ -1,0 +1,63 @@
+{
+  "_fixture": {
+    "hswap": "0.3.1",
+    "collected_at": 1794761398,
+    "argv": "hswap list opencode --json --cached",
+    "device": "thsvkd-macmini"
+  },
+  "schemaVersion": 1,
+  "harnesses": [
+    {
+      "harness": "opencode",
+      "accounts": [
+        {
+          "provider": "opencode-go",
+          "active": true,
+          "authMode": "key",
+          "label": "account 1",
+          "usage": {
+            "state": "unsupported",
+            "measuredAt": null,
+            "plan": null,
+            "balance": null,
+            "detail": "",
+            "windows": []
+          }
+        },
+        {
+          "provider": "opencode",
+          "active": true,
+          "authMode": "oauth",
+          "label": "account 2",
+          "usage": {
+            "state": "rate_limited",
+            "measuredAt": "2026-11-15T16:47:51Z",
+            "plan": null,
+            "balance": null,
+            "detail": "",
+            "windows": [
+              {
+                "name": "5h",
+                "usedPercent": 100.0,
+                "windowSeconds": 18000,
+                "resetsAt": "2026-11-15T17:01:58Z"
+              },
+              {
+                "name": "weekly",
+                "usedPercent": 52.0,
+                "windowSeconds": 604800,
+                "resetsAt": "2026-11-16T00:00:00Z"
+              },
+              {
+                "name": "monthly",
+                "usedPercent": 32.0,
+                "windowSeconds": null,
+                "resetsAt": "2026-11-22T12:41:32Z"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

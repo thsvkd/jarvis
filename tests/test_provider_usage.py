@@ -64,6 +64,23 @@ class CaamProviderTest(unittest.TestCase):
         self.assertEqual(row["label"], "기본 계정")
         self.assertTrue(row["attention"])
 
+    def test_rows_carry_a_closed_failure_code(self):
+        """covers: USAGE-17. caam 행의 failure 와 attention. 한도 창 소진(limit_stage)만으로는 attention 이 아니다"""
+        cases = (("login", {"health": {"login_required": True}}, {}, ("auth", True)),
+                 ("mismatch", {}, {"account_id": "other@example.com"}, ("unknown", True)),
+                 ("limit_stage", {}, {"limit_stage": "blocked"}, ("limit", False)),
+                 ("degraded", {}, {"quota_status": "degraded"}, ("unknown", True)),
+                 ("ok", {}, {}, (None, False)))
+        for name, ident, usage, want in cases:
+            ls = {"profiles": [{"tool": "grok", "type": "vault", "name": "p", "identity": {"email": "one@example.com"}, **ident}]}
+            limits = [{"provider": "grok", "profile_name": "p", "usage": {"quota_status": "ok", "primary_window": {"used_percent": 20}, **usage}}]
+            with self.subTest(name), mock.patch.object(provider_usage.caam_usage, "_json", side_effect=[ls, limits]):
+                row = provider_usage.read_provider("/fake/caam", "grok")[0]
+                self.assertEqual((row["failure"], row["attention"]), want)
+                self.assertIn(row["failure"], (*provider_usage.FAILURES, None))
+                if name == "limit_stage":
+                    self.assertEqual(row["note"], "사용 한도에 도달했습니다(리셋 시각에 풀립니다).")
+
 
 if __name__ == "__main__":
     unittest.main()

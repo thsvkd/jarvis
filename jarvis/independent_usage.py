@@ -93,6 +93,8 @@ def read(force=False):
             else:
                 accounts = value if isinstance(value, list) else []
                 failed = not future.done()
+                if name == "codex":  # 갱신이 멈춘 로그인(USAGE-19). 실패하면 이 try 가 삼켜 login 은 None 이다
+                    login = codex_native_usage.login(hswap_usage._skipped.get("codex"))
         except Exception:
             pass
         if failed or not accounts:
