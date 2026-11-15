@@ -85,6 +85,31 @@ devices[1].logins = ["codex", "grok"];
 click({ prov: "all" });
 assert.match(summary(), /data-login="second" data-lp="codex"/);
 assert.match(summary(), /Codex 다시 로그인/);
+// covers: USAGE-3, USAGE-8. hswap 의 값 없는 행은 상태 문구(고정 한국어)를 접지 않고 보이고, 요약 카드의 다시 로그인 버튼은 .ul-acts 묶음 안에 있다
+{
+  const codex = devices[1].providers[1].accounts, prev = codex[0];
+  const relogBtn = /<div class="ul-acts"><button type="button" class="seg-action" data-login="second" data-lp="codex">Codex 다시 로그인<\/button><\/div>/;
+  devices[1].logins = ["codex"];
+  codex[0] = { ...prev, source: "hswap", failure: "authentication_required", error: "다시 로그인해야 합니다.", attention: true };
+  click({ prov: "all" });
+  assert.match(summary(), /<span class="badge" data-tone="crit">로그인 만료<\/span>/);
+  assert.match(summary(), /<p class="ul-err">다시 로그인해야 합니다\.<\/p>/);
+  assert.doesNotMatch(summary(), /원문 보기/);
+  assert.match(summary(), relogBtn);
+  codex[0] = { ...prev, source: "hswap", failure: "stale", error: "아직 잰 값이 없습니다(hswap 이 지금은 재지 않았습니다).", attention: true };
+  click({ prov: "all" });
+  assert.match(summary(), /<span class="badge" data-tone="crit">측정 전<\/span>/);
+  assert.match(summary(), /<p class="ul-err">아직 잰 값이 없습니다\(hswap 이 지금은 재지 않았습니다\)\.<\/p><p class="ul-why">다시 로그인하거나/);
+  assert.match(summary(), relogBtn);
+  // 다른 수집기 원문의 stale 은 '측정 전' 이 아니고 원문은 계속 접힌다
+  codex[0] = { ...prev, source: "caam", failure: null, error: "stale file handle", attention: false };
+  click({ prov: "all" });
+  assert.doesNotMatch(summary(), /측정 전/);
+  assert.match(summary(), /<summary>원문 보기<\/summary><pre>stale file handle<\/pre>/);
+  codex[0] = prev;
+  devices[1].logins = ["codex", "grok"];
+  click({ prov: "all" });
+}
 
 // 기기 행의 '로그인' 버튼은 저장한 자격이 없다고 확인된 프로바이더에만 나온다
 devices[0].fresh_logins = ["codex"];

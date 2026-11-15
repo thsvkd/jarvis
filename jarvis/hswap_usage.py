@@ -116,12 +116,15 @@ def account(row):
     has = bool(windows or extra or (plan and at))
     if not has and state == "stale":  # 이전 값을 줄 측정이 아직 한 번도 없었다(토큰 갱신 대기 등)
         note = "아직 잰 값이 없습니다(hswap 이 지금은 재지 않았습니다)."
+        # 사용 중 계정을 한 번도 재지 못했으면 hswap 이 스스로 풀지 못할 수 있다(Codex 가 실행 중이면 갱신을 건너뛴다): 다시 로그인하거나 하네스를 써야 한다.
+        # 쉬는 계정에 다시 로그인을 내면 지금 로그인을 바꾸게 되므로 사용 중 계정만 주의로 둔다
+        attention = row.get("active") is True
     label = row.get("label")
     return {"label": label if isinstance(label, str) and len(label) <= 200 and provider_usage.EMAIL.fullmatch(label)
             else "API 키 계정" if row.get("authMode") in ("api_key", "key") else "이름 없는 계정",
             "org": None, "active": row.get("active") is True,
             "status": "ok" if has else "error", "error": None if has else note or "사용량을 확인할 수 없습니다.",
-            "note": note if has else None, "attention": attention, "failure": None, "plan": plan or None, "updated_at": at,
+            "note": note if has else None, "attention": attention, "failure": state if not has and state in STATES else None, "plan": plan or None, "updated_at": at,
             "windows": windows, "buckets": [], "extra": extra, "credits": None, "source": "hswap",
             # stale·error 행은 마지막 측정값을 싣고 온다. merge 가 판정에만 쓰고 지운다
             "_prior": state in ("stale", "error")}

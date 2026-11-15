@@ -121,6 +121,21 @@ class ReadTest(FakeHswapCase):
         empty = hswap_usage.account(acct("grok", state="stale", measuredAt=None, detail="the active login's token is due for refresh"))
         self.assertEqual((empty["status"], empty["error"]), ("error", "아직 잰 값이 없습니다(hswap 이 지금은 재지 않았습니다)."))
 
+    def test_rows_without_values_carry_the_state_code_as_failure(self):
+        """covers: USAGE-3, USAGE-8. 값 없는 행만 상태 코드를 failure 로 싣고, 한 번도 재지 못한 stale 은 사람이 손봐야 한다"""
+        auth = hswap_usage.account(acct("codex", state="authentication_required", measuredAt=None, detail="401 token_expired"))
+        self.assertEqual((auth["status"], auth["failure"], auth["attention"]), ("error", "authentication_required", True))
+        empty = hswap_usage.account(acct("codex", state="stale", measuredAt=None, detail="the active login's token is due for refresh"))
+        self.assertEqual((empty["status"], empty["failure"], empty["attention"]), ("error", "stale", True))
+        idle = hswap_usage.account({**acct("codex", state="stale", measuredAt=None), "active": False})
+        self.assertEqual((idle["failure"], idle["attention"]), ("stale", False))  # 쉬는 계정에 다시 로그인을 내면 지금 로그인이 바뀐다
+        prior = hswap_usage.account(acct("codex", state="stale", measuredAt=None, windows=[CODEX_7D]))
+        self.assertEqual((prior["status"], prior["failure"], prior["attention"]), ("ok", None, False))  # 이전 값이 있으면 오류가 아니다
+        for state in ("not_a_state", {"x": 1}):
+            row = hswap_usage.account(acct("codex", state=state, measuredAt=None, detail="/Users/someone"))
+            self.assertEqual((row["status"], row["failure"]), ("error", None), state)
+            self.assertNotIn("/Users/someone", json.dumps(row))  # detail 원문은 failure 로도 내보내지 않는다
+
     def test_grok_without_credit_percent_is_zero_percent(self):
         """covers: USAGE-3, USAGE-8"""
         # s2 실측(2026-11-08): 창 없이 요금제·잔액·측정 시각만 있다. Grok 의 /usage 는 같은 때 주간 0% 를 보였다(2026-11-09)

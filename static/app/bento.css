@@ -1142,7 +1142,7 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
 .ul-muted { color: var(--text-3); font-size: var(--fs-sm); }
 .ul-err { color: var(--crit-ink); font-size: var(--fs-sm); background: var(--crit-soft); padding: var(--sp-2) var(--sp-2_5); border-radius: var(--r-xs); overflow-wrap: anywhere; }
 /* 로그인 문제 한 덩어리: 상태(ul-st-t) -> 설명(ul-why) -> 동작(ul-acts). 기기 로그인 줄과 로그인 실패 화면이 같은 모양이다 */
-.ul-st { display: grid; gap: var(--sp-1_5); margin: var(--sp-2) 0; padding: var(--sp-2_5) var(--sp-3); border-radius: var(--r-xs); background: var(--tone-soft); }
+.ul-st { display: grid; gap: var(--sp-2); margin: var(--sp-2) 0; padding: var(--sp-3); border-radius: var(--r-xs); background: var(--tone-soft); }
 .ul-st:first-child { margin-top: 0; } .ul-st:last-child { margin-bottom: 0; }
 .ul-st-t { color: var(--tone-ink); font-size: var(--fs-sm); font-weight: var(--fw-semibold); overflow-wrap: anywhere; }
 .ul-why { color: var(--text-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
@@ -1188,7 +1188,7 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
 .ul-mx thead .ul-dot { margin-right: var(--sp-1_5); }
 .ul-mx tbody th { font-weight: var(--fw-regular); min-width: 190px; }
 .ul-mx tbody th .ul-meta { margin-top: var(--sp-1); }
-.ul-mx tbody th > .ul-muted { display: block; margin-top: var(--sp-1); overflow-wrap: anywhere; }
+.ul-mx tbody th > .ul-muted, #ulDlgB > .ul-muted { display: block; margin-top: var(--sp-1); overflow-wrap: anywhere; }
 /* 자세히: 프로바이더 열을 같은 너비로(내용 길이에 따라 열마다 달라지지 않게). --n 은 프로바이더 열 수 */
 .ul-mx[data-mode="full"] table { table-layout: fixed; min-width: calc(210px + var(--n, 3) * 260px); }
 .ul-mx[data-mode="full"] thead th:first-child { width: 210px; }
@@ -1215,11 +1215,13 @@ html.is-stale main .tile, html.is-stale main .svc { filter: saturate(.55); }
 .ul-paste { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
 .ul-paste p { flex-basis: 100%; }
 .ul-paste input { flex: 1 1 14rem; min-width: 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--tile-2); color: var(--text); font: var(--fs-sm) var(--mono); }
-.ul-acct > .seg-action, .ul-acct > .ul-acts, .ul-summary-account > .seg-action { margin-top: var(--sp-2); }
+/* 버튼 줄(.ul-acts·낱개 버튼) 위 여백 하나: 카드·요약·칸·대화상자 어디서든 직계일 때 8 */
+.ul-acct > .seg-action, .ul-acct > .ul-acts, .ul-summary-account > .ul-acts, .ul-full > * + .ul-acts, #ulDlgB > * + .ul-acts, .ul-full > * + .seg-action, #ulDlgB > * + .seg-action { margin-top: var(--sp-2); }
 /* 사용량 표·상세의 버튼은 칸의 작은 글자에 맞춘 낮은 컨트롤 하나로 통일한다(높이 32) */
 #usage .seg-action, #ulDlg .seg-action { font-size: var(--fs-sm); line-height: 18px; padding: var(--sp-1_5) var(--sp-3); }
-/* 칸·상세에서 카드 뒤에 오는 버튼(계정 추가 등)은 카드와 띄운다 */
-.ul-full > * + .seg-action, #ulDlgB > * + .seg-action { margin-top: var(--sp-2); }
+/* 대화상자 직계 버튼(최근 hswap 로그)은 줄로 떼어 위·아래 8 */
+#ulDlgB > .seg-action { display: block; margin-bottom: var(--sp-2); }
+#usage .seg-action:not([aria-disabled="true"]):hover, #ulDlg .seg-action:not([aria-disabled="true"]):hover { background: var(--tile-3); }
 /* 하네스 갱신: 이름 · 판 · 버튼을 한 줄에, 줄 사이는 좁게, 묶음 위아래는 기기 메타와 띄운다 */
 .ul-hn { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1_5); margin-top: var(--sp-2); }
 .ul-hn ul { display: grid; grid-template-columns: max-content auto; align-items: center; gap: var(--sp-2) var(--sp-4); margin: 0; padding: 0; list-style: none; }

@@ -43,6 +43,7 @@
   ["perm","권한 문제","이 기기에서 사용량을 읽을 권한이 없습니다.",/관리자 권한|permission|denied|403/i],
   ["net","네트워크 오류","프로바이더에 닿지 못했습니다. 잠시 뒤 새로고침하세요.",/time.?out|timed out|network|connect|ENOTFOUND|EAI_|DNS|fetch failed|socket/i],
   ["server","프로바이더 오류","프로바이더 서버가 오류를 냈습니다. 잠시 뒤 새로고침하세요.",/\b5\d\d\b|server error|unavailable|bad gateway/i],
+  ["wait","측정 전","다시 로그인하거나 그 하네스를 한 번 쓰면 hswap 이 다시 잽니다.",/^stale /], // failure 가 hswap 의 stale 일 때만(다른 수집기 원문의 stale 은 아니다)
  ];
  const kind=a=>{const t=(a.failure||"")+" "+(a.error||"");return KINDS.find(k=>k[3].test(t))||["unknown","알 수 없는 오류","사용량을 읽지 못했습니다.",null];};
  const peak=a=>{const v=[...a.windows,...a.buckets].map(cur).filter(u=>u!=null);return isErr(a)||!v.length?null:Math.max(...v);};
@@ -105,7 +106,8 @@
   return "";
  }
  function body(a){
-  if(isErr(a)){const k=kind(a);return html`<p class="ul-err">${k[2]}</p>${a.error?html`<details class="ul-raw"><summary>원문 보기</summary><pre>${a.error}</pre></details>`:""}`;}
+  // hswap 의 error 는 상태별 고정 한국어 문구(STATES)라 접지 않고 그대로 보인다
+  if(isErr(a)){const k=kind(a);if(a.source==="hswap"&&a.error)return html`<p class="ul-err">${a.error}</p>${k[0]==="wait"&&a.attention?html`<p class="ul-why">${k[2]}</p>`:""}`;return html`<p class="ul-err">${k[2]}</p>${a.error?html`<details class="ul-raw"><summary>원문 보기</summary><pre>${a.error}</pre></details>`:""}`;}
   const note=a.note?html`<p class="${a.attention?"ul-why":"ul-note"}">${a.note}</p>`:""; // 마지막으로 읽은 값에 붙는 이유
   // 창 없이 요금제·잔액만 있는 계정(hswap 의 Grok)은 잔액 줄을 함께 보인다
   if(!a.windows.length&&!a.buckets.length)return (note||a.extra)?html`${note}${extra(a.extra)}`:html`<p class="ul-muted">${a.status==="fetching"?"사용량을 읽는 중입니다.":"아직 사용량을 읽지 않았습니다."}</p>`;
@@ -189,7 +191,7 @@
   const soon=wins.length?html`<div class="tile ul-soon"><h3 class="sub-h">곧 풀리는 한도 (50% 이상)</h3><ol>${wins.slice(0,6).map(({a,p,w})=>html`<li><span class="ul-when" title="${at(w.resets_at)}">${left(w.resets_at)}</span>${dot(p.id)}<span class="ul-email">${a.label}</span><span class="ul-wl">${p.name} ${WIN[w.key]||w.key}</span>${meter(w.used)}<b class="ul-wp" data-tone="${tone(w.used)}">${pct(w.used)}</b></li>`)}</ol></div>`:"";
   const summaryAccounts=uniq(false).filter(({a})=>!S.hot||isHot(a)); // 최신 값을 고른 뒤 주의 필터를 적용한다
   const groups=columns(false).map(p=>({p,accounts:summaryAccounts.filter(x=>x.p.id===p.id)})).filter(g=>g.accounts.length);
-  const summary=groups.length?html`<div class="ul-summary"><h3 class="sub-h">프로바이더별 계정 사용량</h3><p class="ul-muted">같은 계정은 사용량이 있는 최근 값으로 한 번 표시합니다.</p>${groups.map(({p,accounts})=>html`<section class="tile ul-group"><h4>${dot(p.id)} ${p.name} <span class="ul-muted">${accounts.length}개 계정</span></h4><div class="ul-summary-grid">${accounts.map(({a,p,d})=>html`<div class="ul-summary-account">${head(a)}${body(a)}${relogIf(a,d,p)}<p class="ul-age">${d.host||d.id} · ${a.updated_at?P.fmt.ago(a.updated_at)+" 확인":"확인 시각 모름"}</p></div>`)}</div></section>`)}</div>`:"";
+  const summary=groups.length?html`<div class="ul-summary"><h3 class="sub-h">프로바이더별 계정 사용량</h3><p class="ul-muted">같은 계정은 사용량이 있는 최근 값으로 한 번 표시합니다.</p>${groups.map(({p,accounts})=>html`<section class="tile ul-group"><h4>${dot(p.id)} ${p.name} <span class="ul-muted">${accounts.length}개 계정</span></h4><div class="ul-summary-grid">${accounts.map(({a,p,d})=>html`<div class="ul-summary-account">${head(a)}${body(a)}${acts(relogIf(a,d,p))}<p class="ul-age">${d.host||d.id} · ${a.updated_at?P.fmt.ago(a.updated_at)+" 확인":"확인 시각 모름"}</p></div>`)}</div></section>`)}</div>`:"";
   const rows=S.devs.filter(visible),cols=columns(S.hot).filter(c=>S.prov==="all"||c.id===S.prov);
   if(!rows.length)return html`${kpi}${soon}<div class="tile ul-none"><p>${filtering()?"조건에 맞는 계정이 없습니다.":"사용량을 보여 줄 기기가 없습니다."}</p>${filtering()?html`<button type="button" class="seg-action" data-clear>필터 해제</button>`:""}</div>`;
   const cell=(d,c)=>{
