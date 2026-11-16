@@ -88,6 +88,21 @@ class Releases(unittest.TestCase):
         with self.serve(manifest("1.2.0", data), data):  # 되돌린 버전은 다시 받지 않는다
             self.assertEqual(self_update.start("1.1.0")[0], 409)
 
+    def test_the_staging_folder_is_not_created_owner_only(self):
+        """Python 3.13+ Windows 는 0o700 폴더(mkdtemp)에 상속 없는 ACL 을 붙여, 관리자 SSH 가 받은 버전을 예약 작업이 열지 못했다(1.17.0 배포)."""
+        modes, real = [], os.mkdir
+
+        def spy(path, mode=0o777, **kw):
+            if os.path.basename(path).startswith(".tmp-"):
+                modes.append(mode)
+            return real(path, mode, **kw)
+        data = tgz("1.2.0", {"{p}/jarvis/__init__.py": b""})
+        with self.serve(manifest("1.2.0", data), data), mock.patch("os.mkdir", spy):
+            self_update.install(manifest("1.2.0", data))
+        self.assertTrue(modes)
+        self.assertNotIn(0o700, modes)
+        self.assertTrue(os.path.isfile(os.path.join(self.d, "versions", "1.2.0", "jarvis", "__init__.py")))
+
     def test_keeps_running_versions(self):
         """CLI 가 두 번 받아도 서비스가 도는 버전(마지막 확정본)은 지우지 않는다."""
         os.makedirs(os.path.join(self.d, "versions", "1.3.0", "jarvis"))

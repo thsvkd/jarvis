@@ -270,6 +270,20 @@ class Mac(Base):
         self.assertFalse(os.path.exists(self.app))
         self.assertTrue(os.path.isdir(self.old))
 
+    def test_the_staging_folder_is_not_created_owner_only(self):
+        """Python 3.13+ Windows 는 0o700 폴더(mkdtemp)에 상속 없는 ACL 을 붙여, 관리자 SSH 가 옮긴 app 을 예약 작업이 열지 못한다."""
+        modes, real = [], os.mkdir
+
+        def spy(path, mode=0o777, **kw):
+            if os.path.basename(path).startswith(relocate.TMP):
+                modes.append(mode)
+            return real(path, mode, **kw)
+        with mock.patch("os.mkdir", spy):
+            self.assertEqual(relocate.run()["state"], "pending_reload")
+        self.assertTrue(modes)
+        self.assertNotIn(0o700, modes)
+        self.assert_copied()
+
     def test_a_half_copied_tmp_is_recovered(self):
         """covers: RELOC-5"""
         stale = os.path.join(self.root, relocate.TMP + "dead")

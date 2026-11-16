@@ -1,7 +1,7 @@
 {
   "_fixture": {
-    "hswap": "0.3.1",
-    "collected_at": 1794761385,
+    "hswap": "0.3.2",
+    "collected_at": 1794802871,
     "argv": "hswap claude list --json",
     "device": "thsvkd-macmini"
   },
@@ -13,30 +13,30 @@
       "usageStatus": "ok",
       "usage": {
         "sevenDay": {
-          "pct": 56.0,
-          "resetsAt": "2026-11-17T00:59:59.619358+00:00",
-          "countdown": "1d 8h",
-          "clock": "Nov 17 09:59",
-          "expectedPct": 80.8,
+          "pct": 62.0,
+          "resetsAt": "2026-11-17T01:00:00.078318+00:00",
+          "countdown": "20h 38m",
+          "clock": "Nov 17 10:00",
+          "expectedPct": 87.7,
           "aheadOfPace": false,
-          "projectedExhaustionAt": "2026-11-20T03:28:51Z",
+          "projectedExhaustionAt": "2026-11-19T22:35:52Z",
           "willLastToReset": true
         },
         "scoped": [
           {
-            "pct": 6.0,
-            "resetsAt": "2026-11-17T00:59:59.619542+00:00",
-            "countdown": "1d 8h",
-            "clock": "Nov 17 09:59",
-            "expectedPct": 80.8,
+            "pct": 10.0,
+            "resetsAt": "2026-11-17T01:00:00.078477+00:00",
+            "countdown": "20h 38m",
+            "clock": "Nov 17 10:00",
+            "expectedPct": 87.7,
             "aheadOfPace": false,
-            "projectedExhaustionAt": "2027-02-12T08:09:20Z",
+            "projectedExhaustionAt": "2027-01-10T10:06:26Z",
             "willLastToReset": true,
             "name": "Fable"
           }
         ]
       },
-      "usageFetchedAt": "2026-11-15T16:47:21Z",
+      "usageFetchedAt": "2026-11-16T04:18:38Z",
       "loginExpiresAt": "2026-12-08T18:27:21Z",
       "plan": "max",
       "rateLimitTier": "default_claude_max_20x",
@@ -53,7 +53,7 @@
         "sevenDay": {
           "pct": 78.0,
           "resetsAt": "2026-11-19T05:00:00.105100+00:00",
-          "countdown": "3d 12h",
+          "countdown": "3d 0h",
           "clock": "Nov 19 14:00",
           "expectedPct": 26.3,
           "aheadOfPace": true,
@@ -64,7 +64,7 @@
           {
             "pct": 38.0,
             "resetsAt": "2026-11-19T05:00:00.105247+00:00",
-            "countdown": "3d 12h",
+            "countdown": "3d 0h",
             "clock": "Nov 19 14:00",
             "expectedPct": 26.3,
             "aheadOfPace": false,
@@ -91,29 +91,29 @@
         },
         "sevenDay": {
           "pct": 95.0,
-          "resetsAt": "2026-11-17T15:59:59.710932+00:00",
-          "countdown": "1d 23h",
-          "clock": "Nov 18 00:59",
-          "expectedPct": 71.9,
+          "resetsAt": "2026-11-17T16:00:00.325373+00:00",
+          "countdown": "1d 11h",
+          "clock": "Nov 18 01:00",
+          "expectedPct": 78.7,
           "aheadOfPace": true,
-          "projectedExhaustionAt": "2026-11-15T23:09:19Z",
+          "projectedExhaustionAt": "2026-11-16T11:05:52Z",
           "willLastToReset": false
         },
         "scoped": [
           {
             "pct": 57.0,
-            "resetsAt": "2026-11-17T15:59:59.711131+00:00",
-            "countdown": "1d 23h",
-            "clock": "Nov 18 00:59",
-            "expectedPct": 71.9,
+            "resetsAt": "2026-11-17T16:00:00.325554+00:00",
+            "countdown": "1d 11h",
+            "clock": "Nov 18 01:00",
+            "expectedPct": 78.7,
             "aheadOfPace": false,
-            "projectedExhaustionAt": "2026-11-19T11:55:32Z",
+            "projectedExhaustionAt": "2026-11-20T07:49:46Z",
             "willLastToReset": true,
             "name": "Fable"
           }
         ]
       },
-      "lastGoodFetchedAt": "2026-11-15T16:47:51Z",
+      "lastGoodFetchedAt": "2026-11-16T04:08:34Z",
       "loginExpiresAt": "2026-12-02T21:11:57Z",
       "email": "user2@example.com",
       "organizationName": "Org 1",
@@ -126,30 +126,30 @@
       "usage": null,
       "lastGoodUsage": {
         "sevenDay": {
-          "pct": 70.0,
-          "resetsAt": "2026-11-17T14:00:00.070196+00:00",
-          "countdown": "1d 21h",
+          "pct": 95.0,
+          "resetsAt": "2026-11-17T14:00:00.522937+00:00",
+          "countdown": "1d 9h",
           "clock": "Nov 17 23:00",
-          "expectedPct": 73.1,
-          "aheadOfPace": false,
-          "projectedExhaustionAt": "2026-11-17T21:25:30Z",
-          "willLastToReset": true
+          "expectedPct": 79.9,
+          "aheadOfPace": true,
+          "projectedExhaustionAt": "2026-11-16T11:17:29Z",
+          "willLastToReset": false
         },
         "scoped": [
           {
-            "pct": 33.0,
-            "resetsAt": "2026-11-17T14:00:00.070379+00:00",
-            "countdown": "1d 21h",
-            "clock": "Nov 17 23:00",
-            "expectedPct": 73.1,
+            "pct": 44.0,
+            "resetsAt": "2026-11-17T13:59:59.523091+00:00",
+            "countdown": "1d 9h",
+            "clock": "Nov 17 22:59",
+            "expectedPct": 79.9,
             "aheadOfPace": false,
-            "projectedExhaustionAt": "2026-11-26T02:06:49Z",
+            "projectedExhaustionAt": "2026-11-23T07:03:40Z",
             "willLastToReset": true,
             "name": "Fable"
           }
         ]
       },
-      "lastGoodFetchedAt": "2026-11-15T16:47:51Z",
+      "lastGoodFetchedAt": "2026-11-16T04:13:36Z",
       "email": "user3@example.com",
       "organizationName": "user3@example.com's Organization",
       "organizationUuid": "00000000-0000-4000-8000-000000000004"
@@ -161,25 +161,28 @@
       "usage": null,
       "lastGoodUsage": {
         "fiveHour": {
-          "pct": 0.0
+          "pct": 100.0,
+          "resetsAt": "2026-11-16T07:09:59.577271+00:00",
+          "countdown": "2h 48m",
+          "clock": "16:09"
         },
         "sevenDay": {
-          "pct": 0.0,
-          "resetsAt": "2026-11-22T11:00:00+00:00",
-          "countdown": "6d 18h",
-          "clock": "Nov 22 20:00"
+          "pct": 17.0,
+          "resetsAt": "2026-11-22T10:59:59.577293+00:00",
+          "countdown": "6d 6h",
+          "clock": "Nov 22 19:59"
         },
         "scoped": [
           {
-            "pct": 0.0,
-            "resetsAt": "2026-11-22T11:00:00+00:00",
-            "countdown": "6d 18h",
-            "clock": "Nov 22 20:00",
+            "pct": 6.0,
+            "resetsAt": "2026-11-22T10:59:59.577659+00:00",
+            "countdown": "6d 6h",
+            "clock": "Nov 22 19:59",
             "name": "Fable"
           }
         ]
       },
-      "lastGoodFetchedAt": "2026-11-15T16:47:21Z",
+      "lastGoodFetchedAt": "2026-11-16T04:18:38Z",
       "loginExpiresAt": "2026-12-03T15:10:04Z",
       "email": "user3@example.com",
       "organizationName": "Org 1",

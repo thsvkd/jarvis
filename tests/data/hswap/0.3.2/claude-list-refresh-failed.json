@@ -1,7 +1,7 @@
 {
   "_fixture": {
-    "hswap": "0.3.1",
-    "collected_at": 1794761470,
+    "hswap": "0.3.2",
+    "collected_at": 1794802862,
     "argv": "hswap claude list --json",
     "device": "pit5"
   },
@@ -13,30 +13,30 @@
       "usageStatus": "ok",
       "usage": {
         "sevenDay": {
-          "pct": 56.0,
-          "resetsAt": "2026-11-17T01:00:00.412540+00:00",
-          "countdown": "1d 8h",
+          "pct": 62.0,
+          "resetsAt": "2026-11-17T01:00:00.361362+00:00",
+          "countdown": "20h 38m",
           "clock": "Nov 17 10:00",
-          "expectedPct": 80.9,
+          "expectedPct": 87.7,
           "aheadOfPace": false,
-          "projectedExhaustionAt": "2026-11-20T03:35:40Z",
+          "projectedExhaustionAt": "2026-11-19T22:38:07Z",
           "willLastToReset": true
         },
         "scoped": [
           {
-            "pct": 6.0,
-            "resetsAt": "2026-11-17T01:00:00.412704+00:00",
-            "countdown": "1d 8h",
+            "pct": 10.0,
+            "resetsAt": "2026-11-17T01:00:00.361587+00:00",
+            "countdown": "20h 38m",
             "clock": "Nov 17 10:00",
-            "expectedPct": 80.9,
+            "expectedPct": 87.7,
             "aheadOfPace": false,
-            "projectedExhaustionAt": "2027-02-12T09:12:55Z",
+            "projectedExhaustionAt": "2027-01-10T10:20:22Z",
             "willLastToReset": true,
             "name": "Fable"
           }
         ]
       },
-      "usageFetchedAt": "2026-11-15T16:51:10Z",
+      "usageFetchedAt": "2026-11-16T04:20:02Z",
       "loginExpiresAt": "2026-12-11T18:49:38Z",
       "plan": "max",
       "rateLimitTier": "default_claude_max_20x",
@@ -51,29 +51,29 @@
       "usage": {
         "sevenDay": {
           "pct": 100.0,
-          "resetsAt": "2026-11-19T04:59:59.974269+00:00",
-          "countdown": "3d 12h",
+          "resetsAt": "2026-11-19T04:59:59.610155+00:00",
+          "countdown": "3d 0h",
           "clock": "Nov 19 13:59",
-          "expectedPct": 49.9,
+          "expectedPct": 56.8,
           "aheadOfPace": true,
-          "projectedExhaustionAt": "2026-11-15T16:50:02Z",
+          "projectedExhaustionAt": "2026-11-16T04:21:01Z",
           "willLastToReset": false
         },
         "scoped": [
           {
             "pct": 50.0,
-            "resetsAt": "2026-11-19T04:59:59.974480+00:00",
-            "countdown": "3d 12h",
+            "resetsAt": "2026-11-19T04:59:59.610303+00:00",
+            "countdown": "3d 0h",
             "clock": "Nov 19 13:59",
-            "expectedPct": 49.9,
+            "expectedPct": 56.8,
             "aheadOfPace": false,
-            "projectedExhaustionAt": "2026-11-19T04:40:04Z",
-            "willLastToReset": false,
+            "projectedExhaustionAt": "2026-11-20T03:42:04Z",
+            "willLastToReset": true,
             "name": "Fable"
           }
         ]
       },
-      "usageFetchedAt": "2026-11-15T16:50:02Z",
+      "usageFetchedAt": "2026-11-16T04:21:01Z",
       "loginExpiresAt": "2026-11-21T07:12:26Z",
       "plan": "max",
       "rateLimitTier": "default_claude_max_20x",
@@ -86,13 +86,13 @@
       "active": false,
       "usageStatus": "unavailable",
       "usageError": "refresh-failed",
-      "usageRetryAt": "2026-11-15T17:01:10Z",
+      "usageRetryAt": "2026-11-16T04:30:02Z",
       "usage": null,
       "lastGoodUsage": {
         "sevenDay": {
           "pct": 2.0,
           "resetsAt": "2026-11-17T14:00:00.034992+00:00",
-          "countdown": "1d 21h",
+          "countdown": "1d 9h",
           "clock": "Nov 17 23:00",
           "expectedPct": 40.4,
           "aheadOfPace": false,
@@ -103,7 +103,7 @@
           {
             "pct": 0.0,
             "resetsAt": "2026-11-17T14:00:00+00:00",
-            "countdown": "1d 21h",
+            "countdown": "1d 9h",
             "clock": "Nov 17 23:00",
             "expectedPct": 40.4,
             "aheadOfPace": false,
@@ -130,29 +130,29 @@
         },
         "sevenDay": {
           "pct": 95.0,
-          "resetsAt": "2026-11-17T15:59:59.607613+00:00",
-          "countdown": "1d 23h",
+          "resetsAt": "2026-11-17T15:59:59.840641+00:00",
+          "countdown": "1d 11h",
           "clock": "Nov 18 00:59",
-          "expectedPct": 71.9,
+          "expectedPct": 78.8,
           "aheadOfPace": true,
-          "projectedExhaustionAt": "2026-11-15T23:12:49Z",
+          "projectedExhaustionAt": "2026-11-16T11:18:58Z",
           "willLastToReset": false
         },
         "scoped": [
           {
             "pct": 57.0,
-            "resetsAt": "2026-11-17T15:59:59.607799+00:00",
-            "countdown": "1d 23h",
+            "resetsAt": "2026-11-17T15:59:59.840799+00:00",
+            "countdown": "1d 11h",
             "clock": "Nov 18 00:59",
-            "expectedPct": 71.9,
+            "expectedPct": 78.8,
             "aheadOfPace": false,
-            "projectedExhaustionAt": "2026-11-19T12:01:22Z",
+            "projectedExhaustionAt": "2026-11-20T08:11:38Z",
             "willLastToReset": true,
             "name": "Fable"
           }
         ]
       },
-      "usageFetchedAt": "2026-11-15T16:51:10Z",
+      "usageFetchedAt": "2026-11-16T04:21:01Z",
       "loginExpiresAt": "2026-12-02T04:06:31Z",
       "plan": "team",
       "rateLimitTier": "default_claude_max_5x",
@@ -166,25 +166,28 @@
       "usageStatus": "ok",
       "usage": {
         "fiveHour": {
-          "pct": 0.0
+          "pct": 100.0,
+          "resetsAt": "2026-11-16T07:10:00.423645+00:00",
+          "countdown": "2h 48m",
+          "clock": "16:10"
         },
         "sevenDay": {
-          "pct": 0.0,
-          "resetsAt": "2026-11-22T11:00:00+00:00",
-          "countdown": "6d 18h",
+          "pct": 17.0,
+          "resetsAt": "2026-11-22T11:00:00.423669+00:00",
+          "countdown": "6d 6h",
           "clock": "Nov 22 20:00"
         },
         "scoped": [
           {
-            "pct": 0.0,
-            "resetsAt": "2026-11-22T11:00:00+00:00",
-            "countdown": "6d 18h",
+            "pct": 6.0,
+            "resetsAt": "2026-11-22T11:00:00.424086+00:00",
+            "countdown": "6d 6h",
             "clock": "Nov 22 20:00",
             "name": "Fable"
           }
         ]
       },
-      "usageFetchedAt": "2026-11-15T16:45:02Z",
+      "usageFetchedAt": "2026-11-16T04:15:02Z",
       "loginExpiresAt": "2026-11-29T16:28:39Z",
       "plan": "team",
       "rateLimitTier": "default_raven",

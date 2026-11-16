@@ -330,7 +330,8 @@ def _copy(src, dest):
     for name in os.listdir(root):
         if name.startswith(TMP):  # 지난번에 끊긴 복사
             shutil.rmtree(os.path.join(root, name), ignore_errors=True)
-    tmp = tempfile.mkdtemp(prefix=TMP, dir=root)
+    tmp = os.path.join(root, f"{TMP}{os.urandom(6).hex()}")
+    os.mkdir(tmp)  # mkdtemp 의 0o700 은 Python 3.13+ Windows 에서 상속 없는 ACL 이 되어 예약 작업이 app 을 열지 못한다(self_update.install 과 같다)
     try:
         shutil.copytree(src, tmp, symlinks=True, ignore=shutil.ignore_patterns("__pycache__"), dirs_exist_ok=True)
         os.replace(tmp, dest)

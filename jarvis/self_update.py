@@ -15,7 +15,6 @@ import os
 import re
 import shutil
 import tarfile
-import tempfile
 import threading
 import time
 import urllib.request
@@ -99,7 +98,9 @@ def install(m):
     if hashlib.sha256(data).hexdigest() != m["sha256"]:
         raise ValueError("릴리스 묶음의 SHA256 이 manifest 와 다릅니다")
     os.makedirs(launch.VERSIONS, exist_ok=True)
-    tmp = tempfile.mkdtemp(prefix=".tmp-", dir=launch.VERSIONS)
+    # mkdtemp 의 0o700 은 Python 3.13+ Windows 에서 상속을 끊은 ACL(SYSTEM·Administrators·소유자)이 된다: 관리자 SSH 가 받은 폴더를 예약 작업이 열지 못한다
+    tmp = os.path.join(launch.VERSIONS, f".tmp-{os.urandom(6).hex()}")
+    os.mkdir(tmp)
     try:
         _extract(data, v, tmp)
         shutil.rmtree(os.path.join(launch.VERSIONS, v), ignore_errors=True)  # 지난번에 반쯤 남은 폴더

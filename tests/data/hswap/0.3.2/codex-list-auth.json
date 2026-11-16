@@ -1,9 +1,9 @@
 {
   "_fixture": {
-    "hswap": "0.3.1",
-    "collected_at": 1794761443,
+    "hswap": "0.3.2",
+    "collected_at": 1794802862,
     "argv": "hswap list codex --json --cached",
-    "device": "thsvkd-kgolf-macmini"
+    "device": "s2"
   },
   "schemaVersion": 1,
   "harnesses": [
@@ -16,7 +16,7 @@
           "authMode": "chatgpt",
           "label": "user1@example.com",
           "usage": {
-            "state": "stale",
+            "state": "authentication_required",
             "measuredAt": null,
             "plan": null,
             "balance": null,
