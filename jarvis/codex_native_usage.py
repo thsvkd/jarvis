@@ -63,7 +63,7 @@ def login(skipped):
         return None
     note = (f"접근 토큰이 {claude_accounts._span(late)} 전에 만료됐습니다. 다시 로그인하세요. 상주 Codex(데몬·앱)가 있으면 먼저 끝내야 새 로그인을 씁니다."
             + (" hswap 은 실행 중인 Codex 때문에 갱신을 건너뜁니다." if skipped else ""))
-    return {"state": "stalled", "text": "Codex 로그인 갱신 멈춤", "note": note, "attention": True, "slot": None, "other": False, "store": None}
+    return {"state": "stalled", "text": "Codex 다시 로그인 필요", "note": note, "attention": True, "slot": None, "other": False, "store": None}
 
 
 def read():

@@ -202,7 +202,7 @@ class IndependentUsageTest(unittest.TestCase):
     def test_stalled_codex_login_keeps_the_provider_without_accounts(self):
         """covers: USAGE-19. Codex 계정이 0개여도 갱신이 멈춘 로그인을 보일 칸이 남는다"""
         empty = {"status": "unavailable", "accounts": []}
-        stalled = {"state": "stalled", "text": "Codex 로그인 갱신 멈춤", "note": "n", "attention": True, "slot": None, "other": False, "store": None}
+        stalled = {"state": "stalled", "text": "Codex 다시 로그인 필요", "note": "n", "attention": True, "slot": None, "other": False, "store": None}
         independent_usage.hswap_usage._skipped["codex"] = True
         with mock.patch.object(independent_usage, "_claude", return_value={"accounts": []}), \
                 mock.patch.object(independent_usage, "_codex", return_value=[]), \

@@ -81,7 +81,7 @@ class LoginTest(unittest.TestCase):
         self.write({"exp": time.time() - 3 * 3600, "pwd_auth_time": 1762000000})
         login = codex_native_usage.login(True)
         self.assertEqual({k: login[k] for k in ("state", "text", "attention", "slot", "other", "store")},
-                         {"state": "stalled", "text": "Codex 로그인 갱신 멈춤", "attention": True, "slot": None, "other": False, "store": None})
+                         {"state": "stalled", "text": "Codex 다시 로그인 필요", "attention": True, "slot": None, "other": False, "store": None})
         self.assertTrue(login["note"].startswith("접근 토큰이 3시간 전에 만료됐습니다. 다시 로그인하세요."), login["note"])
         self.assertIn("건너뜁니다", login["note"])
         text = json.dumps(login, ensure_ascii=False)

@@ -427,14 +427,14 @@ assert.match(rendered(), /<td data-label="Claude" class="ul-nil">–<\/td>/);
 // covers: USAGE-19. Codex login(state stalled)은 Claude 와 같은 칸 줄로 보이고 'Codex 다시 로그인' 만 낸다. 안내 버튼·예약 안내는 없고, 주의는 기기마다 하나로 센다
 {
   const codexP = devices[1].providers[1], base = hotNow();
-  codexP.login = { state: "stalled", text: "Codex 로그인 갱신 멈춤", note: "접근 토큰이 3시간 전에 만료됐습니다.", attention: true, slot: null, other: false, store: null };
+  codexP.login = { state: "stalled", text: "Codex 다시 로그인 필요", note: "접근 토큰이 3시간 전에 만료됐습니다.", attention: true, slot: null, other: false, store: null };
   devices[1].logins = ["codex"];
   for (const mode of ["brief", "full"]) {
     click({ mode });
     const row = rendered().match(/<tr aria-busy="false"><th scope="row"><b>second<\/b>[\s\S]*?<\/tr>/)?.[0] || "";
     const cell = row.match(/<td data-label="Codex"[\s\S]*?<\/td>/)?.[0] || "";
-    assert.ok(cell.includes('<div class="ul-st" data-tone="crit"><p class="ul-st-t">Codex 로그인 갱신 멈춤</p><p class="ul-why">접근 토큰이 3시간 전에 만료됐습니다.</p><div class="ul-acts"><button type="button" class="seg-action" data-login="second" data-lp="codex">Codex 다시 로그인</button></div></div>'), mode);
-    assert.equal((cell.match(/Codex 다시 로그인/g) || []).length, 1, mode); // 계정 카드의 버튼은 숨는다
+    assert.ok(cell.includes('<div class="ul-st" data-tone="crit"><p class="ul-st-t">Codex 다시 로그인 필요</p><p class="ul-why">접근 토큰이 3시간 전에 만료됐습니다.</p><div class="ul-acts"><button type="button" class="seg-action" data-login="second" data-lp="codex">Codex 다시 로그인</button></div></div>'), mode);
+    assert.equal((cell.match(/>Codex 다시 로그인<\/button>/g) || []).length, 1, mode); // 계정 카드의 버튼은 숨는다(제목 문구는 세지 않는다)
     assert.doesNotMatch(rendered(), /data-guide|keepalive --install-service/, mode);
     assert.equal(hotNow(), base + 1, mode);
   }
