@@ -1,7 +1,7 @@
 {
   "_fixture": {
-    "hswap": "0.3.2",
-    "collected_at": 1794802862,
+    "hswap": "0.4.0",
+    "collected_at": 1794874490,
     "argv": "hswap list codex --json --cached",
     "device": "pit5"
   },

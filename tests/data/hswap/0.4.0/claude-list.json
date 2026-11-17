@@ -1,0 +1,202 @@
+{
+  "_fixture": {
+    "hswap": "0.4.0",
+    "collected_at": 1794874485,
+    "argv": "hswap claude list --json",
+    "device": "thsvkd-macmini"
+  },
+  "schemaVersion": 1,
+  "accounts": [
+    {
+      "number": 1,
+      "active": false,
+      "usageStatus": "ok",
+      "usage": {
+        "sevenDay": {
+          "pct": 99.0,
+          "resetsAt": "2026-11-17T00:59:59.748338+00:00",
+          "countdown": "45m",
+          "clock": "09:59",
+          "expectedPct": 99.5,
+          "aheadOfPace": false,
+          "projectedExhaustionAt": "2026-11-17T01:52:55Z",
+          "willLastToReset": true
+        },
+        "scoped": [
+          {
+            "pct": 35.0,
+            "resetsAt": "2026-11-17T00:59:59.748527+00:00",
+            "countdown": "45m",
+            "clock": "09:59",
+            "expectedPct": 99.5,
+            "aheadOfPace": false,
+            "projectedExhaustionAt": "2026-11-29T22:41:42Z",
+            "willLastToReset": true,
+            "name": "Fable"
+          }
+        ]
+      },
+      "usageFetchedAt": "2026-11-17T00:11:35Z",
+      "loginExpiresAt": "2026-12-08T18:27:21Z",
+      "plan": "max",
+      "rateLimitTier": "default_claude_max_20x",
+      "email": "user1@example.com",
+      "organizationName": "user1@example.com's Organization",
+      "organizationUuid": "00000000-0000-4000-8000-000000000001"
+    },
+    {
+      "number": 2,
+      "active": true,
+      "usageStatus": "ok",
+      "usage": {
+        "sevenDay": {
+          "pct": 18.0,
+          "resetsAt": "2026-11-19T05:00:00.387288+00:00",
+          "countdown": "2d 4h",
+          "clock": "Nov 19 14:00",
+          "expectedPct": 68.6,
+          "aheadOfPace": false,
+          "projectedExhaustionAt": "2026-12-08T21:15:17Z",
+          "willLastToReset": true
+        },
+        "scoped": [
+          {
+            "pct": 12.0,
+            "resetsAt": "2026-11-19T05:00:00.387463+00:00",
+            "countdown": "2d 4h",
+            "clock": "Nov 19 14:00",
+            "expectedPct": 68.6,
+            "aheadOfPace": false,
+            "projectedExhaustionAt": "2026-12-22T05:22:56Z",
+            "willLastToReset": true,
+            "name": "Fable"
+          }
+        ]
+      },
+      "usageFetchedAt": "2026-11-17T00:14:45Z",
+      "loginExpiresAt": "2026-12-15T06:05:26Z",
+      "plan": "max",
+      "rateLimitTier": "default_claude_max_20x",
+      "email": "user2@example.com",
+      "organizationName": "user2@example.com's Organization",
+      "organizationUuid": "00000000-0000-4000-8000-000000000002"
+    },
+    {
+      "number": 3,
+      "active": false,
+      "usageStatus": "ok",
+      "usage": {
+        "fiveHour": {
+          "pct": 0.0
+        },
+        "sevenDay": {
+          "pct": 100.0,
+          "resetsAt": "2026-11-17T16:00:00.222015+00:00",
+          "countdown": "15h 45m",
+          "clock": "Nov 18 01:00",
+          "expectedPct": 90.6,
+          "aheadOfPace": false,
+          "projectedExhaustionAt": "2026-11-17T00:11:35Z",
+          "willLastToReset": false
+        },
+        "scoped": [
+          {
+            "pct": 59.0,
+            "resetsAt": "2026-11-17T16:00:00.222173+00:00",
+            "countdown": "15h 45m",
+            "clock": "Nov 18 01:00",
+            "expectedPct": 90.6,
+            "aheadOfPace": false,
+            "projectedExhaustionAt": "2026-11-21T09:57:16Z",
+            "willLastToReset": true,
+            "name": "Fable"
+          }
+        ]
+      },
+      "usageFetchedAt": "2026-11-17T00:11:35Z",
+      "loginExpiresAt": "2026-12-16T11:59:42Z",
+      "plan": "team",
+      "rateLimitTier": "default_claude_max_5x",
+      "email": "user2@example.com",
+      "organizationName": "Org 1",
+      "organizationUuid": "00000000-0000-4000-8000-000000000003"
+    },
+    {
+      "number": 4,
+      "active": false,
+      "usageStatus": "ok",
+      "usage": {
+        "sevenDay": {
+          "pct": 97.0,
+          "resetsAt": "2026-11-17T14:00:00.486297+00:00",
+          "countdown": "13h 45m",
+          "clock": "23:00",
+          "expectedPct": 91.8,
+          "aheadOfPace": false,
+          "projectedExhaustionAt": "2026-11-17T04:57:43Z",
+          "willLastToReset": false
+        },
+        "scoped": [
+          {
+            "pct": 45.0,
+            "resetsAt": "2026-11-17T14:00:00.486492+00:00",
+            "countdown": "13h 45m",
+            "clock": "23:00",
+            "expectedPct": 91.8,
+            "aheadOfPace": false,
+            "projectedExhaustionAt": "2026-11-24T20:39:05Z",
+            "willLastToReset": true,
+            "name": "Fable"
+          }
+        ]
+      },
+      "usageFetchedAt": "2026-11-17T00:11:35Z",
+      "loginExpiresAt": "2026-12-03T06:07:15Z",
+      "plan": "max",
+      "rateLimitTier": "default_claude_max_20x",
+      "email": "user3@example.com",
+      "organizationName": "user3@example.com's Organization",
+      "organizationUuid": "00000000-0000-4000-8000-000000000004"
+    },
+    {
+      "number": 5,
+      "active": false,
+      "usageStatus": "ok",
+      "usage": {
+        "fiveHour": {
+          "pct": 0.0
+        },
+        "sevenDay": {
+          "pct": 49.0,
+          "resetsAt": "2026-11-22T10:59:59.740553+00:00",
+          "countdown": "5d 10h",
+          "clock": "Nov 22 19:59",
+          "expectedPct": 22.1,
+          "aheadOfPace": true,
+          "projectedExhaustionAt": "2026-11-18T14:54:17Z",
+          "willLastToReset": false
+        },
+        "scoped": [
+          {
+            "pct": 26.0,
+            "resetsAt": "2026-11-22T10:59:59.740848+00:00",
+            "countdown": "5d 10h",
+            "clock": "Nov 22 19:59",
+            "expectedPct": 22.1,
+            "aheadOfPace": false,
+            "projectedExhaustionAt": "2026-11-21T10:03:04Z",
+            "willLastToReset": false,
+            "name": "Fable"
+          }
+        ]
+      },
+      "usageFetchedAt": "2026-11-17T00:11:35Z",
+      "loginExpiresAt": "2026-12-03T15:10:04Z",
+      "plan": "team",
+      "rateLimitTier": "default_raven",
+      "email": "user3@example.com",
+      "organizationName": "Org 1",
+      "organizationUuid": "00000000-0000-4000-8000-000000000003"
+    }
+  ]
+}

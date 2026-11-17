@@ -1,7 +1,7 @@
 {
   "_fixture": {
-    "hswap": "0.3.2",
-    "collected_at": 1794802863,
+    "hswap": "0.4.0",
+    "collected_at": 1794874491,
     "argv": "hswap list grok --json --cached",
     "device": "s2"
   },
@@ -17,7 +17,7 @@
           "label": "user1@example.com",
           "usage": {
             "state": "unknown",
-            "measuredAt": "2026-11-15T17:46:09Z",
+            "measuredAt": "2026-11-16T13:57:55Z",
             "plan": "Free",
             "balance": {
               "currency": "USD",
