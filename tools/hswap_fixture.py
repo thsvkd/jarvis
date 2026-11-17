@@ -2,8 +2,8 @@
 """hswap list --json 출력을 테스트 픽스처로 가린다(표준 라이브러리만, jarvis 를 import 하지 않는다).
 
 기기 안에서 `python3 -I` 로 돌려 원본이 기기 밖으로 나가지 않게 한다.
-  hswap list codex --json --cached | python3 -I hswap_fixture.py hswap --version 0.4.0 --device s2 --argv "hswap list codex --json --cached"
-  hswap claude list --json | python3 -I hswap_fixture.py claude --version 0.4.0 --device macmini --argv "hswap claude list --json"
+  hswap list codex --json --cached | python3 -I hswap_fixture.py hswap --version 0.4.1 --device s2 --argv "hswap list codex --json --cached"
+  hswap claude list --json | python3 -I hswap_fixture.py claude --version 0.4.1 --device macmini --argv "hswap claude list --json"
   python3 -I hswap_fixture.py hswap --check < 저장한_픽스처.json    # 검사만 하고 입력을 그대로 낸다
 
 허용 목록에 없는 키는 모두 버리고, 이메일·조직·라벨은 가짜 값으로 바꾼다. 출력(또는 원본)에 토큰 꼴이 있으면 표준 출력 없이 종료 코드 3,

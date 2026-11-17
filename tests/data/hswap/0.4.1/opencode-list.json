@@ -1,7 +1,7 @@
 {
   "_fixture": {
-    "hswap": "0.4.0",
-    "collected_at": 1794874486,
+    "hswap": "0.4.1",
+    "collected_at": 1794905228,
     "argv": "hswap list opencode --json --cached",
     "device": "thsvkd-macmini"
   },
@@ -30,8 +30,8 @@
           "authMode": "oauth",
           "label": "account 2",
           "usage": {
-            "state": "stale",
-            "measuredAt": "2026-11-16T16:25:19Z",
+            "state": "available",
+            "measuredAt": "2026-11-17T08:41:23Z",
             "plan": null,
             "balance": null,
             "detail": "",
@@ -40,7 +40,7 @@
                 "name": "5h",
                 "usedPercent": 0.0,
                 "windowSeconds": 18000,
-                "resetsAt": "2026-11-16T21:25:19Z"
+                "resetsAt": "2026-11-17T13:41:23Z"
               },
               {
                 "name": "weekly",

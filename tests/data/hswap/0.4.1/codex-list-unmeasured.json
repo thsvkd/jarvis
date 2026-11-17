@@ -1,7 +1,7 @@
 {
   "_fixture": {
-    "hswap": "0.4.0",
-    "collected_at": 1794874492,
+    "hswap": "0.4.1",
+    "collected_at": 1794905234,
     "argv": "hswap list codex --json --cached",
     "device": "thsvkd-kgolf-macmini"
   },
