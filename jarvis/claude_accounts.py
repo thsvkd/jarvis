@@ -606,7 +606,8 @@ def _store_read():
             if org_uuid:  # hswap 은 조직 이름을 등록할 때만 저장한다: added 가 그 이름의 시점이다
                 orgs[str(number)] = {**({"org": result[-1]["org"]} if isinstance(name, str) and name else {}), "org_key": hashlib.sha256(org_uuid.encode("utf-8", "replace")).hexdigest(), "org_at": _sec(ident.get("added"))}
         # signed_in: 로그인을 읽었다. 그런데 active 인 행이 없으면 지금 로그인은 어느 저장 슬롯과도 맞지 않는다
-        return {"accounts": result, "signed_in": identity is not None, "ids": ids, "orgs": orgs} if result else None
+        # updated: 전환·추가 때 hswap 이 고치는 시각. keepalive 기록이 그보다 이르면 아직 이전 슬롯의 것이다(_judge_login)
+        return {"accounts": result, "signed_in": identity is not None, "ids": ids, "orgs": orgs, "updated": _sec(roster.get("lastUpdated"))} if result else None
     except (OSError, ValueError, TypeError, OverflowError, RecursionError):
         return None
 
@@ -657,7 +658,7 @@ def _is_relogin(a):
     return STATUS["relogin_required"][0] in (a.get("note"), a.get("error"))
 
 
-def _judge_login(k, rows, keychain, signed_in, fatal, first_seen, now, svc=None, headless=False):
+def _judge_login(k, rows, keychain, signed_in, fatal, first_seen, now, svc=None, headless=False, switched=None):
     """로그인 판정: 값만 받아 (기기 단위 로그인 상태 {state, text, note, attention, slot, other, store} 또는 None, 새 first_seen). 알릴 것이 없으면 None(keepalive.json 이 없으면 이 기능을 쓰지 않는 기기다).
     k: keepalive 기록(없으면 {}). first_seen: 파일 저장소에서 갱신을 확인하지 못한 기록을 처음 본 시각. now: time.time().
     순서: 세션 밖의 키체인 저장 방식(headless) > 설정 충돌·키체인 항목(있거나 확인 실패) > 사람이 다시 로그인해야 하는 것 > 키체인 > 만료 임박 > 멈춤 > 이전 계정의 기록 > 그 밖의 실패 > 정상.
@@ -671,6 +672,7 @@ def _judge_login(k, rows, keychain, signed_in, fatal, first_seen, now, svc=None,
     unconfirmed: 파일 저장소인데 keychain_unavailable 로 실패한 기록. 키체인 경고는 아니지만 갱신이 확인되지 않았으므로 성공 문구를 쓰지 않고, CLAUDE_KEEPALIVE_STALE_S 동안 계속되면 attention 으로 올린다.
     other: keepalive 기록의 activeSlot 이 지금 로그인의 슬롯과 다르다고 확인됐다. 만료·오류·접근 토큰은 그 계정의 사실이라 쓰지 않고, 키체인·멈춤·자격 부재는 기기의 사실이라 그대로 쓴다.
     activeSlot 이 없으면 슬롯을 모르는 것이지 다른 계정이라는 증거가 아니다: 판정은 그대로 두고 slot 만 뺀다.
+    switched: 저장소 sequence.json 의 lastUpdated(epoch 초). 기록이 이보다 이르고 지금 로그인이 저장된 슬롯이면 이전 계정의 기록은 attention 없이 보인다.
     슬롯은 맞다고 확인될 때만 준다(다른 계정의 슬롯에 add 하면 저장 로그인을 덮을 수 있다). 파일이 없으면 기록과 비교할 것이 없어 사용 중 슬롯을 준다."""
     err = k.get("error") if isinstance(k.get("error"), dict) else {}
     kind = err.get("type") if isinstance(err.get("type"), str) else None
@@ -704,7 +706,10 @@ def _judge_login(k, rows, keychain, signed_in, fatal, first_seen, now, svc=None,
     elif checked is None or now - checked > config.CLAUDE_KEEPALIVE_STALE_S:
         state, text = "stalled", "자동 갱신 멈춤" + (f"(마지막 {_span(now - checked)} 전)" if checked else "")
     elif other and kind != "no_credentials":  # 자격 부재는 add 로 고칠 수 없어 /login 안내로 이어지는 실패로 둔다
-        state, text = "other_account", "자동 갱신 기록이 이전 계정의 것입니다"
+        # 저장소가 바뀐(sequence.json lastUpdated: 전환·추가·별칭·삭제 등) 뒤 유지가 아직 돌지 않았다: 다음 유지가 기록을 고친다(2026-11-17 s2 실측).
+        # 미래 시각은 믿지 않는다(시계가 뒤로 가거나 손으로 고친 파일이 경고를 계속 숨기지 않게). checked 는 위의 멈춤 분기 덕에 None 이 아니다
+        quiet = current is not None and switched is not None and checked < switched <= now
+        state, text = "other_account", f"사용 중 슬롯 {current}: 다음 자동 갱신 때 기록이 바뀝니다" if quiet else "자동 갱신 기록이 이전 계정의 것입니다"
     elif first_seen:
         quiet = now - first_seen <= config.CLAUDE_KEEPALIVE_STALE_S
         state, text = "unconfirmed", "자동 갱신 확인되지 않음" + ("" if quiet else f"({_span(now - first_seen)}째)")
@@ -719,9 +724,10 @@ def _judge_login(k, rows, keychain, signed_in, fatal, first_seen, now, svc=None,
             "note": None if access is None else f"접근 토큰 {_span(access - now)} 뒤 만료(자동 갱신)" if access > now else "접근 토큰 만료됨(자동 갱신 대기)"}, first_seen
 
 
-def login(rows=(), keychain=False, signed_in=False, fatal=None):
+def login(rows=(), keychain=False, signed_in=False, fatal=None, switched=None):
     """지금 keepalive 기록으로 로그인을 판정한다(_judge_login). 파일 읽기와 처음 본 시각의 기억은 판정 밖인 여기서 한다."""
-    state, _state.unconfirmed = _judge_login(_keepalive() or {}, rows, keychain, signed_in, fatal, _state.unconfirmed, time.time(), service, headless())
+    state, _state.unconfirmed = _judge_login(_keepalive() or {}, rows, keychain, signed_in, fatal, _state.unconfirmed, time.time(), service, headless(),
+                                             switched)
     if state and state["state"] == "keychain_item_present":
         state["text"] = item_text()
     return state
@@ -852,7 +858,7 @@ def _read(force, deadline, give_up=False):
             settled = _store_shape(store) == shape
     rows, accounts = _judge_rows(out, store, bool(binary()), time.time())
     mono = time.monotonic()  # hswap 이 방금 답했으면 그 기억으로 판정한다
-    state = login(rows, _recent(_state.device, mono), bool(store and store.get("signed_in")), _recent(_state.fatal, mono))
+    state = login(rows, _recent(_state.device, mono), bool(store and store.get("signed_in")), _recent(_state.fatal, mono), (store or {}).get("updated"))
     if accounts is None:
         return ({**(out or {}), "accounts": [], "login": state} if state else out), settled
     result = {"accounts": accounts}

@@ -1897,6 +1897,10 @@ class IdentityNormalizationTest(StoreCase):
         self.assertEqual((s["state"], s["slot"], s["other"], s["text"]), ("failed", "1", False, "자동 갱신 실패(자격 증명 없음)"))
         self.keepalive(activeSlot=2)
         self.assertEqual(claude_accounts.read()["login"]["state"], "other_account")  # 정말 다른 슬롯의 기록은 그대로 가린다
+        # 저장소가 기록보다 나중에 바뀌었다(전환·추가): 유지가 아직 돌지 않은 것이라 같은 상태를 attention 없이 보인다
+        self.write("sequence.json", {"sequence": [1], "lastUpdated": iso(time.time() - 60), "accounts": {"1": {"email": "a@example.com", "organizationName": "Org"}}})
+        s = claude_accounts.read()["login"]
+        self.assertEqual((s["state"], s["attention"], s["slot"], s["text"]), ("other_account", False, None, "사용 중 슬롯 1: 다음 자동 갱신 때 기록이 바뀝니다"))
 
     def test_null_org_account_gets_relogin_from_the_store(self):
         """covers: USAGE-7. CLI 행과 저장소의 신원이 맞아 인증 실패가 옮겨 가고 기기 상태가 재로그인이 된다"""
@@ -2252,8 +2256,8 @@ class JudgeLoginTest(unittest.TestCase):
 
     ACTIVE = [{"active": True, "slot": "1"}]
 
-    def judge(self, k, rows=(), keychain=False, signed_in=False, fatal=None, first_seen=None):
-        return claude_accounts._judge_login(k, rows, keychain, signed_in, fatal, first_seen, NOW)
+    def judge(self, k, rows=(), keychain=False, signed_in=False, fatal=None, first_seen=None, switched=None):
+        return claude_accounts._judge_login(k, rows, keychain, signed_in, fatal, first_seen, NOW, switched=switched)
 
     def test_states(self):
         """covers: USAGE-7. 표의 칸: 이름, keepalive, 나머지 입력, 기대하는 (state, attention, slot, other)"""
@@ -2278,6 +2282,13 @@ class JudgeLoginTest(unittest.TestCase):
                  ("멈춤", keepalive_value(checkedAt=NOW - KEEPALIVE_STALE - 1), {"rows": self.ACTIVE}, ("stalled", True, "1", False)),
                  ("멈춤은 이전 계정보다 먼저", keepalive_value(activeSlot=2, checkedAt=None), {"rows": self.ACTIVE}, ("stalled", True, None, True)),
                  ("저장되지 않은 로그인", keepalive_value(), {"signed_in": True}, ("other_account", True, None, True)),
+                 ("전환 뒤 유지 전이면 조용히", keepalive_value(activeSlot=2), {"rows": self.ACTIVE, "switched": NOW - 60}, ("other_account", False, None, True)),
+                 ("전환 뒤 유지가 돌았는데도 다르면 경고", keepalive_value(activeSlot=2), {"rows": self.ACTIVE, "switched": NOW - 600}, ("other_account", True, None, True)),
+                 ("저장되지 않은 로그인은 전환 뒤여도 경고", keepalive_value(), {"signed_in": True, "switched": NOW - 60}, ("other_account", True, None, True)),
+                 ("기록과 같은 시각의 변경은 경고", keepalive_value(activeSlot=2), {"rows": self.ACTIVE, "switched": NOW - 300}, ("other_account", True, None, True)),
+                 ("미래의 변경 시각은 믿지 않는다", keepalive_value(activeSlot=2), {"rows": self.ACTIVE, "switched": NOW + 60}, ("other_account", True, None, True)),
+                 ("자격 부재는 전환 뒤여도 실패", failed("no_credentials", activeSlot=2), {"rows": self.ACTIVE, "switched": NOW - 60}, ("failed", True, None, True)),
+                 ("멈춤은 전환 뒤여도 먼저", keepalive_value(activeSlot=2, checkedAt=NOW - KEEPALIVE_STALE - 1), {"rows": self.ACTIVE, "switched": NOW - 60}, ("stalled", True, None, True)),
                  ("사용 중 슬롯을 모르면 경고만", keepalive_value(), {}, ("ok", False, None, False)),
                  ("activeSlot 없음", keepalive_value(activeSlot=None), {"rows": self.ACTIVE}, ("ok", False, None, False)),
                  ("activeSlot 이 참거짓", keepalive_value(activeSlot=True), {"rows": self.ACTIVE}, ("ok", False, None, False)),
