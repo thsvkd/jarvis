@@ -303,6 +303,39 @@ def test_powershell_is_not_redirected(cmd):
     assert decision_of(ps(cmd)) != "deny"
 
 
+# 따옴표 없는 heredoc 본문의 백틱은 셸이 명령 치환으로 실행한다. Claude Code 파서는 이 줄을 unparsed_line 으로 보고
+# bypass 모드에서도 묻는다(2.1.327). 2026-11-19 실사용 명령(정규식 안의 백틱)을 줄여 넣었다.
+HEREDOC_REDIRECT = [
+    'python3 - <<EOF\nfull=open("$S/full.md").read()\n'
+    'rowids=re.findall(r"^\\| `?([A-Za-z][\\w-]*)`? \\|",full,re.M)\nEOF',
+    "python3 - <<EOF\nx = re.sub(r'`?', '', s)\nEOF",
+    "cat <<-EOF\n\tuse `date`\n\tEOF",
+    "cat <<'A' <<B\nsafe `x`\nA\nbad `y`\nB",
+]
+HEREDOC_NOT_REDIRECTED = [
+    "python3 - <<'EOF'\nx = re.sub(r'`?', '', s)\nEOF",
+    'python3 - <<"EOF"\nuse `x`\nEOF',
+    "cat <<\\EOF\nuse `x`\nEOF",
+    "cat <<EOF\nescaped \\`x\\` and $S\nEOF",
+    "cat <<EOF\nplain $S text\nEOF",
+    "echo $((a<<2)) `date`",
+    "cat <<'A' <<B\nsafe `x`\nA\nfine\nB",
+    "git commit -m \"$(cat <<'EOF'\nmsg with `code`\nEOF\n)\"",
+]
+
+
+@pytest.mark.parametrize("cmd", HEREDOC_REDIRECT)
+def test_unquoted_heredoc_backtick_is_denied_with_fix_hint(cmd):
+    p = payload_of(bash(cmd))["hookSpecificOutput"]
+    assert p["permissionDecision"] == "deny", cmd
+    assert "<<'EOF'" in p["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize("cmd", HEREDOC_NOT_REDIRECTED)
+def test_safe_heredoc_is_not_redirected(cmd):
+    assert decision_of(bash(cmd)) != "deny", cmd
+
+
 @pytest.mark.parametrize("cmd", NOT_BLOCKED)
 def test_not_blocked(cmd):
     assert decision_of(bash(cmd)) in (None, "allow"), cmd

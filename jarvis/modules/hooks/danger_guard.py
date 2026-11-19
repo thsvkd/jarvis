@@ -42,6 +42,7 @@ Bash 툴(POSIX 셸·Git Bash)과 PowerShell 툴 양쪽을 대상으로 한다. �
   3) deny 는 하나뿐이다 — Claude Code 내장 rm 검사가 '권한 규칙으로도 넘길 수 없는 확인 창'을
      띄울 꼴(아래 redirect_reason). 이 꼴은 bypass 모드에서도 사람을 붙잡으므로, 먼저 거부하고
      사유로 고쳐 쓰는 법을 알려 모델이 스스로 다시 실행하게 한다(CC 2.1.325 의 조건을 좁게 옮겼다).
+     같은 이유로 따옴표 없는 heredoc 본문의 백틱도 거부한다(CC 파서의 unparsed_line 확인 창, 2.1.327).
      그 밖에는 위험이 자명한 셋만 ask 로 사람에게 묻고 나머지는 판정하지 않는다.
        - 루트/홈 전체 삭제 (rm 으로 / · /* · ~ · $HOME ; Remove-Item 류로 드라이브 루트·홈)
        - 디스크 파괴 (mkfs*·newfs*·wipefs -a, dd of=<디스크>, > <디스크>, /dev/ 대상 파티션 편집기
@@ -442,10 +443,50 @@ CMDSUB_RM_RE = re.compile(
 REDIRECT_FIX = (" Rewrite this rm so Claude Code can check it statically, then run it again: use a literal absolute "
                 "path (no cd before a relative glob, no $VAR or $(...) target), or `find DIR -mindepth 1 -delete`, "
                 "or `rm -rf DIR && mkdir DIR`.")
+# 따옴표 없는 heredoc(`<<EOF`) 본문의 이스케이프되지 않은 백틱. 셸은 이것을 명령 치환으로 실행하므로
+# Claude Code 파서는 이 줄을 'unparsed_line' 으로 보고 bypass 모드에서도 묻는다(2.1.327 바이너리의 heredoc_redirect
+# 조건과 같은 정규식). 2026-11-19 실사용: python3 - <<EOF 본문의 정규식 백틱 → 확인 창, 승인 뒤에도 zsh parse error.
+UNESCAPED_BACKTICK_RE = re.compile(r"(?:^|[^\\])(?:\\\\)*`")
+HEREDOC_FIX = (" Quote the delimiter (<<'EOF') so the body is passed literally, and pass any values as arguments or "
+               "environment variables instead of $VAR in the body (e.g. `python3 - \"$S\" <<'EOF'` and sys.argv[1]), "
+               "then run it again.")
+
+
+def _unquoted_heredoc_backtick(command):
+    """따옴표 없는 heredoc 본문에 이스케이프되지 않은 백틱이 있으면 그 끝 표지, 없으면 None.
+
+    끝 표지 줄이 없는 꼴(산술 `$((a<<b))`, 따옴표 안의 `<<`)은 본문이 없다고 보고 넘긴다(놓칠 뿐).
+    """
+    lo, pos = 0, 0  # 앞 heredoc 본문의 범위. 한 줄의 heredoc 여럿은 본문이 차례로 이어진다
+    for m in HEREDOC_RE.finditer(command):
+        if lo <= m.start() < pos:
+            continue  # 앞 heredoc 본문 안의 글자다
+        nl = command.find("\n", m.end())
+        if nl < 0:
+            break
+        start, end, strip_tabs = max(nl + 1, pos), m.group(1), m.group(0).startswith("<<-")
+        i = start
+        while i < len(command):
+            j = command.find("\n", i)
+            line, nxt = command[i:len(command) if j < 0 else j], len(command) if j < 0 else j + 1
+            if (line.lstrip("\t") if strip_tabs else line) == end:
+                break
+            i = nxt
+        else:
+            continue  # 끝 표지가 없다
+        quoted = any(q in m.group(0) for q in "'\"\\")
+        if not quoted and UNESCAPED_BACKTICK_RE.search(command[start:i]):
+            return end
+        lo, pos = start, nxt
+    return None
 
 
 def redirect_reason(command):
     """(로그 판정 이름, 모델에게 보일 거부 사유) 또는 None."""
+    end = _unquoted_heredoc_backtick(command)
+    if end:
+        return ("deny-heredoc-backtick", "Blocked before Claude Code's parser check prompts the user: the body of the "
+                "unquoted heredoc <<%s has a backtick, which the shell runs as command substitution." % end + HEREDOC_FIX)
     text = _clean(command, False)
     if CMDSUB_RM_RE.search(text):
         return "deny-rm-cmdsub", "Blocked before Claude Code's rm check prompts the user: the rm target is a command substitution." + REDIRECT_FIX
