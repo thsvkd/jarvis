@@ -336,6 +336,38 @@ def test_safe_heredoc_is_not_redirected(cmd):
     assert decision_of(bash(cmd)) != "deny", cmd
 
 
+# 명령 글자 어디든 `$$(`·`$${`·`$$[` 가 있으면 Claude Code 파서는 명령 전체를 ERROR 로 보고 bypass 모드에서도 묻는다
+# (2.1.328 의 파서를 떼어 돌려 확인했다). 2026-11-20 실사용 명령(compose 의 `$$(cat …)` 를 고치는 heredoc)을 줄여 넣었다.
+DOUBLE_DOLLAR_REDIRECT = [
+    "cd /w && python3 - <<'EOF'\nnew='''\n  X=$$(cat /run/secrets/k)\n  exec \"$$@\"\n'''\nEOF\necho ok",
+    "echo '$$(a)'",
+    'echo "$${a}"',
+    "cat <<'EOF'\n# $$[x]\nEOF",
+]
+DOUBLE_DOLLAR_NOT_REDIRECTED = [
+    "echo $$",
+    "exec \"$$@\"",
+    "echo '$\\$(x)'",
+    "python3 -c \"print('$' * 2 + '(')\"",
+]
+
+
+@pytest.mark.parametrize("cmd", DOUBLE_DOLLAR_REDIRECT)
+def test_double_dollar_before_bracket_is_denied_with_fix_hint(cmd):
+    p = payload_of(bash(cmd))["hookSpecificOutput"]
+    assert p["permissionDecision"] == "deny", cmd
+    assert "Edit or Write tool" in p["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize("cmd", DOUBLE_DOLLAR_NOT_REDIRECTED)
+def test_double_dollar_without_bracket_is_not_redirected(cmd):
+    assert decision_of(bash(cmd)) != "deny", cmd
+
+
+def test_powershell_double_dollar_is_not_redirected():
+    assert decision_of(ps("Write-Output '$$(a)'")) != "deny"
+
+
 @pytest.mark.parametrize("cmd", NOT_BLOCKED)
 def test_not_blocked(cmd):
     assert decision_of(bash(cmd)) in (None, "allow"), cmd

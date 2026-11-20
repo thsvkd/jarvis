@@ -43,6 +43,7 @@ Bash 툴(POSIX 셸·Git Bash)과 PowerShell 툴 양쪽을 대상으로 한다. �
      띄울 꼴(아래 redirect_reason). 이 꼴은 bypass 모드에서도 사람을 붙잡으므로, 먼저 거부하고
      사유로 고쳐 쓰는 법을 알려 모델이 스스로 다시 실행하게 한다(CC 2.1.325 의 조건을 좁게 옮겼다).
      같은 이유로 따옴표 없는 heredoc 본문의 백틱도 거부한다(CC 파서의 unparsed_line 확인 창, 2.1.327).
+     명령 글자 어디든 `$$(`·`$${`·`$$[` 가 있는 꼴도 거부한다(CC 파서가 명령 전체를 ERROR 로 보는 꼴, 2.1.328).
      그 밖에는 위험이 자명한 셋만 ask 로 사람에게 묻고 나머지는 판정하지 않는다.
        - 루트/홈 전체 삭제 (rm 으로 / · /* · ~ · $HOME ; Remove-Item 류로 드라이브 루트·홈)
        - 디스크 파괴 (mkfs*·newfs*·wipefs -a, dd of=<디스크>, > <디스크>, /dev/ 대상 파티션 편집기
@@ -450,6 +451,13 @@ UNESCAPED_BACKTICK_RE = re.compile(r"(?:^|[^\\])(?:\\\\)*`")
 HEREDOC_FIX = (" Quote the delimiter (<<'EOF') so the body is passed literally, and pass any values as arguments or "
                "environment variables instead of $VAR in the body (e.g. `python3 - \"$S\" <<'EOF'` and sys.argv[1]), "
                "then run it again.")
+# 명령 글자 어디든(작은따옴표·따옴표 친 heredoc 본문·주석 안까지) `$$(`·`$${`·`$$[` 가 있으면 Claude Code 파서는
+# zsh 가 달리 읽을 수 있다며 명령 전체를 ERROR 로 보고, 삭제가 없어도 bypass 모드에서 묻는다(2.1.328 바이너리의
+# 같은 정규식 /\$\$[({[]/). 2026-11-20 실사용: compose 파일의 `$$(cat …)` 를 python3 - <<'EOF' 로 고치다 확인 창.
+DOUBLE_DOLLAR_RE = re.compile(r"\$\$[({\[]")
+DOUBLE_DOLLAR_FIX = (" Write file content that contains it with the Edit or Write tool, or build it in the script so the "
+                     "command text never has `$$` right before `(`, `{` or `[` (e.g. Python '$' * 2 + '('), "
+                     "then run it again.")
 
 
 def _unquoted_heredoc_backtick(command):
@@ -487,6 +495,11 @@ def redirect_reason(command):
     if end:
         return ("deny-heredoc-backtick", "Blocked before Claude Code's parser check prompts the user: the body of the "
                 "unquoted heredoc <<%s has a backtick, which the shell runs as command substitution." % end + HEREDOC_FIX)
+    m = DOUBLE_DOLLAR_RE.search(command)
+    if m:
+        return ("deny-double-dollar", "Blocked before Claude Code's parser check prompts the user: the command text has "
+                "'%s', which Claude Code treats as unparseable anywhere, even inside quotes or a quoted heredoc." % m.group(0)
+                + DOUBLE_DOLLAR_FIX)
     text = _clean(command, False)
     if CMDSUB_RM_RE.search(text):
         return "deny-rm-cmdsub", "Blocked before Claude Code's rm check prompts the user: the rm target is a command substitution." + REDIRECT_FIX
