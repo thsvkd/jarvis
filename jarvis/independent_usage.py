@@ -13,6 +13,8 @@ _lock = threading.Lock()
 _tasks = {}  # 이름 → (시작 시각, Future, 강제 여부). 늦은 수집을 중복 실행하지 않는다.
 FORCE_WAIT_S = 10  # 새로고침이 진행 중인 보통 읽기를 기다리는 시간. 이어지는 읽기의 시한(40초)과 합쳐 read 의 대기(55초) 안이어야 한다
 _names = {"claude": "Claude", "codex": "Codex", "grok": "Grok", "cursor": "Cursor", "opencodeGo": "OpenCode Go", "antigravity": "Antigravity", "kimi": "Kimi", "zcode": "ZCode", "gemini": "Gemini", "minimax": "MiniMax"}
+# 계정 하나를 직접 읽는 수집기. read() 가 {"status", "accounts"} 를 돌려준다(usage_common.account)
+_DIRECT = {"antigravity": antigravity_usage, "kimi": kimi_usage, "zcode": zcode_usage, "gemini": gemini_usage, "minimax": minimax_usage}
 
 
 def _caam(name):
@@ -63,8 +65,7 @@ def read(force=False):
     """독립 수집 결과만 반환한다. 실패 원문이나 자격 증명은 내보내지 않는다."""
     jobs = {"claude": lambda: _claude(force), "codex": _hswap("codex", lambda: _codex(), force), "grok": _hswap("grok", lambda: _caam("grok"), force),
             "cursor": lambda: _caam("cursor"), "opencodeGo": _hswap("opencode", lambda: _opencode().get("accounts", []), force),
-            "antigravity": antigravity_usage.read, "kimi": kimi_usage.read, "zcode": zcode_usage.read,
-            "gemini": gemini_usage.read, "minimax": minimax_usage.read}
+            **{name: module.read for name, module in _DIRECT.items()}}
     now = time.monotonic()
     selected = {}
     with _lock:
@@ -87,7 +88,7 @@ def read(force=False):
                 accounts = value.get("accounts", []) if isinstance(value, dict) else []
                 failed = not isinstance(value, dict) or bool(value.get("error"))
                 login = value.get("login") if isinstance(value, dict) else None
-            elif name in ("antigravity", "kimi", "zcode", "gemini", "minimax"):
+            elif name in _DIRECT:
                 accounts = value.get("accounts", []) if isinstance(value, dict) else []
                 failed = not isinstance(value, dict) or value.get("status") != "ok"
             else:
