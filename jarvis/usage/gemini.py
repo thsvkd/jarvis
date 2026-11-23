@@ -11,7 +11,7 @@ import time
 import urllib.request
 
 from . import antigravity
-from .common import UNNAMED, account, email, fetch_json, private_json, valid_token
+from .common import DEFAULT, UNNAMED, account, email, fetch_json, private_json, valid_token
 from ..util import parse_iso
 
 
@@ -54,6 +54,6 @@ def read():
             label = email(info) if isinstance(info, dict) and info.get("email_verified") is True else UNNAMED
         except (OSError, ValueError, TypeError):
             label = UNNAMED
-        return {"status": "ok", "accounts": [account("gemini", buckets=buckets[:12], label="기본 계정" if label == UNNAMED else label)]}
+        return {"status": "ok", "accounts": [account("gemini", buckets=buckets[:12], label=DEFAULT if label == UNNAMED else label)]}
     except (OSError, ValueError, TypeError):
         return unavailable

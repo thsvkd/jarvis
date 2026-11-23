@@ -14,7 +14,7 @@ import os
 import subprocess
 import threading
 
-from .common import email
+from .common import DEFAULT, UNNAMED, email
 from ..util import parse_iso, which_local
 
 LS_TIMEOUT_S = 10
@@ -84,11 +84,11 @@ def _account(row, ident, provider):
     degraded = usage.get("quota_status") in ("degraded", "unavailable")
     label = email(ident.get("identity"))
     observed = email({"email": usage.get("account_id")})
-    mismatch = label != "이름 없는 계정" and observed != "이름 없는 계정" and label.lower() != observed.lower()
+    mismatch = label != UNNAMED and observed != UNNAMED and label.lower() != observed.lower()
     if mismatch:
-        label = "이름 없는 계정"
-    if provider == "grok" and label == "이름 없는 계정":
-        label = "기본 계정"
+        label = UNNAMED
+    if provider == "grok" and label == UNNAMED:
+        label = DEFAULT
     attention = login or degraded or mismatch
     note = ("사용량과 계정 정보가 일치하지 않습니다." if mismatch else "다시 로그인이 필요할 수 있습니다." if login
             else "프로바이더가 한도 상태를 완전히 확인하지 못했습니다." if degraded else LIMIT_NOTE if limited else None)

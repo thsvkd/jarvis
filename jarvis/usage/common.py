@@ -7,7 +7,8 @@ import time
 import urllib.request
 
 EMAIL = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
-UNNAMED = "이름 없는 계정"
+UNNAMED = "이름 없는 계정"  # email() 이 이메일을 확인하지 못했을 때
+DEFAULT = "기본 계정"  # 계정이 하나뿐인 수집기의 이름 없는 계정
 
 
 def email(ident):
@@ -50,7 +51,7 @@ def fetch_json(req, timeout=20):
     return json.loads(raw)
 
 
-def account(source, windows=(), buckets=(), label="기본 계정"):
+def account(source, windows=(), buckets=(), label=DEFAULT):
     """한 계정만 있는 수집기의 정상 계정 행."""
     return {"label": label, "org": None, "active": True, "status": "ok", "error": None, "note": None, "attention": False,
             "failure": None, "plan": None, "updated_at": time.time(), "windows": list(windows), "buckets": list(buckets),

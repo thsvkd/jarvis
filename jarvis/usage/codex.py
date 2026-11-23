@@ -17,16 +17,9 @@ LOGIN_S = 30 * 86400
 
 
 def _http(token, account):
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, *args, **kwargs):
-            return None
     req = urllib.request.Request("https://chatgpt.com/backend-api/wham/usage", headers={
         "Authorization": "Bearer " + token, "ChatGPT-Account-Id": account, "Accept": "application/json"})
-    with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(req, timeout=20) as response:
-        data = response.read(1_000_001)
-    if len(data) > 1_000_000:
-        raise ValueError("oversized response")
-    return json.loads(data)
+    return common.fetch_json(req)
 
 
 def _email(tokens, account):
@@ -37,10 +30,10 @@ def _email(tokens, account):
         auth = claims.get("https://api.openai.com/auth") or {}
         if claims.get("email_verified") is True and auth.get("chatgpt_account_id") == account:
             email = common.email(claims)
-            return "기본 계정" if email == "이름 없는 계정" else email
+            return common.DEFAULT if email == common.UNNAMED else email
     except (AttributeError, IndexError, TypeError, ValueError):
         pass
-    return "기본 계정"
+    return common.DEFAULT
 
 
 def _home():

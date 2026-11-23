@@ -132,7 +132,7 @@ def account(row):
                            "그 하네스가 데몬·앱으로 상주하면 먼저 끝내야 새 로그인을 씁니다."), True
     label = row.get("label")
     return {"label": label if isinstance(label, str) and len(label) <= 200 and common.EMAIL.fullmatch(label)
-            else "API 키 계정" if row.get("authMode") in ("api_key", "key") else "이름 없는 계정",
+            else "API 키 계정" if row.get("authMode") in ("api_key", "key") else common.UNNAMED,
             "org": None, "active": row.get("active") is True,
             "status": "ok" if has else "error", "error": None if has else note or "사용량을 확인할 수 없습니다.",
             "note": note if has else None, "attention": attention, "failure": failure, "plan": plan or None, "updated_at": at,
@@ -294,9 +294,8 @@ def schedule():
     답한 상태는 로그인 판정(claude.service)에 쓴다. 할 일이 아니면 None 이고 지난 답도 지운다."""
     claude.service = claude.service_note = None
     exe = claude.binary()
-    v = claude._version
     if (sys.platform != "darwin" or not config.CSWAP_INSTALL or not exe or not which_tool("claude") or claude.installer.state == "running"
-            or not v or claude._key(v) < claude._key(SERVICE_FROM) or not claude._store_read()):
+            or not claude.hswap_at_least(SERVICE_FROM) or not claude._store_read()):
         return None
     st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json")[1])
     want, note = _service_plan(st)
@@ -358,8 +357,7 @@ def inspect():
             or claude.installer.state == "running"):
         claude.doctor = None
         return None
-    v = claude._version
-    new = bool(v) and claude._key(v) >= claude._key(claude.DOCTOR_FROM)
+    new = claude.hswap_at_least(claude.DOCTOR_FROM)
     body = _json(_run(exe, "claude", "doctor", "--json")[1]) if new else None  # 문제가 있으면 0 이 아닌 코드로 끝나도 JSON 은 정상이다
     d = claude.doctor = macos_daemon.summary(body, None if macos_daemon.answered(body) else _settings(exe))
     if d:  # 바뀔 때만 남긴다(USAGE-16). problems 는 코드뿐이다
@@ -395,8 +393,7 @@ def rotation():
     on: 게이트웨이 tick 이 도는 곳(macOS 밖, macOS 의 세션 밖 파일 저장 방식)은 순서 전략(tick 이 그때만 auto 를 부른다), 그 밖의 macOS 는 hswap 예약의 then-auto.
     ordered: 순서 전략인지."""
     exe = claude.binary()
-    v = claude._version
-    if not exe or not v or claude._key(v) < claude._key(ROTATION_FROM):
+    if not exe or not claude.hswap_at_least(ROTATION_FROM):
         return 409, {"error": f"이 기기에 hswap {ROTATION_FROM} 이상이 필요합니다"}  # 404 는 core 가 'jarvis 갱신 필요'로 바꾼다
     with _rot_lock:
         s, pri = _settings(exe, UI), _priorities(exe, UI)
@@ -466,8 +463,8 @@ def hswap_log(since):
     hswap 의 출력은 {events: [...]}·배열·JSON Lines 중 어느 것이든 받는다(계약에 모양이 정해지지 않았다)."""
     if not isinstance(since, str) or not SINCE.fullmatch(since):
         return 400, {"error": "since 는 30m·1h·2d 꼴이어야 합니다"}
-    exe, v = claude.binary(), claude._version
-    if not exe or not v or claude._key(v) < claude._key(LOG_FROM):
+    exe = claude.binary()
+    if not exe or not claude.hswap_at_least(LOG_FROM):
         return 409, {"error": f"hswap {LOG_FROM} 이상 필요"}
     if not _log_lock.acquire(blocking=False):
         return 429, {"error": "hswap 로그를 이미 읽는 중입니다. 잠시 뒤 다시 시도하세요"}
@@ -627,7 +624,7 @@ def merge(rows, old):
     active = next((h for h in rows or [] if h.get("active")), None)
     for o in (o for o in old if isinstance(o, dict)):
         # 이메일을 모르는 활성 기본 계정(네이티브 수집기)은 hswap 의 활성 계정과 같은 로그인이다
-        same = active is not None and o.get("active") is True and o.get("label") == "기본 계정"
+        same = active is not None and o.get("active") is True and o.get("label") == common.DEFAULT
         k = _email(active) if same else _email(o)
         if k in hswap:
             chosen[k] = pick(hswap.pop(k), o)

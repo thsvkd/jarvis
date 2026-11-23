@@ -12,7 +12,7 @@ import time
 import urllib.request
 
 from ..util import parse_iso
-from .common import UNNAMED, account, email, fetch_json, valid_token
+from .common import DEFAULT, UNNAMED, account, email, fetch_json, valid_token
 
 
 def _http(url, token, post=False):
@@ -89,6 +89,6 @@ def read():
                 label = email(identity) if isinstance(identity, dict) and identity.get("email_verified") is True else UNNAMED
             except (OSError, ValueError, TypeError):
                 pass
-        return {"status": "ok", "accounts": [account("antigravity", label="기본 계정" if label == UNNAMED else label, **quota)]}
+        return {"status": "ok", "accounts": [account("antigravity", label=DEFAULT if label == UNNAMED else label, **quota)]}
     except (OSError, ValueError, TypeError):
         return unavailable

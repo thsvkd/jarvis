@@ -60,9 +60,9 @@ def _claude_ready():
 
 def _hswap_add():
     """계정 추가를 맡길 hswap(고정 버전 이상). 버전을 아직 모르거나 낮으면 None."""
-    exe, v = claude.binary(), claude._version
+    exe = claude.binary()
     try:
-        return exe if exe and v and claude._key(v) >= claude._key(HSWAP_ADD) else None
+        return exe if exe and claude.hswap_at_least(HSWAP_ADD) else None
     except ValueError:
         return None
 

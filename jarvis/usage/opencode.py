@@ -16,7 +16,7 @@ import time
 import urllib.request
 import urllib.parse
 from . import caam
-from .common import fetch_json, private_json, valid_token
+from .common import DEFAULT, fetch_json, private_json, valid_token
 from ..util import parse_iso
 
 
@@ -166,7 +166,7 @@ def read(exe, use_service=False):
             limited = limited or w.get("limited") is True or w.get("status") == "rate-limited"
         if not windows:
             return unavailable
-        account = {"label": "기본 계정", "org": None, "active": True, "status": "ok", "error": None,
+        account = {"label": DEFAULT, "org": None, "active": True, "status": "ok", "error": None,
                    "note": caam.LIMIT_NOTE if limited else None, "attention": False,
                    "failure": "limit" if limited else None, "plan": None, "updated_at": time.time(), "windows": windows, "buckets": [],
                    "extra": None, "credits": None, "source": "opencode"}

@@ -220,6 +220,11 @@ def _key(v):
     return tuple(int(x) for x in v.split("."))
 
 
+def hswap_at_least(minimum):
+    """마지막으로 확인한 hswap 버전이 minimum 이상인가. 아직 모르면 False."""
+    return bool(_version) and _key(_version) >= _key(minimum)
+
+
 def _install():
     """uv tool install(없으면 pipx). 이미 깔린 낮은 버전도 같은 명령으로 올린다: uv 는 기존 도구 환경의 Python 을 그대로 쓴다
     (thsvkd-home 처럼 Python 경로를 고정해 둔 기기도 유지된다). pipx 는 --force 가 있어야 다시 깐다."""
@@ -375,7 +380,7 @@ def account(row, source="cswap", headless=False):
     plan = " · ".join(x for x in (_plan_label(row), str(row.get("alias") or "")[:40], "자동 전환 제외" if row.get("disabled") is True else "") if x)
     email = str(row.get("email") or "")[:200]
     num = row.get("number")
-    return {"label": email or "이름 없는 계정", "org": str(row.get("organizationName") or "")[:80] or None,
+    return {"label": email or common.UNNAMED, "org": str(row.get("organizationName") or "")[:80] or None,
             "active": row.get("active") is True,
             # 슬롯 번호: 기기마다 다르다. 같은 이메일이 조직별로 여러 슬롯일 수 있어 이메일 대신 이것으로 바꾼다
             "slot": str(num) if isinstance(num, int) and not isinstance(num, bool) and num > 0 else None,
