@@ -218,6 +218,9 @@ class HooksModuleTest(unittest.TestCase):
         r.update({"added_allow": ["Bash", "Read"], "added_ask": ["Skill(loop)"], "removed_legacy": {"deny": ["x"]},
                   "default_mode_before": None, "default_mode_after": "auto", "default_mode_changed": True})
         (self.claude / ".claude-code-setup.json").write_text(json.dumps(r))
+        st = hooks.status()  # settings.json 이 바뀌지 않으므로 정리 전에도 건강하다
+        self.assertEqual((st["health"], st["details"]["settings_changes"]), ("ok", []))
+        self.assertIn("권한 항목도 걷어내고", hooks.uninstall(dry_run=True)["steps"][0]["message"])
         plan = hooks.plan()
         settings = next(st for st in plan["steps"] if st["id"] == "settings")
         self.assertIn("권한·모드 기록을 사용자 것으로", settings["summary"])
@@ -228,6 +231,7 @@ class HooksModuleTest(unittest.TestCase):
                          ([], [], {}, False))
         self.assertEqual(hooks.plan()["steps"], [])
         dry = hooks.uninstall(dry_run=True)
+        self.assertNotIn("권한", dry["steps"][0]["message"])
         self.assertEqual(hooks.uninstall(plan_id=dry["plan_id"])["status"], "done")
         self.assertEqual(self.settings()["permissions"], s["permissions"])
 

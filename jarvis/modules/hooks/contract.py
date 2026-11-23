@@ -171,8 +171,6 @@ def _settings_plan(py, receipt):
     changes, _ = m.merge(after, fragment, m.load_manifest(str(_receipt_path())))
     _, violated = m.top_level_diff(before, after)
     changes.sort(key=lambda c: not c.startswith("hooks."))  # 승인할 사람이 먼저 봐야 할 훅 등록을 앞에 둔다
-    if _held_permissions(receipt):
-        changes.append("설치 영수증: 권한·모드 기록을 사용자 것으로 넘김(settings.json 의 권한은 그대로)")
     return changes, violated
 
 
@@ -256,6 +254,8 @@ def plan():
                       "from": {n: _digest(_claude() / "hooks" / n) for n in write}})
     if py:
         changes, violated = _settings_plan(py, receipt)
+        if _held_permissions(receipt):  # settings.json 은 그대로라 status 의 건강 판정에는 넣지 않는다
+            changes.append("설치 영수증: 권한·모드 기록을 사용자 것으로 넘김(settings.json 의 권한은 그대로)")
         if violated:
             blocked.append({"step": "settings", "reason": f"병합이 예상 밖의 최상위 키를 바꿉니다: {violated}"})
         if changes or write or not receipt.get("hook_files"):
@@ -391,7 +391,8 @@ def _uninstall_plan(receipt):
     settings = _claude() / "settings.json"
     if receipt.get("hook_files") or receipt.get("added_allow") or receipt.get("default_mode_changed") \
             or (settings.is_file() and "danger_guard.py" in settings.read_text(encoding="utf-8", errors="replace")):
-        steps.append({"id": "settings", "summary": "settings.json 에서 설치가 넣은 훅 등록·권한 항목만 걷어내고 defaultMode 원복",
+        steps.append({"id": "settings", "summary": "settings.json 에서 설치가 넣은 훅 등록·기본값만 걷어냄"
+                      + (", 옛 설치가 넣은 권한 항목도 걷어내고 defaultMode 원복" if _held_permissions(receipt) else ""),
                       "risk": "config", "argv": []})
     if remove:
         steps.append({"id": "files", "summary": "훅 파일 지움: " + ", ".join(remove), "risk": "remove", "argv": [],

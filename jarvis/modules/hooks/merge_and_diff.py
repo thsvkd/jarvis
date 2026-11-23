@@ -6,7 +6,7 @@ merge_and_diff.py — 실제 settings.json 조각을 기존 settings.json에 외
 입력 조각(res/settings.json)은 진짜 Claude Code settings.json 형식이며(SSoT), 훅 command에
 {{PY}} / {{HOOKS_DIR}} 자리표시자를 담는다. 이 스크립트가:
   1) 자리표시자를 치환하고 (Windows/POSIX 설치 스크립트 양쪽이 같은 이 로직을 씀),
-  2) permissions(allow/deny/ask/defaultMode)와 hooks.* 만 기존 settings.json에 병합하며,
+  2) 조각에 있는 permissions(allow/deny/ask/defaultMode)와 hooks.* 만 기존 settings.json에 병합하며,
   3) 그 외 최상위 키(model, env, statusLine, 다른 훅 등)는 100% 그대로 보존한다.
 예상치 못하게 바뀐 최상위 키가 감지되면 비정상 종료(exit 1)한다.
 
@@ -18,13 +18,17 @@ allow/deny/ask 는 합집합(중복 없이 뒤에 추가), defaultMode 는 덮�
 설치 영수증(매니페스트)으로 기록한다. --uninstall 모드는 그 영수증을 읽어, 설치가 건드린
 부분만 정밀하게 되돌린다 (훅 등록 해제 + 우리가 추가한 권한 항목만 제거 + defaultMode 원복).
 
---default-mode 를 주면 조각의 permissions.defaultMode 를 그 값으로 바꿔 병합한다. 온보딩이
-사용자에게 고르게 한 값(auto / bypassPermissions)을 전달하는 통로다. 조각(res/settings.json)
-자체는 건드리지 않으므로 SSoT 는 그대로 유지된다.
+jarvis 가 배포하는 조각(jarvis/modules/hooks/settings.json)에는 2026-11-23 부터 permissions 가 없다.
+조각에 permissions 가 없으면 settings.json 의 권한은 건드리지 않고, 옛 설치가 영수증에 남긴 권한·모드
+기록만 비운다(사용자 것으로 넘긴다. 그 뒤 --uninstall 은 권한을 되돌리지 않는다). 권한 병합 코드는
+옛 영수증과 권한이 있는 조각을 다루려고 남겨 둔다.
+
+--default-mode 는 더 이상 받지 않는다(오류로 끝난다). 이 옵션은 조각에 permissions 를 만들어 넣어,
+영수증이 우리 것이라 적은 allow/ask 규칙을 '더는 배포하지 않는다'며 지우게 했다.
 
 --windows 는 Windows 설치기가 넘긴다. 없으면 조각의 WINDOWS_ONLY_ENV 키를 빼고 병합한다.
 
-usage: merge_and_diff.py [--default-mode <mode>] [--windows] <fragment.json> <settings_path> <dry_run:0|1> <py_invoke> <hooks_dir> [manifest_path] [hook_files_csv]
+usage: merge_and_diff.py [--windows] <fragment.json> <settings_path> <dry_run:0|1> <py_invoke> <hooks_dir> [manifest_path] [hook_files_csv]
        merge_and_diff.py --uninstall <settings_path> <dry_run:0|1> <manifest_path>
 """
 import copy
@@ -44,16 +48,6 @@ SCALAR_KEYS = ("model", "effortLevel", "language")
 # Windows 설치기(--windows)에서만 병합하는 env 키. GRAFT_TEST_SYNC_RUN 은 Windows 에만 설치되는
 # graft_sync_hidden.cjs 를 가리키므로, POSIX 에 넣으면 graft 가 없는 파일을 보고 동기화를 건너뛴다.
 WINDOWS_ONLY_ENV = ("GRAFT_TEST_SYNC_RUN",)
-
-# 온보딩이 --default-mode 로 넘길 수 있는 값. Claude Code 가 실제로 아는 모드만 받는다 —
-# 오타가 그대로 settings.json 에 박히면 사용자는 모드가 왜 안 켜지는지 알 길이 없다.
-VALID_DEFAULT_MODES = (
-    "auto",
-    "bypassPermissions",
-    "default",
-    "acceptEdits",
-    "plan",
-)
 
 
 def load_manifest(path):
@@ -598,15 +592,15 @@ def main() -> int:
     if argv and argv[0] == "--uninstall":
         return main_uninstall(argv[1:])
 
-    # 위치 인자 사이 어디에 와도 되도록 --default-mode / --windows 를 먼저 걷어낸다.
-    default_mode = ""
+    # 위치 인자 사이 어디에 와도 되도록 --windows 를 먼저 걷어낸다.
     windows = False
     positional = []
     i = 0
     while i < len(argv):
-        if argv[i] == "--default-mode" and i + 1 < len(argv):
-            default_mode = argv[i + 1]
-            i += 2
+        if argv[i] == "--default-mode":
+            print("--default-mode is no longer supported: jarvis does not manage permissions.defaultMode.",
+                  file=sys.stderr)
+            return 1
         elif argv[i] == "--windows":
             windows = True
             i += 1
@@ -615,13 +609,8 @@ def main() -> int:
             i += 1
     argv = positional
 
-    if default_mode and default_mode not in VALID_DEFAULT_MODES:
-        print(f"Unknown defaultMode: {default_mode!r} (valid: {', '.join(VALID_DEFAULT_MODES)})",
-              file=sys.stderr)
-        return 1
-
     if len(argv) < 5:
-        print("usage: merge_and_diff.py [--default-mode <mode>] [--windows] <fragment.json> <settings_path> <dry_run> <py_invoke> <hooks_dir> [manifest_path] [hook_files_csv]",
+        print("usage: merge_and_diff.py [--windows] <fragment.json> <settings_path> <dry_run> <py_invoke> <hooks_dir> [manifest_path] [hook_files_csv]",
               file=sys.stderr)
         return 1
 
@@ -642,10 +631,6 @@ def main() -> int:
     if not windows:
         for key in WINDOWS_ONLY_ENV:
             fragment.get("env", {}).pop(key, None)
-
-    # 온보딩이 고른 권한 모드로 조각의 기본값을 갈아끼운다 (조각 파일 자체는 그대로).
-    if default_mode:
-        fragment.setdefault("permissions", {})["defaultMode"] = default_mode
 
     settings_existed = os.path.exists(settings_path)
     if settings_existed:

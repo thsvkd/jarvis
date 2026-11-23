@@ -848,6 +848,16 @@ def test_shipped_fragment_has_no_permissions():
     assert "permissions" not in json.loads(FRAGMENT.read_text(encoding="utf-8"))
 
 
+def test_default_mode_option_is_refused_and_writes_nothing(tmp_path):
+    # 이 옵션은 조각에 permissions 를 만들어, 영수증의 allow·ask 를 '더는 배포하지 않는다'며 지우게 했다
+    target = tmp_path / "settings.json"
+    target.write_text(json.dumps({"permissions": {"allow": ["Read"]}}), encoding="utf-8")
+    proc = subprocess.run([sys.executable, "-X", "utf8", str(MERGE), "--default-mode", "auto", str(FRAGMENT), str(target),
+                           "0", "python3", "/home/u/.claude/hooks"], capture_output=True, text=True, encoding="utf-8")
+    assert proc.returncode == 1 and "--default-mode" in proc.stderr
+    assert json.loads(target.read_text(encoding="utf-8")) == {"permissions": {"allow": ["Read"]}}
+
+
 def test_shipped_fragment_leaves_permissions_alone(tmp_path):
     target = tmp_path / "settings.json"
     original = {"permissions": {"defaultMode": "bypassPermissions", "allow": ["Read"], "ask": ["Skill(x)"], "mode": "x"}}
