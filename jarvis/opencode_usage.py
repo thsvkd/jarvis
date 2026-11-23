@@ -16,6 +16,7 @@ import time
 import urllib.request
 import urllib.parse
 from . import provider_usage
+from .usage_common import fetch_json, private_json as _private_json, valid_token
 from .util import parse_iso
 
 
@@ -31,20 +32,6 @@ def _local(value):
 def _run(args, timeout):
     return subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
                           stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-
-
-def _private_json(path):
-    before = os.lstat(path)
-    if not stat.S_ISREG(before.st_mode):
-        raise ValueError("invalid registration")
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    with os.fdopen(fd, "rb") as f:
-        st = os.fstat(f.fileno())
-        if not stat.S_ISREG(st.st_mode) or st.st_size > 65536 or (st.st_dev, st.st_ino) != (before.st_dev, before.st_ino):
-            raise ValueError("invalid registration")
-        if os.name != "nt" and (st.st_uid != os.getuid() or st.st_mode & 0o077):
-            raise ValueError("unsafe registration")
-        return json.loads(f.read(65537))
 
 
 def _registration(endpoint):
@@ -65,7 +52,7 @@ def _legacy_key():
     body = _private_json(os.path.join(data, "opencode", "auth.json"))
     entry = body.get("opencode-go") if isinstance(body, dict) else None
     key = entry.get("key") if isinstance(entry, dict) and entry.get("type") == "api" else None
-    if not isinstance(key, str) or not key or len(key) > 8192 or any(c in key for c in "\r\n"):
+    if not valid_token(key):
         raise ValueError("invalid credential")
     return key
 
@@ -104,7 +91,7 @@ def _v2_credential():
         key = value.get("key")
     else:
         raise ValueError("unsupported credential")
-    if not isinstance(key, str) or not key or len(key) > 8192 or any(c in key for c in "\r\n"):
+    if not valid_token(key):
         raise ValueError("invalid credential")
     return key, org
 
@@ -114,34 +101,20 @@ def _go_api(key, org=None):
 
     https://github.com/anomalyco/opencode/blob/dev/packages/console/app/src/routes/zen/go/v1/usage.ts
     """
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, *args, **kwargs):
-            return None
     headers = {"Accept": "application/json", "Authorization": "Bearer " + key}
     if org is not None:
         headers["x-opencode-org-id"] = org
     req = urllib.request.Request("https://opencode.ai/zen/go/v1/usage", headers=headers)
-    with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(req, timeout=20) as response:
-        raw = response.read(1_000_001)
-    if len(raw) > 1_000_000:
-        raise ValueError("response too large")
-    return json.loads(raw)
+    return fetch_json(req)
 
 
 def _request(endpoint, password):
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, *args, **kwargs):
-            return None
     headers = {"Accept": "application/json"}
     if password is not None:
         token = base64.b64encode(("opencode:" + password).encode()).decode("ascii")
         headers["Authorization"] = "Basic " + token
     req = urllib.request.Request(endpoint.rstrip("/") + "/api/experimental/usage/limits", headers=headers)
-    with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(req, timeout=20) as response:
-        raw = response.read(1_000_001)
-    if len(raw) > 1_000_000:
-        raise ValueError("response too large")
-    return json.loads(raw)
+    return fetch_json(req)
 
 
 def read(exe, use_service=False):

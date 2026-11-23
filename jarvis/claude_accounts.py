@@ -26,7 +26,7 @@ import sys
 import threading
 import time
 
-from . import config, macos_daemon, opencode_usage, provider_usage
+from . import config, macos_daemon, usage_common
 from .util import Installer, org, parse_iso, run, scrub_home, which_local, which_tool
 
 CONFIG_MAX = 32 << 20  # Claude Code 전역 설정은 프로젝트 기록이 쌓여 수 MB 까지 큰다
@@ -564,9 +564,9 @@ def _store_read():
     """저장소 캐시 어댑터. 명령 실행과 토큰 갱신은 하지 않는다. 계정이 없거나 읽지 못하면 None."""
     root = _root()
     try:
-        roster = opencode_usage._private_json(os.path.join(root, "sequence.json"))
+        roster = usage_common.private_json(os.path.join(root, "sequence.json"))
         try:
-            cache = opencode_usage._private_json(os.path.join(root, "cache", "usage.json"))
+            cache = usage_common.private_json(os.path.join(root, "cache", "usage.json"))
         except (OSError, ValueError):
             cache = {}
         accounts = roster.get("accounts", {}) if isinstance(roster, dict) else {}
@@ -595,7 +595,7 @@ def _store_read():
             dead = isinstance(strikes, int) and strikes >= 1
             name = ident.get("organizationName")
             # 저장소 값도 hswap 한 줄 모양으로 바꿔 account() 의 규칙을 그대로 태운다. 조직 UUID·별칭은 넘기지 않는다
-            a = account({"number": number, "email": provider_usage._email(ident), "organizationName": name if isinstance(name, str) else None,
+            a = account({"number": number, "email": usage_common.email(ident), "organizationName": name if isinstance(name, str) else None,
                          # 사용 중: 실제 로그인과 이메일·조직 UUID 가 같은 슬롯(엔진의 _find_account_slot 과 같은 비교)
                          "active": identity is not None and _identity(*identity) == who,
                          "usageStatus": "relogin_required" if dead else "ok" if any(_windows(usage)) else "no_saved_usage",
@@ -615,7 +615,7 @@ def _store_read():
 def _keepalive():
     """hswap claude keepalive 가 남긴 저장소의 cache/keepalive.json(토큰 없음). 없거나 안전하지 않거나 모르는 형식이면 None."""
     try:
-        body = opencode_usage._private_json(os.path.join(_root(), "cache", "keepalive.json"))
+        body = usage_common.private_json(os.path.join(_root(), "cache", "keepalive.json"))
     except (OSError, ValueError, RecursionError):
         return None
     return body if isinstance(body, dict) and body.get("schemaVersion") == 1 else None

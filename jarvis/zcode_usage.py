@@ -2,12 +2,12 @@
 
 https://github.com/zai-org/zai-coding-plugins/blob/main/plugins/glm-plan-usage/skills/usage-query-skill/scripts/query-usage.mjs
 """
-import json
 import math
 import os
-import time
 import urllib.parse
 import urllib.request
+
+from .usage_common import account, fetch_json, valid_token
 
 
 def _credentials():
@@ -19,24 +19,17 @@ def _credentials():
         if url.scheme != "https" or url.hostname not in ("api.z.ai", "open.bigmodel.cn") or url.port not in (None, 443) or url.username or url.password:
             return None
         base = "https://" + url.hostname
-    if not isinstance(token, str) or not token or len(token) > 8192 or any(c in token for c in "\r\n"):
+    if not valid_token(token):
         return None
     return base, token
 
 
 def _http(base, token):
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, *args, **kwargs):
-            return None
     if base not in ("https://api.z.ai", "https://open.bigmodel.cn"):
         raise ValueError("unsupported endpoint")
     auth = token if token.lower().startswith("bearer ") else "Bearer " + token
     req = urllib.request.Request(base + "/api/monitor/usage/quota/limit", headers={"Authorization": auth, "Accept": "application/json"})
-    with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(req, timeout=20) as response:
-        data = response.read(1_000_001)
-    if len(data) > 1_000_000:
-        raise ValueError("oversized response")
-    return json.loads(data)
+    return fetch_json(req)
 
 
 def _limits(body):
@@ -69,8 +62,6 @@ def read():
         windows, buckets = _limits(_http(*creds))
         if not windows and not buckets:
             return unavailable
-        return {"status": "ok", "accounts": [{"label": "기본 계정", "org": None, "active": True, "status": "ok",
-                "error": None, "note": None, "attention": False, "failure": None, "plan": None,
-                "updated_at": time.time(), "windows": windows, "buckets": buckets, "extra": None, "credits": None, "source": "zcode"}]}
+        return {"status": "ok", "accounts": [account("zcode", windows, buckets)]}
     except (OSError, ValueError, TypeError):
         return unavailable

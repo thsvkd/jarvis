@@ -12,25 +12,18 @@ import time
 import urllib.request
 
 from .util import parse_iso
-from .provider_usage import _email
+from .usage_common import UNNAMED, account, email, fetch_json, valid_token
 
 
 def _http(url, token, post=False):
     """Google 고정 주소에만 토큰을 전송하며 프록시와 리다이렉트는 따르지 않는다."""
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, *args, **kwargs):
-            return None
     allowed = ("https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
                "https://openidconnect.googleapis.com/v1/userinfo")
     if url not in allowed:
         raise ValueError("unsupported endpoint")
     req = urllib.request.Request(url, data=b"{}" if post else None,
                                  headers={"Authorization": "Bearer " + token, "User-Agent": "antigravity", "Content-Type": "application/json"})
-    with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(req, timeout=15) as response:
-        data = response.read(1_000_001)
-    if len(data) > 1_000_000:
-        raise ValueError("oversized response")
-    return json.loads(data)
+    return fetch_json(req, timeout=15)
 
 
 def _token():
@@ -50,10 +43,10 @@ def _token():
     entry = body.get("token") if isinstance(body, dict) else None
     token = entry.get("access_token") if isinstance(entry, dict) else None
     expiry = parse_iso(entry.get("expiry")) if isinstance(entry, dict) and isinstance(entry.get("expiry"), str) else None
-    if not isinstance(token, str) or not token or len(token) > 8192 or any(c in token for c in "\r\n") or not expiry or expiry <= time.time():
+    if not valid_token(token) or not expiry or expiry <= time.time():
         raise ValueError("expired or invalid credential")
     # CLI 가 자격 파일에 남긴 로그인 이메일. 있으면 userinfo 호출 없이 계정을 식별한다
-    return token, _email({"email": body.get("id_token_email")})
+    return token, email({"email": body.get("id_token_email")})
 
 
 def _quota(body):
@@ -90,15 +83,12 @@ def read():
         quota = _quota(_http("https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary", token, True))
         if not quota:
             return unavailable
-        if label == "이름 없는 계정":
+        if label == UNNAMED:
             try:
                 identity = _http("https://openidconnect.googleapis.com/v1/userinfo", token)
-                label = _email(identity) if isinstance(identity, dict) and identity.get("email_verified") is True else "이름 없는 계정"
+                label = email(identity) if isinstance(identity, dict) and identity.get("email_verified") is True else UNNAMED
             except (OSError, ValueError, TypeError):
                 pass
-        account = {"label": "기본 계정" if label == "이름 없는 계정" else label, "org": None, "active": True,
-                   "status": "ok", "error": None, "note": None, "attention": False, "failure": None, "plan": None,
-                   "updated_at": time.time(), **quota, "extra": None, "credits": None, "source": "antigravity"}
-        return {"status": "ok", "accounts": [account]}
+        return {"status": "ok", "accounts": [account("antigravity", label="기본 계정" if label == UNNAMED else label, **quota)]}
     except (OSError, ValueError, TypeError):
         return unavailable

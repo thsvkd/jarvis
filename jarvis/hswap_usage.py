@@ -18,7 +18,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout, wait
 
-from . import caam_usage, claude_accounts, config, macos_daemon, provider_usage
+from . import caam_usage, claude_accounts, config, macos_daemon, provider_usage, usage_common
 from .util import _NO_WINDOW, scrub_home, tool_path, which_tool
 
 WAIT_S = 8  # 읽기를 시작한 뒤 hswap 을 기다리는 시간. 기존 수집기가 그보다 오래 걸리면 그동안 함께 기다린다(수집 대기 55초 안)
@@ -130,7 +130,7 @@ def account(row):
         note, attention = (f"{claude_accounts._span(time.time() - at)}째 새로 재지 못했습니다. 다시 로그인해야 할 수 있습니다. "
                            "그 하네스가 데몬·앱으로 상주하면 먼저 끝내야 새 로그인을 씁니다."), True
     label = row.get("label")
-    return {"label": label if isinstance(label, str) and len(label) <= 200 and provider_usage.EMAIL.fullmatch(label)
+    return {"label": label if isinstance(label, str) and len(label) <= 200 and usage_common.EMAIL.fullmatch(label)
             else "API 키 계정" if row.get("authMode") in ("api_key", "key") else "이름 없는 계정",
             "org": None, "active": row.get("active") is True,
             "status": "ok" if has else "error", "error": None if has else note or "사용량을 확인할 수 없습니다.",
@@ -605,7 +605,7 @@ def read(harness, fallback, force=False):
 def _email(r):
     """같은 계정을 가르는 열쇠: 이메일(대소문자 무시). 이메일이 아닌 라벨(기본 계정 등)은 서로 다른 계정으로 본다."""
     label = r.get("label")
-    return label.lower() if isinstance(label, str) and provider_usage.EMAIL.fullmatch(label) else id(r)
+    return label.lower() if isinstance(label, str) and usage_common.EMAIL.fullmatch(label) else id(r)
 
 
 def merge(rows, old):

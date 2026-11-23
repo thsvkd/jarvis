@@ -10,23 +10,16 @@ import re
 import time
 import urllib.request
 
-from . import antigravity_usage, opencode_usage
-from .provider_usage import _email
+from . import antigravity_usage
+from .usage_common import UNNAMED, account, email, fetch_json, private_json, valid_token
 from .util import parse_iso
 
 
 def _http(token, project):
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, *args, **kwargs):
-            return None
     req = urllib.request.Request("https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota",
                                  data=json.dumps({"project": project}).encode(), headers={"Authorization": "Bearer " + token,
                                  "Content-Type": "application/json", "Accept": "application/json"})
-    with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(req, timeout=20) as response:
-        raw = response.read(1_000_001)
-    if len(raw) > 1_000_000:
-        raise ValueError("oversized response")
-    return json.loads(raw)
+    return fetch_json(req)
 
 
 def read():
@@ -36,10 +29,10 @@ def read():
         if not isinstance(project, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9:_-]{1,199}", project):
             return unavailable
         home = os.environ.get("GEMINI_HOME") or os.path.expanduser("~/.gemini")
-        auth = opencode_usage._private_json(os.path.join(home, "oauth_creds.json"))
+        auth = private_json(os.path.join(home, "oauth_creds.json"))
         token = auth.get("access_token") if isinstance(auth, dict) else None
         expiry = auth.get("expiry_date") if isinstance(auth, dict) else None
-        if not isinstance(token, str) or not token or len(token) > 8192 or any(c in token for c in "\r\n"):
+        if not valid_token(token):
             return unavailable
         if isinstance(expiry, bool) or not isinstance(expiry, (int, float)) or not math.isfinite(expiry) or expiry <= time.time() * 1000:
             return unavailable
@@ -58,12 +51,9 @@ def read():
             return unavailable
         try:
             info = antigravity_usage._http("https://openidconnect.googleapis.com/v1/userinfo", token)
-            label = _email(info) if isinstance(info, dict) and info.get("email_verified") is True else "이름 없는 계정"
+            label = email(info) if isinstance(info, dict) and info.get("email_verified") is True else UNNAMED
         except (OSError, ValueError, TypeError):
-            label = "이름 없는 계정"
-        return {"status": "ok", "accounts": [{"label": "기본 계정" if label == "이름 없는 계정" else label,
-                "org": None, "active": True, "status": "ok", "error": None, "note": None, "attention": False,
-                "failure": None, "plan": None, "updated_at": time.time(), "windows": [], "buckets": buckets[:12],
-                "extra": None, "credits": None, "source": "gemini"}]}
+            label = UNNAMED
+        return {"status": "ok", "accounts": [account("gemini", buckets=buckets[:12], label="기본 계정" if label == UNNAMED else label)]}
     except (OSError, ValueError, TypeError):
         return unavailable

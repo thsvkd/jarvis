@@ -3,19 +3,18 @@
 https://github.com/MiniMax-AI/cli/blob/main/src/client/endpoints.ts
 https://github.com/MiniMax-AI/cli/blob/main/src/utils/quota.ts
 """
-import json
 import math
 import os
 import time
 import urllib.request
 
-from . import opencode_usage
+from .usage_common import account, fetch_json, private_json, valid_token
 from .util import parse_iso
 
 
 def _credential():
     home = os.environ.get("MMX_CONFIG_DIR") or os.path.expanduser("~/.mmx")
-    cfg = opencode_usage._private_json(os.path.join(home, "config.json"))
+    cfg = private_json(os.path.join(home, "config.json"))
     if not isinstance(cfg, dict):
         raise ValueError("invalid configuration")
     oauth = cfg.get("oauth")
@@ -36,23 +35,16 @@ def _credential():
     base = os.environ.get("MINIMAX_BASE_URL") or cfg.get("base_url") or resource or ("https://api.minimax.io" if region == "global" else "https://api.minimax.cn")
     if not isinstance(base, str) or base.rstrip("/") not in ("https://api.minimax.io", "https://api.minimax.cn"):
         raise ValueError("unsupported endpoint")
-    if not isinstance(token, str) or not token or len(token) > 8192 or any(c in token for c in "\r\n"):
+    if not valid_token(token):
         raise ValueError("invalid credential")
     return base.rstrip("/"), token
 
 
 def _http(base, token):
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, *args, **kwargs):
-            return None
     if base not in ("https://api.minimax.io", "https://api.minimax.cn"):
         raise ValueError("unsupported endpoint")
     req = urllib.request.Request(base + "/v1/token_plan/remains", headers={"Authorization": "Bearer " + token, "Accept": "application/json"})
-    with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(req, timeout=20) as response:
-        data = response.read(1_000_001)
-    if len(data) > 1_000_000:
-        raise ValueError("oversized response")
-    return json.loads(data)
+    return fetch_json(req)
 
 
 def _windows(body):
@@ -83,8 +75,6 @@ def read():
         windows = _windows(_http(*_credential()))
         if not windows:
             return unavailable
-        return {"status": "ok", "accounts": [{"label": "기본 계정", "org": None, "active": True, "status": "ok",
-                "error": None, "note": None, "attention": False, "failure": None, "plan": None,
-                "updated_at": time.time(), "windows": windows, "buckets": [], "extra": None, "credits": None, "source": "minimax"}]}
+        return {"status": "ok", "accounts": [account("minimax", windows)]}
     except (OSError, ValueError, TypeError):
         return unavailable

@@ -3,22 +3,15 @@
 https://github.com/Dicklesworthstone/coding_agent_account_manager/blob/v0.1.24/cmd/caam/cmd/limits.go
 """
 import math
-import re
 
 from . import caam_usage
+from .usage_common import email as _email
 from .util import parse_iso
 
-EMAIL = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 SUPPORTED = ("codex", "grok", "cursor")
 # 사용량 계정 행의 failure 닫힌 코드(USAGE-17). 뜻은 static/shared/API.md 의 "사용량 계정 행의 failure" 표, 화면은 usage.js 의 CODES 가 같은 키를 쓴다
 FAILURES = ("auth", "expiring", "rate", "limit", "wait", "keychain", "perm", "net", "server", "unsupported", "unknown")
 LIMIT_NOTE = "사용 한도에 도달했습니다(리셋 시각에 풀립니다)."  # 한도 창 소진(limit)은 리셋 시각에 풀려 attention 이 아니다
-
-
-def _email(ident):
-    ident = ident if isinstance(ident, dict) else {}
-    email = ident.get("email")
-    return email if isinstance(email, str) and len(email) <= 200 and EMAIL.fullmatch(email) else "이름 없는 계정"
 
 
 def _time(value):

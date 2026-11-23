@@ -4,7 +4,6 @@ https://github.com/MoonshotAI/kimi-code/blob/main/packages/oauth/src/managed-usa
 https://github.com/MoonshotAI/kimi-code/blob/main/packages/oauth/src/storage.ts
 https://github.com/MoonshotAI/kimi-code/issues/3908
 """
-import json
 import math
 import os
 import re
@@ -12,7 +11,7 @@ import time
 import tomllib
 import urllib.request
 
-from . import opencode_usage
+from .usage_common import account, fetch_json, private_json, valid_token
 from .util import parse_iso
 
 
@@ -37,10 +36,10 @@ def _token():
         pass
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", name) or name in (".", ".."):
         raise ValueError("invalid credential name")
-    value = opencode_usage._private_json(os.path.join(home, "credentials", name + ".json"))
+    value = private_json(os.path.join(home, "credentials", name + ".json"))
     token = value.get("access_token") if isinstance(value, dict) else None
     expiry = value.get("expires_at") if isinstance(value, dict) else None
-    if not isinstance(token, str) or not token or len(token) > 8192 or any(c in token for c in "\r\n"):
+    if not valid_token(token):
         raise ValueError("invalid credential")
     if isinstance(expiry, bool) or not isinstance(expiry, (int, float)) or not math.isfinite(expiry) or expiry <= time.time():
         raise ValueError("expired credential")
@@ -48,18 +47,11 @@ def _token():
 
 
 def _http(token):
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, *args, **kwargs):
-            return None
     base = os.environ.get("KIMI_CODE_BASE_URL", "https://api.kimi.com/coding/v1").rstrip("/")
     if base not in ("https://api.kimi.com/coding/v1", "https://api.kimi.ai/coding/v1"):
         raise ValueError("unsupported endpoint")
     req = urllib.request.Request(base + "/usages", headers={"Authorization": "Bearer " + token, "Accept": "application/json"})
-    with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(req, timeout=20) as response:
-        data = response.read(1_000_001)
-    if len(data) > 1_000_000:
-        raise ValueError("oversized response")
-    return json.loads(data)
+    return fetch_json(req)
 
 
 def _counter(value):
@@ -118,8 +110,6 @@ def read():
         windows = _windows(_http(_token()))
         if not windows:
             return unavailable
-        return {"status": "ok", "accounts": [{"label": "기본 계정", "org": None, "active": True, "status": "ok",
-                "error": None, "note": None, "attention": False, "failure": None, "plan": None,
-                "updated_at": time.time(), "windows": windows, "buckets": [], "extra": None, "credits": None, "source": "kimi"}]}
+        return {"status": "ok", "accounts": [account("kimi", windows)]}
     except (OSError, ValueError, TypeError, UnicodeError):
         return unavailable

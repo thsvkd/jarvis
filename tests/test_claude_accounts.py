@@ -584,7 +584,7 @@ class LoginStateTest(StoreCase):
         self.assertIsNone(claude_accounts.login())
 
     def test_unsafe_or_foreign_files_are_ignored(self):
-        """covers: USAGE-7. opencode_usage._private_json 과 같은 안전 규칙"""
+        """covers: USAGE-7. usage_common.private_json 과 같은 안전 규칙"""
         path = os.path.join(self.root, "cache", "keepalive.json")
         self.keepalive(ok=False, error={"type": "refresh_failed"})
         os.chmod(path, 0o644)
