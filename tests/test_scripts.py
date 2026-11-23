@@ -16,7 +16,14 @@ def _load(name):
     return mod
 
 
-lint, run = _load("lint"), _load("run")
+lint, run, help_ = _load("lint"), _load("run"), _load("help")
+
+
+class HelpTest(unittest.TestCase):
+    def test_lists_every_documented_make_target(self):
+        with open(os.path.join(os.path.dirname(_SCRIPTS), "Makefile"), encoding="utf-8") as f:
+            names = [t for t, _ in help_.targets(f.read())]
+        self.assertEqual(names, ["help", "deps", "test", "lint", "run"])
 
 
 class LintTest(unittest.TestCase):

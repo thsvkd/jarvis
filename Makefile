@@ -6,7 +6,11 @@ else
 PYTHON ?= python3
 endif
 
-.PHONY: deps test lint run
+.PHONY: help deps test lint run
+.DEFAULT_GOAL := help
+
+help: ## 이 목록을 보여 준다(인자 없이 make 를 불러도 같다)
+	@$(PYTHON) scripts/help.py
 
 deps: ## .venv 에 Python 3.13 과 psutil 을 받는다(uv 필요)
 	$(PYTHON) scripts/deps.py
