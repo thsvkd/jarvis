@@ -10,12 +10,31 @@ from pytest_compat import collect, pytest  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 MERGE = ROOT / "jarvis" / "modules" / "hooks" / "merge_and_diff.py"
 FRAGMENT = ROOT / "jarvis" / "modules" / "hooks" / "settings.json"
+# 배포 조각은 2026-11-23 부터 permissions 를 다루지 않는다. 병합기의 권한 병합·원복은 옛 영수증을 다루느라 남아 있어,
+# 그 동작은 마지막으로 배포한 권한 블록을 더한 조각으로 검사한다.
+SHIPPED_PERMISSIONS = {
+    "defaultMode": "auto",
+    "allow": ["Bash", "PowerShell", "Glob", "Grep", "Read", "Edit", "MultiEdit(*)", "Write", "Agent(*)", "WebFetch(*)",
+              "WebSearch", "Monitor", "Workflow", "Artifact", "mcp__plugin_oh-my-claudecode_t__*",
+              "mcp__plugin_context7_context7__*", "mcp__claude_ai_Context7__*", "Skill"],
+    "ask": [f"Skill({s}{t})" for s in ("oh-my-claudecode:release", "to-issues", "to-prd", "triage", "schedule", "loop")
+            for t in ("", " *")],
+}
+
+
+def permission_fragment(directory: Path) -> Path:
+    path = directory / "fragment-with-permissions.json"
+    if not path.exists():
+        data = json.loads(FRAGMENT.read_text(encoding="utf-8"))
+        data["permissions"] = SHIPPED_PERMISSIONS
+        path.write_text(json.dumps(data), encoding="utf-8")
+    return path
 
 
 def run_merge(target: Path, dry="0", py="python3", hooks_dir="/home/u/.claude/hooks",
-              manifest_path=None, hook_files="danger_guard.py,shims/rm", windows=False):
+              manifest_path=None, hook_files="danger_guard.py,shims/rm", windows=False, fragment=None):
     args = [sys.executable, "-X", "utf8", str(MERGE)] + (["--windows"] if windows else [])
-    args += [str(FRAGMENT), str(target), dry, py, hooks_dir]
+    args += [str(fragment or permission_fragment(target.parent)), str(target), dry, py, hooks_dir]
     if manifest_path is not None:
         args += [str(manifest_path), hook_files]
     proc = subprocess.run(args, capture_output=True, text=True, encoding="utf-8")
@@ -821,6 +840,44 @@ def test_malformed_auto_mode_is_left_untouched(tmp_path):
     proc, result = run_merge(target, manifest_path=manifest)
     assert proc.returncode == 0, proc.stdout
     assert result["autoMode"] == {"allow": "not a list"}
+
+
+# --- 배포 조각은 권한을 다루지 않는다(2026-11-23 사용자 결정) ---
+
+def test_shipped_fragment_has_no_permissions():
+    assert "permissions" not in json.loads(FRAGMENT.read_text(encoding="utf-8"))
+
+
+def test_shipped_fragment_leaves_permissions_alone(tmp_path):
+    target = tmp_path / "settings.json"
+    original = {"permissions": {"defaultMode": "bypassPermissions", "allow": ["Read"], "ask": ["Skill(x)"], "mode": "x"}}
+    target.write_text(json.dumps(original), encoding="utf-8")
+    proc, result = run_merge(target, manifest_path=tmp_path / "manifest.json", fragment=FRAGMENT)
+    assert proc.returncode == 0, proc.stdout
+    assert result["permissions"] == original["permissions"]
+    assert "danger_guard.py" in hook_commands(result)[0]
+
+
+def test_shipped_fragment_releases_an_old_receipt_and_uninstall_keeps_permissions(tmp_path):
+    target, manifest = tmp_path / "settings.json", tmp_path / "manifest.json"
+    target.write_text(json.dumps({"permissions": {"allow": ["CustomTool"], "deny": ["Bash(curl *)"]}}), encoding="utf-8")
+    run_merge(target, manifest_path=manifest)  # 옛 배포본: 권한·모드를 넣고 영수증에 적는다
+    m = json.loads(manifest.read_text(encoding="utf-8"))
+    m["removed_legacy"] = {"deny": ["Bash(curl *)"]}
+    manifest.write_text(json.dumps(m), encoding="utf-8")
+    installed = json.loads(target.read_text(encoding="utf-8"))
+    assert installed["permissions"]["defaultMode"] == "auto" and "Bash" in installed["permissions"]["allow"]
+
+    proc, result = run_merge(target, manifest_path=manifest, fragment=FRAGMENT)
+    assert proc.returncode == 0, proc.stdout
+    assert result["permissions"] == installed["permissions"]  # settings.json 의 권한은 그대로
+    m = json.loads(manifest.read_text(encoding="utf-8"))
+    assert (m["added_allow"], m["added_deny"], m["added_ask"], m["removed_legacy"]) == ([], [], [], {})
+    assert m["default_mode_changed"] is False and m["hook_files"] == ["danger_guard.py", "shims/rm"]
+
+    _, result = run_uninstall(target, manifest)
+    assert result["permissions"] == installed["permissions"]  # 놓아 준 규칙과 모드는 사용자 것이다
+    assert "hooks" not in result or not result["hooks"].get("PreToolUse")
 
 
 load_tests = collect(globals())

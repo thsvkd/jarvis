@@ -146,40 +146,34 @@ def _trash_steps(py):
     return steps
 
 
-def _fragment(mode):
-    """조각(자리표시자는 그대로). 사용자가 지금 쓰는 권한 모드를 바꾸지 않는다: 병합기가 아는 값이면 그 값으로,
-    모르는 값(새 Claude Code 모드 등)이면 조각에서 defaultMode 를 빼서 손대지 않는다."""
+def _fragment():
+    """조각(자리표시자는 그대로). 권한(permissions)은 다루지 않는다(2026-11-23 사용자 결정)."""
     with open(FRAGMENT, encoding="utf-8") as f:
         fragment = json.load(f)
     fragment.pop("_comment", None)
-    perms = fragment.setdefault("permissions", {})
-    if mode in merger().VALID_DEFAULT_MODES:
-        perms["defaultMode"] = mode
-    elif mode:
-        perms.pop("defaultMode", None)
     return fragment
 
 
-def _mode(before, receipt):
-    return (before.get("permissions") or {}).get("defaultMode") or receipt.get("default_mode_after")
+def _held_permissions(receipt):
+    """옛 설치가 영수증에 남긴 권한·모드 기록이 있는가. 있으면 다음 병합이 그 기록을 사용자 것으로 넘긴다."""
+    return any(receipt.get(k) for k in ("added_allow", "added_deny", "added_ask", "removed_legacy", "default_mode_changed"))
 
 
 def _settings_plan(py, receipt):
-    """(바뀔 항목들, 예상 밖으로 바뀌는 최상위 키, defaultMode). 실제 파일은 쓰지 않는다."""
+    """(바뀔 항목들, 예상 밖으로 바뀌는 최상위 키). 실제 파일은 쓰지 않는다."""
     m = merger()
     before = _read_json(_claude() / "settings.json") or {}
-    mode = _mode(before, receipt)
-    fragment = m.substitute(_fragment(mode), {"{{PY}}": py, "{{HOOKS_DIR}}": str(_claude() / "hooks").replace("\\", "/")})
+    fragment = m.substitute(_fragment(), {"{{PY}}": py, "{{HOOKS_DIR}}": str(_claude() / "hooks").replace("\\", "/")})
     if not WINDOWS:
         for key in m.WINDOWS_ONLY_ENV:
             fragment.get("env", {}).pop(key, None)
     after = copy.deepcopy(before)
     changes, _ = m.merge(after, fragment, m.load_manifest(str(_receipt_path())))
     _, violated = m.top_level_diff(before, after)
-    # 승인할 사람이 먼저 봐야 할 것(권한 모드·훅 등록·권한 목록)을 앞에 둔다
-    order = ("permissions.defaultMode", "hooks.", "permissions.")
-    changes.sort(key=lambda c: next((i for i, p in enumerate(order) if c.startswith(p)), len(order)))
-    return changes, violated, mode
+    changes.sort(key=lambda c: not c.startswith("hooks."))  # 승인할 사람이 먼저 봐야 할 훅 등록을 앞에 둔다
+    if _held_permissions(receipt):
+        changes.append("설치 영수증: 권한·모드 기록을 사용자 것으로 넘김(settings.json 의 권한은 그대로)")
+    return changes, violated
 
 
 def _broken_registrations():
@@ -227,7 +221,7 @@ def status():
     py = python_invoke()
     files = _files(receipt)
     trash = _has_trash(py)
-    changes, violated, mode = _settings_plan(py, receipt) if py else ([], [], None)
+    changes, violated = _settings_plan(py, receipt) if py else ([], [])
     broken = _broken_registrations()
     installed = (_claude() / "hooks" / "danger_guard.py").exists()
     healthy = all(s == "ok" for _, s in files) and not changes and not violated and not broken and trash and py
@@ -236,8 +230,7 @@ def status():
             "latest": _bundle([os.path.join(HOOKS, n) for n in FILES]),
             "health": "ok" if healthy else ("degraded" if installed else "down"),
             "details": {"files": [{"name": n, "state": s} for n, s in files], "settings_changes": changes,
-                        "unexpected_keys": violated, "broken_registrations": broken, "trash": trash, "python": py,
-                        "default_mode": mode}}
+                        "unexpected_keys": violated, "broken_registrations": broken, "trash": trash, "python": py}}
 
 
 def plan():
@@ -262,15 +255,15 @@ def plan():
                       "digests": {n: _digest(os.path.join(HOOKS, n)) for n in write},
                       "from": {n: _digest(_claude() / "hooks" / n) for n in write}})
     if py:
-        changes, violated, mode = _settings_plan(py, receipt)
+        changes, violated = _settings_plan(py, receipt)
         if violated:
             blocked.append({"step": "settings", "reason": f"병합이 예상 밖의 최상위 키를 바꿉니다: {violated}"})
         if changes or write or not receipt.get("hook_files"):
             # 파일만 바뀌어도 병합을 다시 돌려 영수증의 hook_files 를 맞춘다(설정 내용은 그대로다)
             shown = "; ".join(changes[:8]) + (f" 외 {len(changes) - 8}건" if len(changes) > 8 else "")
-            steps.append({"id": "settings", "risk": "config", "argv": [], "default_mode": mode, "python": py,
+            steps.append({"id": "settings", "risk": "config", "argv": [], "python": py,
                           "changes": changes,
-                          "summary": "~/.claude/settings.json 병합(권한·훅 등록, 비어 있는 기본값(model 등)만 채움, 나머지 키 보존, "
+                          "summary": "~/.claude/settings.json 병합(훅 등록, 비어 있는 기본값(model 등)만 채움, 권한·나머지 키 보존, "
                                      "바뀌면 백업): " + (shown or "바뀔 항목 없음, 영수증만 맞춤")})
     if steps:
         steps.append({"id": "selftest", "summary": "설치한 danger_guard 에 정해진 입력을 넣어 판정을 확인", "risk": "read", "argv": []})
@@ -327,7 +320,7 @@ def _merge_settings(step):
     # 영수증에는 지금 배포본과 같은 파일만 적는다(설치 기록에 없는 사용자 파일을 우리 것으로 만들지 않는다)
     ours = [n for n in FILES if _digest(claude / "hooks" / n) == _digest(os.path.join(HOOKS, n))]
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
-        json.dump(_fragment(step.get("default_mode")), f)
+        json.dump(_fragment(), f)
         fragment = f.name
     try:
         argv = [sys.executable, "-X", "utf8", os.path.join(HOOKS, "merge_and_diff.py")] + (["--windows"] if WINDOWS else [])

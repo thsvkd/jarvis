@@ -131,9 +131,9 @@ Claude Code 의 체크포인팅(`/rewind`)은 [공식 문서상](https://code.cl
 
 ## settings.json 병합
 
-`permissions.defaultMode: "auto"`, 핵심 툴 `allow`(`Bash`, `PowerShell`, `Read(*)`, `Edit(*)`, `Write(*)`, `Agent(*)`, `WebFetch(*)` 등), `ask`(위험 스킬만 — git 관련 규칙은 없음), `hooks.SessionStart`·`hooks.PreToolUse` 등록, 그리고 없을 때만 채우는 `model: "opus"` / `effortLevel: "xhigh"` / `language: "korean"` 과 `env.CLAUDE_CODE_SCROLL_SPEED: "3"`(마우스 휠 스크롤 속도, `/scroll-speed` 대응)이 병합된다. Windows에서는 `env.GRAFT_TEST_SYNC_RUN`도 없을 때만 채운다 — [graft](https://github.com/NanoNets/context-graph-engine)의 Stop 훅이 턴 종료 때 돌리는 `graft build`가 빈 콘솔 창을 띄우지 않도록, 원래 동기화 스크립트를 숨김 콘솔로 다시 실행하는 `~/.claude/hooks/graft_sync_hidden.cjs`를 가리킨다(graft가 없으면 쓰이지 않는다). git 관련 deny/ask를 `permissions`에 두지 않는 이유는 [push 를 훅이 판정하지 않는 이유](#push-를-훅이-판정하지-않는-이유)에 있다.
+`hooks.SessionStart`·`hooks.PreToolUse` 등록, 그리고 없을 때만 채우는 `model: "opus"` / `effortLevel: "xhigh"` / `language: "korean"` 과 `env.CLAUDE_CODE_SCROLL_SPEED: "3"`(마우스 휠 스크롤 속도, `/scroll-speed` 대응)이 병합된다. Windows에서는 `env.GRAFT_TEST_SYNC_RUN`도 없을 때만 채운다 — [graft](https://github.com/NanoNets/context-graph-engine)의 Stop 훅이 턴 종료 때 돌리는 `graft build`가 빈 콘솔 창을 띄우지 않도록, 원래 동기화 스크립트를 숨김 콘솔로 다시 실행하는 `~/.claude/hooks/graft_sync_hidden.cjs`를 가리킨다(graft가 없으면 쓰이지 않는다).
 
-`permissions.defaultMode`는 설치할 때마다 고른 모드(기본 `auto`)로 바꾸고, 설치 전 값은 설치 기록에 남겨 제거할 때 되돌린다. `allow`·`ask`는 합집합으로 병합하므로, 사용자가 지운 규칙도 다시 설치하면 다시 들어간다. 그 밖에 사용자가 이미 고른 값(`model` 등)과 최상위 키(`statusLine` 등), 기존 `env` 키·값은 건드리지 않는다(이 설치기가 관리하는 `env` 키만 없을 때 추가한다). 단일 소스는 [`res/settings.json`](res/settings.json)이며, 설치 시 python 실행 명령과 훅 경로만 치환된다.
+`permissions`(권한 목록·`defaultMode`)는 다루지 않는다(2026-11-23 사용자 결정). 사용자가 지운 규칙을 다시 설치할 때마다 되살려 넣었기 때문이다. 옛 설치가 넣은 규칙과 모드는 settings.json 에 그대로 두고, 다음 설치 때 설치 기록의 권한·모드 기록만 비워 사용자 것으로 넘긴다(그 뒤 제거해도 권한은 건드리지 않는다). 그 밖에 사용자가 이미 고른 값(`model` 등)과 최상위 키(`statusLine` 등), 기존 `env` 키·값은 건드리지 않는다(이 설치기가 관리하는 `env` 키만 없을 때 추가한다). 단일 소스는 [`res/settings.json`](res/settings.json)이며, 설치 시 python 실행 명령과 훅 경로만 치환된다.
 
 </details>
 

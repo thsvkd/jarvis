@@ -164,7 +164,6 @@
         facts.push(html`<span>파일 <b>${hookCount(x, "ok")}/${files.length}</b> 같음</span>`);
         facts.push(html`<span>휴지통 도구 <b>${x.trash ? "있음" : "없음"}</b></span>`);
         facts.push(html`<span>훅 python <b>${x.python || "못 찾음"}</b></span>`);
-        if (x.default_mode) facts.push(html`<span>권한 모드 <b>${x.default_mode}</b></span>`);
         if (hookCount(x, "foreign")) notes.push("막힘: 설치 기록에 없는 같은 이름 파일은 덮어쓰지 않습니다. 그 파일을 옮기거나 지운 뒤 다시 계획하세요.");
         if ((x.unexpected_keys || []).length) notes.push("막힘: 병합이 예상 밖의 최상위 키를 바꿉니다 — " + x.unexpected_keys.join(", "));
         extra = html`<ul class="su-files" aria-label="훅 파일">${files.map((f) => { const t = HOOK_FILE[f.state] || ["muted", f.state];

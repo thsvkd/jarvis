@@ -201,11 +201,35 @@ class HooksModuleTest(unittest.TestCase):
         self.assertEqual(out["status"], "done", out)
         self.assertEqual(self.settings()["permissions"]["defaultMode"], "dontAsk")
 
-    def test_the_permission_mode_change_comes_first_in_the_summary(self):
+    def test_the_hook_registration_comes_first_and_permissions_are_not_planned(self):
         """covers: HOOKS-1"""
         settings = next(s for s in hooks.plan()["steps"] if s["id"] == "settings")
-        self.assertTrue(settings["changes"][0].startswith("permissions.defaultMode"), settings["changes"])
-        self.assertIn("permissions.defaultMode", settings["summary"])
+        self.assertTrue(settings["changes"][0].startswith("hooks."), settings["changes"])
+        self.assertFalse(any(c.startswith("permissions") for c in settings["changes"]), settings["changes"])
+        self.assertNotIn("default_mode", settings)
+
+    def test_an_old_receipt_releases_its_permission_records_without_touching_settings(self):
+        """covers: HOOKS-2 — 옛 배포본이 넣은 권한·모드는 사용자 것이 되고, uninstall 도 건드리지 않는다."""
+        self.install()
+        s = self.settings()
+        s["permissions"] = {"defaultMode": "auto", "allow": ["Bash", "Read"], "ask": ["Skill(loop)"]}
+        (self.claude / "settings.json").write_text(json.dumps(s))
+        r = self.receipt()
+        r.update({"added_allow": ["Bash", "Read"], "added_ask": ["Skill(loop)"], "removed_legacy": {"deny": ["x"]},
+                  "default_mode_before": None, "default_mode_after": "auto", "default_mode_changed": True})
+        (self.claude / ".claude-code-setup.json").write_text(json.dumps(r))
+        plan = hooks.plan()
+        settings = next(st for st in plan["steps"] if st["id"] == "settings")
+        self.assertIn("권한·모드 기록을 사용자 것으로", settings["summary"])
+        self.assertEqual(hooks.apply(plan["plan_id"])["status"], "done")
+        self.assertEqual(self.settings()["permissions"], s["permissions"])
+        r = self.receipt()
+        self.assertEqual((r["added_allow"], r["added_ask"], r["removed_legacy"], r["default_mode_changed"]),
+                         ([], [], {}, False))
+        self.assertEqual(hooks.plan()["steps"], [])
+        dry = hooks.uninstall(dry_run=True)
+        self.assertEqual(hooks.uninstall(plan_id=dry["plan_id"])["status"], "done")
+        self.assertEqual(self.settings()["permissions"], s["permissions"])
 
     def test_a_registration_whose_python_is_gone_blocks_and_degrades(self):
         """covers: HOOKS-1 — 같은 이름으로 등록돼 있으면 병합기가 고치지 않으므로 가드가 꺼진 채 남는다."""

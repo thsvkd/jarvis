@@ -82,6 +82,7 @@ def fold_receipt(previous: dict, current: dict) -> dict:
     """
     current = dict(current)
     retired = current.pop("retired", None) or {}
+    released = current.pop("released_permissions", False)
     if not previous:
         return current
 
@@ -114,11 +115,11 @@ def fold_receipt(previous: dict, current: dict) -> dict:
         for rule in rules:
             if rule not in merged:
                 merged.append(rule)
-    folded["removed_legacy"] = legacy
+    folded["removed_legacy"] = {} if released else legacy
 
     # defaultMode 는 '설치 전 원래 값'이 유일하게 중요하다. 한 번이라도 우리가 바꿨다면
-    # 그 최초 값을 계속 들고 간다.
-    if previous.get("default_mode_changed"):
+    # 그 최초 값을 계속 들고 간다(권한을 놓아 준 뒤에는 들고 가지 않는다).
+    if previous.get("default_mode_changed") and not released:
         folded["default_mode_before"] = previous.get("default_mode_before")
         folded["default_mode_after"] = current.get("default_mode_after") or previous.get("default_mode_after")
         folded["default_mode_changed"] = True
@@ -401,6 +402,12 @@ def merge(existing: dict, fragment: dict, previous: dict = None):
         if "mode" in perms:
             changes.append(f"Remove permissions.mode (invalid legacy key): {perms['mode']!r}")
             del perms["mode"]
+    else:
+        # 조각이 권한을 다루지 않는다(jarvis, 2026-11-23): settings.json 의 권한은 건드리지 않고, 옛 설치가
+        # 영수증에 남긴 권한·모드 기록만 놓아 준다. 남겨 두면 uninstall 이 그 규칙을 지우고 모드를 되돌린다.
+        for key in ("allow", "deny", "ask"):
+            receipt["retired"][key] = list(previous.get("added_" + key) or [])
+        receipt["released_permissions"] = True
 
     frag_hooks = fragment.get("hooks", {})
     if frag_hooks:
