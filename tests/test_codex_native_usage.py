@@ -104,6 +104,35 @@ class LoginTest(unittest.TestCase):
         self.write({}, access="not-a-jwt")
         self.assertIsNone(codex_native_usage.login(True))
 
+    def test_login_deadline_warns_three_days_ahead(self):
+        """covers: USAGE-19. auth_time + 30일이 3일 안이면 expiring, 지났으면 기한 지남, 멀면 없음. 유지가 돌지 않아도 붙는다"""
+        now = time.time()
+        auth = now - 28 * 86400
+        self.write({"exp": now + 3600, "auth_time": auth})
+        login = codex_native_usage.login(None)
+        self.assertEqual({k: login[k] for k in ("state", "text", "attention", "slot", "other", "store")},
+                         {"state": "expiring", "text": "Codex 로그인 만료 임박(약 2일)", "attention": True, "slot": None, "other": False, "store": None})
+        self.assertNotIn(str(int(auth)), json.dumps(login, ensure_ascii=False))
+        self.write({"exp": now + 3600, "auth_time": now - 31 * 86400})
+        self.assertEqual(codex_native_usage.login(True)["text"], "Codex 로그인 기한이 지났습니다")
+        self.write({"exp": now + 3600, "auth_time": now - 20 * 86400})
+        self.assertIsNone(codex_native_usage.login(True))
+        self.write({"exp": now - 3 * 3600, "auth_time": now - 31 * 86400})  # 이미 끊겼으면 멈춤이 앞선다
+        self.assertEqual(codex_native_usage.login(True)["state"], "stalled")
+        for bad in ("x", True, float("nan"), -1):
+            self.write({"exp": now + 3600, "auth_time": bad})
+            self.assertIsNone(codex_native_usage.login(True), bad)
+
+    def test_login_deadline_survives_an_unreadable_access_token(self):
+        """covers: USAGE-19. 접근 토큰이 없거나 JWT 가 아니어도 id_token 의 기한 경고는 붙는다"""
+        enc = lambda o: base64.urlsafe_b64encode(json.dumps(o).encode()).decode().rstrip("=")
+        id_token = enc({"alg": "none"}) + "." + enc({"auth_time": time.time() - 31 * 86400}) + ".synthetic-signature"
+        for tokens in ({"access_token": "not-a-jwt", "id_token": id_token}, {"id_token": id_token}):
+            with open(self.path, "w", encoding="utf-8") as f:
+                json.dump({"tokens": tokens}, f)
+            os.chmod(self.path, 0o600)
+            self.assertEqual(codex_native_usage.login(True)["state"], "expiring", tokens.keys())
+
 
 if __name__ == "__main__":
     unittest.main()

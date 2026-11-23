@@ -12,6 +12,8 @@ import urllib.request
 from . import caam_usage, claude_accounts, opencode_usage, provider_usage
 
 STALL_S = 7200  # 접근 토큰이 만료된 뒤 이만큼 지나도 그대로면 갱신이 멈춘 것으로 본다(USAGE-19)
+# shortcut: 공개된 규칙이 아니라 pit5 실측 하나다(auth_time 2026-10-14 13:31, refresh token has expired 2026-11-13 10:26 = 29.9일). 다른 기한이 관측되면 고친다
+LOGIN_S = 30 * 86400
 
 
 def _http(token, account):
@@ -45,25 +47,41 @@ def _home():
     return os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
 
 
+def _claim(token, key):
+    """JWT 본문의 시각 값(epoch 초). 없거나 수가 아니면 None. 서명은 보지 않는다(표시용)."""
+    part = token.split(".")[1]
+    value = json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4))).get(key)
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0 else None
+
+
 def login(skipped):
-    """USAGE-19: 로그인 유지가 돌았는데(skipped 가 None 이 아님) auth.json 의 접근 토큰이 STALL_S 넘게 만료된 채면 기기 단위 login.
-    skipped: 마지막 hswap codex refresh 가 건너뛰었는가(hswap_usage._skipped). exp 에서 계산한 경과 시간만 내보낸다(토큰·계정 ID 는 내보내지 않는다).
-    파일이 없거나(키링 저장 방식 포함) 읽지 못했거나 exp 가 없으면 None."""
-    if skipped is None:
-        return None
+    """USAGE-19: 기기 단위 Codex login. 시각에서 계산한 경과·남은 시간만 내보낸다(토큰·계정 ID·시각 원값은 내보내지 않는다).
+    stalled: 로그인 유지가 돌았는데(skipped 가 None 이 아님) 접근 토큰이 STALL_S 넘게 만료된 채다. skipped: 마지막 hswap codex refresh 가 건너뛰었는가(hswap_usage._skipped).
+    expiring: id_token 의 auth_time + LOGIN_S 가 LOGIN_WARN_S 안이거나 지났다. 갱신으로는 늘어나지 않는다.
+    파일이 없거나(키링 저장 방식 포함) 읽지 못했거나 해당 시각이 없으면 None."""
     try:
-        part = opencode_usage._private_json(os.path.join(_home(), "auth.json"))["tokens"]["access_token"].split(".")[1]
-        exp = json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))["exp"]
-        if isinstance(exp, bool) or not isinstance(exp, (int, float)) or not math.isfinite(exp) or exp <= 0:
-            return None
-        late = time.time() - exp
+        tokens = opencode_usage._private_json(os.path.join(_home(), "auth.json"))["tokens"]
     except Exception:  # 형식이 어긋난 파일 하나가 사용량 응답을 막지 않게 하고, 메시지(경로·값)는 남기지 않는다
         return None
-    if late <= STALL_S:
-        return None
-    note = (f"접근 토큰이 {claude_accounts._span(late)} 전에 만료됐습니다. 다시 로그인하세요. 상주 Codex(데몬·앱)가 있으면 먼저 끝내야 새 로그인을 씁니다."
-            + (" hswap 은 실행 중인 Codex 때문에 갱신을 건너뜁니다." if skipped else ""))
-    return {"state": "stalled", "text": "Codex 다시 로그인 필요", "note": note, "attention": True, "slot": None, "other": False, "store": None}
+    try:  # 접근 토큰을 읽지 못하면 멈춤 판정만 건너뛰고 기한 경고는 그대로 본다
+        exp = _claim(tokens["access_token"], "exp")
+    except Exception:
+        exp = None
+    try:
+        auth = _claim(tokens["id_token"], "auth_time")
+    except Exception:
+        auth = None
+    now = time.time()
+    if skipped is not None and exp is not None and now - exp > STALL_S:
+        note = (f"접근 토큰이 {claude_accounts._span(now - exp)} 전에 만료됐습니다. 다시 로그인하세요. 상주 Codex(데몬·앱)가 있으면 먼저 끝내야 새 로그인을 씁니다."
+                + (" hswap 은 실행 중인 Codex 때문에 갱신을 건너뜁니다." if skipped else ""))
+        return {"state": "stalled", "text": "Codex 다시 로그인 필요", "note": note, "attention": True, "slot": None, "other": False, "store": None}
+    if auth is not None and auth + LOGIN_S - now <= claude_accounts.LOGIN_WARN_S:
+        left = auth + LOGIN_S - now
+        return {"state": "expiring", "text": f"Codex 로그인 만료 임박(약 {claude_accounts._span(left)})" if left > 0 else "Codex 로그인 기한이 지났습니다",
+                "note": "Codex 로그인은 로그인한 지 약 30일이 지나면 끊기고, 사용해도 늘어나지 않습니다. 다시 로그인하세요.",
+                "attention": True, "slot": None, "other": False, "store": None}
+    return None
 
 
 def read():
