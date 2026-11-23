@@ -33,11 +33,13 @@ jarvis 는 기기마다 상주하는 게이트웨이(호스트 자원·서비스
 
 | 목적 | 명령 |
 | --- | --- |
-| 전체 단위 테스트 | `JARVIS_CONFIG=/dev/null python3 -m unittest discover -s tests` |
-| 단일 테스트 | `JARVIS_CONFIG=/dev/null python3 -m unittest tests.test_core -v` |
-| 화면 공용 JS | `node tests/test_jarvis_js.mjs` |
+| 개발용 venv 준비 | `make deps` |
+| 전체 단위 테스트 + 화면 공용 JS | `make test` |
+| 단일 테스트 | `make test ARGS="tests.test_core -v"` |
 | 옮긴 셋업 셸 진입점 | `bats tests/setup.bats`, `pwsh -NoProfile -c "Invoke-Pester tests/Setup.Tests.ps1, tests/RmShim.Tests.ps1"` |
 | 스냅샷 스키마 비교 | `docs/verification.md` |
+| 포매팅(VS Code 저장 시와 같게) | `make lint FILES="<고친 파일>"`, 확인만: `CHECK=1` |
+| 시험 실행(:9390, 상태는 `.tmp-run/`) | `make run`, core: `make run CONFIG=<설정 파일>` |
 
 테스트는 표준 라이브러리 unittest 만 쓴다(외부 러너·의존성을 들이지 않는다). ai-setup 에서 옮긴 셸 진입점의 bats·Pester 테스트만 예외로 원래 러너로 돈다.
 

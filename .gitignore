@@ -16,3 +16,7 @@ private/
 jarvis/modules/hooks/guard.log
 .tmp-rmshim/
 .tmp-rmshim-ps/
+
+# make deps·make run 이 만드는 개발용 venv 와 상태 폴더
+.venv/
+.tmp-run/

@@ -96,8 +96,16 @@ curl -fsSL https://github.com/thsvkd/jarvis/releases/latest/download/install.sh 
 ## 개발
 
 ```sh
-JARVIS_CONFIG=/dev/null python3 -m unittest discover -s tests   # 단위 테스트(표준 라이브러리 unittest)
-node tests/test_jarvis_js.mjs                                    # 화면 공용 JS
+make deps                          # .venv 에 Python 3.13 과 psutil 을 받는다(uv 필요)
+make test                          # 단위 테스트(표준 라이브러리 unittest)와 화면 공용 JS
+make lint FILES="a.py b.mjs"       # VS Code 저장 시와 같은 규칙으로 포매팅(CHECK=1 은 확인만)
+make run                           # 게이트웨이를 http://127.0.0.1:9390/ 로 띄운다(CONFIG=설정 파일 로 core)
+```
+
+Windows 에는 make 가 없으므로 먼저 winget 으로 설치하고 터미널을 다시 연다.
+
+```powershell
+winget install ezwinports.make
 ```
 
 작업 규칙은 [AGENTS.md](AGENTS.md), 완료 기준은 [docs/TEST_SPEC.md](docs/TEST_SPEC.md)가 소유한다.
