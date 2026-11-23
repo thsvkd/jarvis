@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest import mock
 
-from jarvis import provider_usage
+from jarvis.usage import caam
 
 
 class CaamProviderTest(unittest.TestCase):
@@ -19,8 +19,8 @@ class CaamProviderTest(unittest.TestCase):
                 "primary_window": {"used_percent": 25, "window_duration": 30 * 86400 * 10**9},
                 "account_id": "secret-id"}}]
 
-        with mock.patch.object(provider_usage.caam_usage, "_json", side_effect=read):
-            rows = {p: provider_usage.read_provider("/fake/caam", p) for p in ("grok", "cursor")}
+        with mock.patch.object(caam, "_json", side_effect=read):
+            rows = {p: caam.read_provider("/fake/caam", p) for p in ("grok", "cursor")}
         for p in rows:
             account = rows[p][0]
             self.assertEqual((account["label"], account["active"], account["status"]), (p + "@example.com", True, "ok"))
@@ -33,8 +33,8 @@ class CaamProviderTest(unittest.TestCase):
                             "identity": {"email": "provider-account-id"}}]}
         limits = [{"provider": "grok", "profile_name": "alias", "usage": {
             "quota_status": "degraded", "primary_window": {"unmeasured": True, "used_percent": 0}}}]
-        with mock.patch.object(provider_usage.caam_usage, "_json", side_effect=[ls, limits]):
-            row = provider_usage.read_provider("/fake/caam", "grok")[0]
+        with mock.patch.object(caam, "_json", side_effect=[ls, limits]):
+            row = caam.read_provider("/fake/caam", "grok")[0]
         self.assertEqual(row["label"], "기본 계정")
         self.assertEqual(row["windows"], [])
         self.assertNotEqual(row["status"], "ok")
@@ -46,8 +46,8 @@ class CaamProviderTest(unittest.TestCase):
         limits = [{"provider": "cursor", "profile_name": "p", "usage": {
             "quota_status": "degraded", "limit_stage": "blocked",
             "primary_window": {"used_percent": 30, "resets_at": 123}, "fetched_at": 123}}]
-        with mock.patch.object(provider_usage.caam_usage, "_json", side_effect=[ls, limits]):
-            row = provider_usage.read_provider("/fake/caam", "cursor")[0]
+        with mock.patch.object(caam, "_json", side_effect=[ls, limits]):
+            row = caam.read_provider("/fake/caam", "cursor")[0]
         self.assertIsNone(row["updated_at"])
         self.assertIsNone(row["windows"][0]["resets_at"])
         self.assertTrue(row["attention"])
@@ -59,8 +59,8 @@ class CaamProviderTest(unittest.TestCase):
                             "identity": {"email": "one@example.com"}}]}
         limits = [{"provider": "grok", "profile_name": "p", "usage": {
             "quota_status": "ok", "account_id": "other@example.com", "primary_window": {"used_percent": 20}}}]
-        with mock.patch.object(provider_usage.caam_usage, "_json", side_effect=[ls, limits]):
-            row = provider_usage.read_provider("/fake/caam", "grok")[0]
+        with mock.patch.object(caam, "_json", side_effect=[ls, limits]):
+            row = caam.read_provider("/fake/caam", "grok")[0]
         self.assertEqual(row["label"], "기본 계정")
         self.assertTrue(row["attention"])
 
@@ -74,10 +74,10 @@ class CaamProviderTest(unittest.TestCase):
         for name, ident, usage, want in cases:
             ls = {"profiles": [{"tool": "grok", "type": "vault", "name": "p", "identity": {"email": "one@example.com"}, **ident}]}
             limits = [{"provider": "grok", "profile_name": "p", "usage": {"quota_status": "ok", "primary_window": {"used_percent": 20}, **usage}}]
-            with self.subTest(name), mock.patch.object(provider_usage.caam_usage, "_json", side_effect=[ls, limits]):
-                row = provider_usage.read_provider("/fake/caam", "grok")[0]
+            with self.subTest(name), mock.patch.object(caam, "_json", side_effect=[ls, limits]):
+                row = caam.read_provider("/fake/caam", "grok")[0]
                 self.assertEqual((row["failure"], row["attention"]), want)
-                self.assertIn(row["failure"], (*provider_usage.FAILURES, None))
+                self.assertIn(row["failure"], (*caam.FAILURES, None))
                 if name == "limit_stage":
                     self.assertEqual(row["note"], "사용 한도에 도달했습니다(리셋 시각에 풀립니다).")
 

@@ -1,17 +1,60 @@
-"""caam 이 제공하는 프로바이더 계정별 사용량을 읽는다.
+"""이 기기 caam(coding_agent_account_manager)을 부르는 공용 도우미. 프로바이더 계정별 사용량 해석도 여기서 한다.
 
-https://github.com/Dicklesworthstone/coding_agent_account_manager/blob/v0.1.24/cmd/caam/cmd/limits.go
+`caam ls <프로바이더> --json`(프로필 → 이메일·상태)과 `caam limits <프로바이더> --format json`(한도)만 부른다.
+limits 는 caam 금고(vault)의 접근 토큰으로 사용량 API 를 읽기만 하고 토큰을 갱신하지 않는다(v0.1.24 cmd/caam/cmd/limits.go).
+caam refresh·daemon·activate 는 부르지 않는다: Codex 갱신 토큰은 쓸 때마다 바뀌어 같은 로그인을 두 곳이 갱신하면 계정이 막힐 수 있다.
+jarvis 는 caam 을 설치하지 않는다.
+
+공식 계약: https://github.com/Dicklesworthstone/coding_agent_account_manager (internal/usage/usage.go 의 UsageInfo)
+라이선스(MIT + OpenAI/Anthropic 추가 조항)는 사용자가 확인하고 도입을 정했다(2026-10-28).
 """
+import json
 import math
+import os
+import subprocess
+import threading
 
-from . import caam_usage
-from .usage_common import email as _email
-from .util import parse_iso
+from .common import email
+from ..util import parse_iso, which_local
+
+LS_TIMEOUT_S = 10
+TIMEOUT_S = 35  # limits: caam 의 프로필당 HTTP 제한(30초)보다 길게. 한 프로필이 느려도 나머지를 잃지 않게
+BUDGET_S = 50  # 잠금 대기 + ls + limits. 독립 사용량 수집이 이 안에서 기다린다
+_lock = threading.Lock()
 
 SUPPORTED = ("codex", "grok", "cursor")
 # 사용량 계정 행의 failure 닫힌 코드(USAGE-17). 뜻은 static/shared/API.md 의 "사용량 계정 행의 failure" 표, 화면은 usage.js 의 CODES 가 같은 키를 쓴다
 FAILURES = ("auth", "expiring", "rate", "limit", "wait", "keychain", "perm", "net", "server", "unsupported", "unknown")
 LIMIT_NOTE = "사용 한도에 도달했습니다(리셋 시각에 풀립니다)."  # 한도 창 소진(limit)은 리셋 시각에 풀려 attention 이 아니다
+
+
+def binary():
+    return which_local("caam")
+
+
+def _codex_cli():
+    """Codex CLI 는 npm·Homebrew 로도 깔린다: 서비스의 짧은 PATH 에 없을 수 있어 흔한 위치도 본다."""
+    return which_local("codex") or next((p for p in ("/opt/homebrew/bin/codex", "/usr/local/bin/codex")
+                                         if os.path.isfile(p)), None)
+
+
+def _key(seconds):
+    m = (seconds or 0) / 60
+    return "session" if 0 < m <= 360 else "monthly" if m >= 40000 else "weekly"
+
+
+def _json(exe, *args, timeout=TIMEOUT_S):
+    try:
+        p = subprocess.run([exe, *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
+                           stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"caam 이 {timeout}초 안에 답하지 않았습니다")
+    except OSError as e:
+        raise RuntimeError(f"caam 을 실행하지 못했습니다({type(e).__name__})")
+    try:
+        return json.loads(p.stdout)
+    except ValueError:
+        raise RuntimeError(f"caam {args[0]} 응답을 읽지 못했습니다(종료 코드 {p.returncode})")
 
 
 def _time(value):
@@ -30,7 +73,7 @@ def _account(row, ident, provider):
             continue
         duration = window.get("window_duration")
         if isinstance(duration, (int, float)) and not isinstance(duration, bool) and math.isfinite(duration) and duration > 0:
-            key = caam_usage._key(duration / 1e9)
+            key = _key(duration / 1e9)
         else:
             key = ("session", "weekly", "monthly")[index] if provider == "codex" else "기간 미확인"
         windows.append({"key": key, "used": max(0, min(100, round(used))),
@@ -39,8 +82,8 @@ def _account(row, ident, provider):
     login = health.get("login_required") is True
     limited = bool(usage.get("limit_stage"))
     degraded = usage.get("quota_status") in ("degraded", "unavailable")
-    label = _email(ident.get("identity"))
-    observed = _email({"email": usage.get("account_id")})
+    label = email(ident.get("identity"))
+    observed = email({"email": usage.get("account_id")})
     mismatch = label != "이름 없는 계정" and observed != "이름 없는 계정" and label.lower() != observed.lower()
     if mismatch:
         label = "이름 없는 계정"
@@ -61,13 +104,13 @@ def read_provider(exe, provider):
     """caam 에 저장된 vault 프로필에 대해서만 사용량을 조회한다."""
     if provider not in SUPPORTED:
         raise ValueError("지원하지 않는 caam 프로바이더")
-    listing = caam_usage._json(exe, "ls", provider, "--json", timeout=caam_usage.LS_TIMEOUT_S)
+    listing = _json(exe, "ls", provider, "--json", timeout=LS_TIMEOUT_S)
     profiles = listing.get("profiles") if isinstance(listing, dict) else None
     vault = {p["name"]: p for p in profiles or [] if isinstance(p, dict) and p.get("tool") == provider
              and p.get("type") == "vault" and isinstance(p.get("name"), str)}
     if not vault:
         return []
-    data = caam_usage._json(exe, "limits", provider, "--format", "json")
+    data = _json(exe, "limits", provider, "--format", "json")
     rows = data if isinstance(data, list) else []
     by_name = {r["profile_name"]: r for r in rows if isinstance(r, dict) and r.get("provider") == provider
                and isinstance(r.get("profile_name"), str) and r["profile_name"] in vault}

@@ -9,7 +9,7 @@ import time
 import unittest
 from unittest import mock
 
-from jarvis import hswap_usage, independent_usage
+from jarvis.usage import hswap, independent
 
 NOW = time.time()
 
@@ -27,7 +27,7 @@ def acct(harness, label="a@example.com", **usage):
 
 
 def read(harness, fallback=list):
-    return hswap_usage.read(harness, fallback)
+    return hswap.read(harness, fallback)
 
 
 CODEX_7D = {"name": "7d", "usedPercent": 27.0, "resetsAt": iso(NOW + 3 * 86400), "windowSeconds": 604800, "remaining": None}
@@ -40,9 +40,9 @@ class FakeHswapCase(unittest.TestCase):
         self.dir = tmp.name
         self.exe = os.path.join(self.dir, "hswap")
         for p in (mock.patch.dict(os.environ, {"HOME": self.dir}),
-                  mock.patch.object(hswap_usage.claude_accounts, "binary", return_value=self.exe),
-                  mock.patch.object(hswap_usage, "_jobs", {}), mock.patch.object(hswap_usage, "_last", {}),
-                  mock.patch.object(hswap_usage, "_skipped", {})):
+                  mock.patch.object(hswap.claude, "binary", return_value=self.exe),
+                  mock.patch.object(hswap, "_jobs", {}), mock.patch.object(hswap, "_last", {}),
+                  mock.patch.object(hswap, "_skipped", {})):
             p.start()
             self.addCleanup(p.stop)
 
@@ -95,16 +95,16 @@ class ReadTest(FakeHswapCase):
         self.assertEqual(read("grok", lambda: old), old)
         with open(self.exe, "w", encoding="utf-8") as f:
             f.write("#!/bin/sh\necho not json\n")
-        hswap_usage._jobs.clear()
+        hswap._jobs.clear()
         self.assertEqual(read("grok", lambda: old), old)
         # 문자열이어야 할 필드가 dict·list 여도 예외 없이 무시한다
         odd = acct("grok", state={"x": 1}, detail=["y"], plan=7, windows=[{**CODEX_7D, "name": {}, "windowSeconds": None}])
         self.fake({"schemaVersion": 1, "harnesses": [{"harness": "grok", "accounts": [odd]}], "errors": {}})
-        hswap_usage._jobs.clear()
+        hswap._jobs.clear()
         row, base = read("grok", lambda: old)
         self.assertEqual((row["note"], row["plan"], row["windows"][0]["key"], base), (None, None, "기간 미확인", old[0]))
-        with mock.patch.object(hswap_usage, "account", side_effect=TypeError("형식 오류")):
-            hswap_usage._jobs.clear()
+        with mock.patch.object(hswap, "account", side_effect=TypeError("형식 오류")):
+            hswap._jobs.clear()
             self.assertEqual(read("grok", lambda: old), old)
 
     def test_states_become_fixed_korean_notes(self):
@@ -114,49 +114,49 @@ class ReadTest(FakeHswapCase):
         unsupported = acct("grok", "c@example.com", state="unsupported", measuredAt=None, detail="enable with `hswap config set usage.remote`")
         self.fake({"schemaVersion": 1, "harnesses": [{"harness": "grok", "accounts": [stale, auth, unsupported]}], "errors": {}})
         s, a, u = read("grok")
-        self.assertEqual((s["status"], s["note"], s["attention"]), ("ok", hswap_usage.STATES["stale"][0], False))  # 이전 값이지 오류가 아니다
-        self.assertEqual((a["status"], a["error"], a["attention"]), ("error", hswap_usage.STATES["authentication_required"][0], True))
-        self.assertEqual((u["status"], u["error"], u["attention"]), ("error", hswap_usage.STATES["unsupported"][0], False))
+        self.assertEqual((s["status"], s["note"], s["attention"]), ("ok", hswap.STATES["stale"][0], False))  # 이전 값이지 오류가 아니다
+        self.assertEqual((a["status"], a["error"], a["attention"]), ("error", hswap.STATES["authentication_required"][0], True))
+        self.assertEqual((u["status"], u["error"], u["attention"]), ("error", hswap.STATES["unsupported"][0], False))
         self.assertNotIn("/Users/someone", json.dumps([s, a, u]))  # detail 원문은 내보내지 않는다
         # 잰 적이 없는 stale(토큰 갱신 대기)은 "이전 값"이 아니다
-        empty = hswap_usage.account(acct("grok", state="stale", measuredAt=None, detail="the active login's token is due for refresh"))
+        empty = hswap.account(acct("grok", state="stale", measuredAt=None, detail="the active login's token is due for refresh"))
         self.assertEqual((empty["status"], empty["error"]), ("error", "아직 잰 값이 없습니다(hswap 이 지금은 재지 않았습니다)."))
 
     def test_rows_carry_the_state_code_as_failure(self):
         """covers: USAGE-3, USAGE-8, USAGE-17. 상태는 값 유무와 상관없이 닫힌 코드로 싣고, 한 번도 재지 못한 사용 중 stale 은 사람이 손봐야 한다"""
-        auth = hswap_usage.account(acct("codex", state="authentication_required", measuredAt=None, detail="401 token_expired"))
+        auth = hswap.account(acct("codex", state="authentication_required", measuredAt=None, detail="401 token_expired"))
         self.assertEqual((auth["status"], auth["failure"], auth["attention"]), ("error", "auth", True))
-        empty = hswap_usage.account(acct("codex", state="stale", measuredAt=None, detail="the active login's token is due for refresh"))
+        empty = hswap.account(acct("codex", state="stale", measuredAt=None, detail="the active login's token is due for refresh"))
         self.assertEqual((empty["status"], empty["failure"], empty["attention"]), ("error", "wait", True))
-        idle = hswap_usage.account({**acct("codex", state="stale", measuredAt=None), "active": False})
+        idle = hswap.account({**acct("codex", state="stale", measuredAt=None), "active": False})
         self.assertEqual((idle["failure"], idle["attention"]), ("wait", False))  # 쉬는 계정에 다시 로그인을 내면 지금 로그인이 바뀐다
-        prior = hswap_usage.account(acct("codex", state="stale", measuredAt=None, windows=[CODEX_7D]))
+        prior = hswap.account(acct("codex", state="stale", measuredAt=None, windows=[CODEX_7D]))
         self.assertEqual((prior["status"], prior["failure"], prior["attention"]), ("ok", "wait", False))  # 이전 값이 있으면 오류가 아니다
-        self.assertIsNone(hswap_usage.account(acct("codex", windows=[CODEX_7D]))["failure"])  # available
+        self.assertIsNone(hswap.account(acct("codex", windows=[CODEX_7D]))["failure"])  # available
         for state in ("not_a_state", {"x": 1}):
-            row = hswap_usage.account(acct("codex", state=state, measuredAt=None, detail="/Users/someone"))
+            row = hswap.account(acct("codex", state=state, measuredAt=None, detail="/Users/someone"))
             self.assertEqual((row["status"], row["failure"]), ("error", "unknown"), state)
             self.assertNotIn("/Users/someone", json.dumps(row))  # detail 원문은 failure 로도 내보내지 않는다
-        self.assertIsNone(hswap_usage.account(acct("codex", state="not_a_state", windows=[CODEX_7D]))["failure"])  # 값이 있으면 오류가 아니다
-        self.assertEqual(set(hswap_usage.CODES), set(hswap_usage.STATES))
+        self.assertIsNone(hswap.account(acct("codex", state="not_a_state", windows=[CODEX_7D]))["failure"])  # 값이 있으면 오류가 아니다
+        self.assertEqual(set(hswap.CODES), set(hswap.STATES))
 
     def test_rate_limited_is_a_reached_limit(self):
         """covers: USAGE-17. 한도 창 소진은 값 유무와 상관없이 limit 이고 attention 이 아니다"""
         for windows in ([CODEX_7D], []):
-            row = hswap_usage.account(acct("codex", state="rate_limited", windows=windows))
+            row = hswap.account(acct("codex", state="rate_limited", windows=windows))
             self.assertEqual((row["failure"], row["attention"], row["note"] or row["error"]),
                              ("limit", False, "사용 한도에 도달했습니다(리셋 시각에 풀립니다)."), windows)
 
     def test_active_stale_over_six_hours_needs_attention(self):
         """covers: USAGE-18. 사용 중 계정의 이전 값이 6시간보다 오래되면 attention, 쉬는 계정과 6시간 안은 이전 값으로 둔다"""
         def row(hours, active=True):
-            return hswap_usage.account({**acct("codex", state="stale", measuredAt=iso(time.time() - hours * 3600), windows=[CODEX_7D]), "active": active})
+            return hswap.account({**acct("codex", state="stale", measuredAt=iso(time.time() - hours * 3600), windows=[CODEX_7D]), "active": active})
         old = row(7)
         self.assertEqual((old["status"], old["failure"], old["attention"]), ("ok", "wait", True))
         self.assertIn("7시간째 새로 재지 못했습니다", old["note"])
         self.assertIn("다시 로그인해야 할 수 있습니다", old["note"])
         for fresh in (row(5), row(7, active=False)):
-            self.assertEqual((fresh["failure"], fresh["attention"], fresh["note"]), ("wait", False, hswap_usage.STATES["stale"][0]))
+            self.assertEqual((fresh["failure"], fresh["attention"], fresh["note"]), ("wait", False, hswap.STATES["stale"][0]))
 
     def test_grok_without_credit_percent_is_zero_percent(self):
         """covers: USAGE-3, USAGE-8"""
@@ -174,7 +174,7 @@ class ReadTest(FakeHswapCase):
         # 요금제나 측정 시각이 없으면 0% 라고 말할 근거가 없다
         for extra in ({"plan": None}, {"measuredAt": None}):
             grok = acct("grok", **{"state": "unknown", "source": "grok-acp", "plan": "SuperGrok", "detail": "Grok reported no included-credit usage", **extra})
-            row = hswap_usage.account(grok)
+            row = hswap.account(grok)
             self.assertEqual((row["windows"], row["status"]), ([], "error"), extra)
 
     def test_opencode_keeps_console_logins_and_names_unsized_windows(self):
@@ -194,7 +194,7 @@ class ReadTest(FakeHswapCase):
         """covers: USAGE-8. 쉬는 Console 계정은 활성일 때만 재진다: 값 없는 그 행은 오류로 보이지 않게 뺀다(값이 있으면 둔다)"""
         def go(**kw):
             row = acct("opencode", "x", source="opencode", state="stale", measuredAt=None,
-                       detail=hswap_usage.INACTIVE_CONSOLE, **kw)
+                       detail=hswap.INACTIVE_CONSOLE, **kw)
             row["provider"], row["active"] = "opencode", False
             return row
         live = acct("opencode", "y", source="opencode", windows=[
@@ -214,7 +214,7 @@ class ReadTest(FakeHswapCase):
 
     def test_alias_is_not_exported(self):
         """covers: USAGE-3, USAGE-8"""
-        row = hswap_usage.account({**acct("codex", plan="prolite", windows=[CODEX_7D]), "alias": "private-name"})
+        row = hswap.account({**acct("codex", plan="prolite", windows=[CODEX_7D]), "alias": "private-name"})
         self.assertEqual(row["plan"], "prolite")
         self.assertNotIn("private-name", json.dumps(row))
 
@@ -223,14 +223,14 @@ class ReadTest(FakeHswapCase):
         self.fake({"schemaVersion": 1, "harnesses": [{"harness": "codex", "accounts": [acct("codex", windows=[CODEX_7D])]}], "errors": {}})
         first = read("codex")
         self.fake({"schemaVersion": 1, "harnesses": [{"harness": "codex", "accounts": [acct("codex", windows=[{**CODEX_7D, "usedPercent": 50.0}])]}], "errors": {}}, sleep=1.5)
-        with mock.patch.object(hswap_usage, "WAIT_S", 0.2):
+        with mock.patch.object(hswap, "WAIT_S", 0.2):
             started = time.monotonic()
             self.assertEqual(read("codex"), first)  # 기다리지 않고 마지막 답
             self.assertLess(time.monotonic() - started, 1)
             self.assertEqual(read("codex"), first)  # 진행 중인 읽기에 얹힌다
-            with mock.patch.object(hswap_usage, "LAST_MAX_S", 0):
+            with mock.patch.object(hswap, "LAST_MAX_S", 0):
                 self.assertEqual(read("codex", lambda: [{"label": "기본 계정"}]), [{"label": "기본 계정"}])  # 너무 오래된 마지막 답은 버린다
-        self.assertEqual(hswap_usage._jobs["codex"].result(timeout=10)[0]["windows"][0]["used"], 50)
+        self.assertEqual(hswap._jobs["codex"].result(timeout=10)[0]["windows"][0]["used"], 50)
         self.assertEqual(len(self.calls()), 2)
 
     def test_forced_read_refreshes_tokens_before_measuring(self):
@@ -238,28 +238,28 @@ class ReadTest(FakeHswapCase):
         # 화면의 새로고침은 측정 전에 hswap refresh 로 기한이 된 토큰을 먼저 갱신한다(Codex·Grok 만, CLI 가 있을 때만)
         body = {"schemaVersion": 1, "harnesses": [{"harness": "grok", "accounts": [acct("grok", windows=[CODEX_7D])]}], "errors": {}}
         self.fake(body)
-        with mock.patch.object(hswap_usage, "which_tool", side_effect=lambda n: f"/x/{n}" if n != "codex" else None):
+        with mock.patch.object(hswap, "which_tool", side_effect=lambda n: f"/x/{n}" if n != "codex" else None):
             read("grok")
             self.assertEqual(self.calls(), ["list grok --json"])  # 보통 읽기는 refresh 하지 않는다
-            hswap_usage._jobs.clear()
-            hswap_usage.read("grok", list, True)
+            hswap._jobs.clear()
+            hswap.read("grok", list, True)
             self.assertEqual(self.calls()[1:], ["grok refresh --json", "list grok --json"])
-            hswap_usage.read("codex", list, True)  # CLI 가 없으면 refresh 하지 않는다
-            hswap_usage.read("opencode", list, True)  # OpenCode 는 스스로 로그인을 갱신한다
+            hswap.read("codex", list, True)  # CLI 가 없으면 refresh 하지 않는다
+            hswap.read("opencode", list, True)  # OpenCode 는 스스로 로그인을 갱신한다
         self.assertEqual(self.calls()[3:], ["list codex --json", "list opencode --json"])
 
     def test_forced_read_waits_for_running_read_then_refreshes(self):
         """covers: USAGE-3, USAGE-8"""
         body = {"schemaVersion": 1, "harnesses": [{"harness": "grok", "accounts": [acct("grok", windows=[CODEX_7D])]}], "errors": {}}
         self.fake(body, sleep=0.4)
-        with mock.patch.object(hswap_usage, "which_tool", return_value="/x/grok"), mock.patch.object(hswap_usage, "_forced", {}):
-            hswap_usage._start("grok")  # 새로고침이 없는 읽기가 도는 중
+        with mock.patch.object(hswap, "which_tool", return_value="/x/grok"), mock.patch.object(hswap, "_forced", {}):
+            hswap._start("grok")  # 새로고침이 없는 읽기가 도는 중
             started = time.monotonic()
-            self.assertEqual(hswap_usage.read("grok", list, True)[0]["windows"][0]["used"], 27)
+            self.assertEqual(hswap.read("grok", list, True)[0]["windows"][0]["used"], 27)
             self.assertGreater(time.monotonic() - started, 0.8)  # 도는 읽기 뒤에 refresh 와 측정이 이어진다
             self.assertEqual(self.calls(), ["list grok --json", "grok refresh --json", "list grok --json"])
-            hswap_usage.read("grok", list, True)  # 이미 새로고침을 담아 끝난 읽기는 새 읽기로 이어진다
-            hswap_usage._jobs["grok"].result(timeout=10)
+            hswap.read("grok", list, True)  # 이미 새로고침을 담아 끝난 읽기는 새 읽기로 이어진다
+            hswap._jobs["grok"].result(timeout=10)
 
     def test_fallback_runs_while_hswap_is_measuring(self):
         """covers: USAGE-3, USAGE-8"""
@@ -268,16 +268,16 @@ class ReadTest(FakeHswapCase):
         def slow():
             time.sleep(.5)
             return [{"label": "기본 계정", "status": "ok"}]
-        with mock.patch.object(hswap_usage, "WAIT_S", 0.2):
+        with mock.patch.object(hswap, "WAIT_S", 0.2):
             started = time.monotonic()
             self.assertEqual(read("codex", slow), [{"label": "기본 계정", "status": "ok"}])
             self.assertLess(time.monotonic() - started, 0.9)
-            hswap_usage._jobs["codex"].result(timeout=10)
+            hswap._jobs["codex"].result(timeout=10)
             # 기존 수집기가 hswap 보다 오래 걸리면 그동안 끝난 hswap 답을 쓴다
             def slower():
                 time.sleep(1.5)
                 return []
-            hswap_usage._jobs.clear()
+            hswap._jobs.clear()
             self.assertEqual(read("codex", slower)[0]["label"], "a@example.com")
 
     def test_process_timeout_kills_the_tree_without_waiting_for_pipes(self):
@@ -289,7 +289,7 @@ class ReadTest(FakeHswapCase):
                     f"c = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
                     f"open({pid!r}, 'w').write(str(c.pid))\ntime.sleep(30)\n")
         os.chmod(self.exe, stat.S_IRWXU)
-        with mock.patch.object(hswap_usage, "TIMEOUT_S", 1):
+        with mock.patch.object(hswap, "TIMEOUT_S", 1):
             started = time.monotonic()
             self.assertEqual(read("codex"), [])
             self.assertLess(time.monotonic() - started, 5)
@@ -314,7 +314,7 @@ class ReadTest(FakeHswapCase):
         for platform, mac in (("linux", []), ("darwin", ["/opt/homebrew/bin"])):  # 이미 PATH 에 있는 /usr/local/bin 은 다시 넣지 않는다
             with mock.patch.dict(os.environ, {"PATH": "/usr/local/bin:/usr/bin:/bin", "GROK_HOME": grok}), \
                     mock.patch.object(sys, "platform", platform):
-                hswap_usage._jobs.clear()
+                hswap._jobs.clear()
                 read("codex")
             want = [os.path.join(self.dir, ".local", "bin"), os.path.join(grok, "bin"), os.path.join(self.dir, ".opencode", "bin"),
                     *mac, "/usr/local/bin", "/usr/bin", "/bin"]
@@ -322,8 +322,8 @@ class ReadTest(FakeHswapCase):
 
     def test_without_hswap_nothing_runs(self):
         """covers: USAGE-3, USAGE-8"""
-        with mock.patch.object(hswap_usage.claude_accounts, "binary", return_value=None), \
-                mock.patch.object(hswap_usage.subprocess, "run", side_effect=AssertionError("실행 금지")):
+        with mock.patch.object(hswap.claude, "binary", return_value=None), \
+                mock.patch.object(hswap.subprocess, "run", side_effect=AssertionError("실행 금지")):
             self.assertEqual(read("codex"), [])
 
 
@@ -335,41 +335,41 @@ class MergeTest(unittest.TestCase):
         """covers: USAGE-3, USAGE-8"""
         h = self.row("A@example.com", updated_at=10)
         old = [self.row("a@example.com", updated_at=20), self.row("vault@example.com"), self.row("기본 계정")]
-        self.assertEqual(hswap_usage.merge([h], old), [h, old[1], old[2]])
+        self.assertEqual(hswap.merge([h], old), [h, old[1], old[2]])
 
     def test_prior_hswap_value_gives_way_to_newer_fallback_value(self):
         """covers: USAGE-3, USAGE-8"""
         # stale 과 error 는 마지막 측정값(창)을 그대로 싣고 온다. detail 이 note 를 바꿔도 상태로 판정한다
         newer, older = self.row("a@example.com", updated_at=NOW), self.row("a@example.com", updated_at=NOW - 7200)
         for state in ("stale", "error"):
-            prior = hswap_usage.account(acct("grok", state=state, measuredAt=iso(NOW - 3600), windows=[CODEX_7D],
+            prior = hswap.account(acct("grok", state=state, measuredAt=iso(NOW - 3600), windows=[CODEX_7D],
                                              detail="Grok reported no included-credit usage"))
             shown = {k: v for k, v in prior.items() if k != "_prior"}
-            self.assertEqual(hswap_usage.merge([prior], [newer]), [newer], state)
-            self.assertEqual(hswap_usage.merge([prior], [older]), [shown], state)
+            self.assertEqual(hswap.merge([prior], [newer]), [newer], state)
+            self.assertEqual(hswap.merge([prior], [older]), [shown], state)
             self.assertIn("_prior", prior, "판정 필드는 사본에서만 지운다(마지막 답을 다시 쓴다)")
-        fresh = hswap_usage.account(acct("codex", measuredAt=iso(NOW - 3600), windows=[CODEX_7D]))
-        self.assertEqual(hswap_usage.merge([fresh], [newer])[0]["source"], "hswap")  # 지금 잰 값은 시각과 상관없이 hswap 을 쓴다
+        fresh = hswap.account(acct("codex", measuredAt=iso(NOW - 3600), windows=[CODEX_7D]))
+        self.assertEqual(hswap.merge([fresh], [newer])[0]["source"], "hswap")  # 지금 잰 값은 시각과 상관없이 hswap 을 쓴다
 
     def test_valueless_side_gives_way(self):
         """covers: USAGE-3, USAGE-8"""
         h, o = self.row("a@example.com", "error"), self.row("a@example.com")
-        self.assertEqual(hswap_usage.merge([h], [o]), [o])
-        self.assertEqual(hswap_usage.merge([o], [self.row("a@example.com", "error")]), [o])
-        self.assertEqual(hswap_usage.merge([h, self.row("b@example.com", "error")], []), [h, self.row("b@example.com", "error")])
+        self.assertEqual(hswap.merge([h], [o]), [o])
+        self.assertEqual(hswap.merge([o], [self.row("a@example.com", "error")]), [o])
+        self.assertEqual(hswap.merge([h, self.row("b@example.com", "error")], []), [h, self.row("b@example.com", "error")])
 
     def test_non_email_labels_are_never_merged(self):
         """covers: USAGE-3, USAGE-8"""
         h, o = self.row("이름 없는 계정"), self.row("이름 없는 계정")
-        self.assertEqual(hswap_usage.merge([h], [o]), [h, o])
+        self.assertEqual(hswap.merge([h], [o]), [h, o])
 
     def test_active_default_account_is_the_active_hswap_login(self):
         """covers: USAGE-3, USAGE-8"""
         # 네이티브 수집기는 이메일을 모르면 "기본 계정"으로 적는다. hswap 에 활성 계정이 있으면 같은 로그인이다
         h = self.row("a@example.com", active=True, updated_at=10)
         native = self.row("기본 계정", active=True, updated_at=20)
-        self.assertEqual(hswap_usage.merge([h, self.row("b@example.com", active=False)], [native]), [h, self.row("b@example.com", active=False)])
-        self.assertEqual(hswap_usage.merge([self.row("b@example.com", active=False)], [native]), [self.row("b@example.com", active=False), native])
+        self.assertEqual(hswap.merge([h, self.row("b@example.com", active=False)], [native]), [h, self.row("b@example.com", active=False)])
+        self.assertEqual(hswap.merge([self.row("b@example.com", active=False)], [native]), [self.row("b@example.com", active=False), native])
 
 
 NATIVE = {"label": "기본 계정", "status": "ok", "active": True, "source": "codex"}  # 네이티브 Codex 수집기: 지금 로그인, 이메일 모름
@@ -379,34 +379,34 @@ class IndependentTest(FakeHswapCase):
     def setUp(self):
         super().setUp()
         empty = {"status": "unavailable", "accounts": []}
-        for p in (mock.patch.object(independent_usage, "_claude", return_value={"accounts": []}),
-                  mock.patch.object(independent_usage, "_caam", side_effect=RuntimeError("caam 없음")),
-                  mock.patch.object(independent_usage.codex_native_usage, "read", return_value=[NATIVE]),
-                  mock.patch.object(independent_usage, "_opencode", return_value=empty),
-                  *[mock.patch.object(m, "read", return_value=empty) for m in (independent_usage.antigravity_usage, independent_usage.kimi_usage,
-                                                                              independent_usage.zcode_usage, independent_usage.gemini_usage, independent_usage.minimax_usage)],
-                  mock.patch.object(independent_usage.cli_login, "available", return_value=[]),
-                  mock.patch.object(independent_usage.cli_login, "fresh", return_value=[]),
-                  mock.patch.object(independent_usage.claude_accounts, "status", return_value=None),
+        for p in (mock.patch.object(independent, "_claude", return_value={"accounts": []}),
+                  mock.patch.object(independent, "_caam", side_effect=RuntimeError("caam 없음")),
+                  mock.patch.object(independent.codex, "read", return_value=[NATIVE]),
+                  mock.patch.object(independent, "_opencode", return_value=empty),
+                  *[mock.patch.object(m, "read", return_value=empty) for m in (independent.antigravity, independent.kimi,
+                                                                              independent.zcode, independent.gemini, independent.minimax)],
+                  mock.patch.object(independent.login, "available", return_value=[]),
+                  mock.patch.object(independent.login, "fresh", return_value=[]),
+                  mock.patch.object(independent.claude, "status", return_value=None),
                   # 새로고침 앞의 refresh 는 하네스 CLI 가 있을 때만 돈다: 시험하는 기기에 깔린 codex·grok 에 따라 호출이 달라지지 않게 한다
-                  mock.patch.object(hswap_usage, "which_tool", return_value=None)):
+                  mock.patch.object(hswap, "which_tool", return_value=None)):
             p.start()
             self.addCleanup(p.stop)
-        independent_usage._tasks.clear()
-        self.addCleanup(independent_usage._tasks.clear)
+        independent._tasks.clear()
+        self.addCleanup(independent._tasks.clear)
 
     def test_hswap_rows_replace_collectors_and_missing_harness_falls_back(self):
         """covers: USAGE-3, USAGE-8"""
         lock = threading.Lock()
         bodies = {"codex": {"schemaVersion": 1, "harnesses": [{"harness": "codex", "accounts": [acct("codex", windows=[CODEX_7D])]}], "errors": {}}}
-        real = hswap_usage._fetch
+        real = hswap._fetch
 
         def fetch(exe, harness):  # 하네스마다 다른 답: grok·opencode 는 설치되지 않았다
             with lock:
                 self.fake(bodies.get(harness, {"schemaVersion": 1, "harnesses": [], "errors": {harness: "not installed"}}), code=0 if harness in bodies else 1)
                 return real(exe, harness)
-        with mock.patch.object(hswap_usage, "_fetch", side_effect=fetch):
-            data = independent_usage.read(force=True)
+        with mock.patch.object(hswap, "_fetch", side_effect=fetch):
+            data = independent.read(force=True)
         codex = next(p for p in data["providers"] if p["id"] == "codex")
         self.assertEqual([(a["label"], a["source"]) for a in codex["accounts"]], [("a@example.com", "hswap")])  # 같은 로그인의 네이티브 기본 계정 행과 겹치지 않는다
         self.assertEqual(sorted(self.calls()), ["list codex --json", "list grok --json", "list opencode --json"])
@@ -415,8 +415,8 @@ class IndependentTest(FakeHswapCase):
 
     def test_without_hswap_existing_collectors_answer(self):
         """covers: USAGE-3, USAGE-8"""
-        with mock.patch.object(hswap_usage.claude_accounts, "binary", return_value=None):
-            data = independent_usage.read(force=True)
+        with mock.patch.object(hswap.claude, "binary", return_value=None):
+            data = independent.read(force=True)
         codex = next(p for p in data["providers"] if p["id"] == "codex")
         self.assertEqual(codex["accounts"], [NATIVE])
         self.assertEqual(self.calls(), [])
@@ -433,8 +433,8 @@ class KeepTest(FakeHswapCase):
         os.chmod(self.exe, stat.S_IRWXU)
 
     def keep(self, clis):
-        with mock.patch.object(hswap_usage, "which_tool", side_effect=lambda n: f"/x/{n}" if n in clis else None):
-            return hswap_usage.keep(self.exe)
+        with mock.patch.object(hswap, "which_tool", side_effect=lambda n: f"/x/{n}" if n in clis else None):
+            return hswap.keep(self.exe)
 
     @staticmethod
     def status(active, known=True):
@@ -475,18 +475,18 @@ class KeepTest(FakeHswapCase):
                    "grok refresh --json": [json.dumps({"schemaVersion": 1, "accounts": [skip[1], {"ok": False, "result": "x"}]}), 1]}
         self.script(answers)
         self.assertEqual(self.keep({"codex", "grok"}), {"codex": "건너뜀 1개", "grok": "실패 1개 · 건너뜀 1개"})
-        self.assertEqual(hswap_usage._skipped, {"codex": True, "grok": True})
+        self.assertEqual(hswap._skipped, {"codex": True, "grok": True})
         answers["codex refresh --json"] = [json.dumps({"schemaVersion": 1, "accounts": [{"ok": True, "result": "refreshed"}]}), 0]
         self.script(answers)
         self.assertEqual(self.keep({"codex"}), {"codex": "확인함"})
-        self.assertIs(hswap_usage._skipped["codex"], False)
-        with mock.patch.object(hswap_usage, "_said", {}), mock.patch.object(hswap_usage, "print", create=True) as log, \
-                mock.patch.object(hswap_usage.claude_accounts.installer, "state", None), \
-                mock.patch.object(hswap_usage, "which_tool", side_effect=lambda n: f"/x/{n}" if n == "codex" else None):
+        self.assertIs(hswap._skipped["codex"], False)
+        with mock.patch.object(hswap, "_said", {}), mock.patch.object(hswap, "print", create=True) as log, \
+                mock.patch.object(hswap.claude.installer, "state", None), \
+                mock.patch.object(hswap, "which_tool", side_effect=lambda n: f"/x/{n}" if n == "codex" else None):
             answers["codex refresh --json"] = [json.dumps({"schemaVersion": 1, "accounts": skip[:1]}), 0]
             self.script(answers)
-            hswap_usage._keep_once()
-            hswap_usage._keep_once()  # 같은 요약은 다시 남기지 않는다
+            hswap._keep_once()
+            hswap._keep_once()  # 같은 요약은 다시 남기지 않는다
         lines = [c.args[0] for c in log.call_args_list]
         self.assertEqual(lines, ["[jarvis] hswap: 로그인 유지: {'codex': '건너뜀 1개'}"])
         self.assertNotIn("running", " ".join(lines))
@@ -494,14 +494,14 @@ class KeepTest(FakeHswapCase):
     def test_once_waits_for_install_and_missing_hswap(self):
         """covers: USAGE-9"""
         self.script({})
-        with mock.patch.object(hswap_usage.claude_accounts.installer, "state", "running"):
-            hswap_usage._keep_once()
-        with mock.patch.object(hswap_usage.claude_accounts, "binary", return_value=None):
-            hswap_usage._keep_once()
+        with mock.patch.object(hswap.claude.installer, "state", "running"):
+            hswap._keep_once()
+        with mock.patch.object(hswap.claude, "binary", return_value=None):
+            hswap._keep_once()
         self.assertEqual(self.calls(), [])
-        with mock.patch.object(hswap_usage.claude_accounts.installer, "state", None), \
-                mock.patch.object(hswap_usage, "which_tool", return_value=None):
-            hswap_usage._keep_once()
+        with mock.patch.object(hswap.claude.installer, "state", None), \
+                mock.patch.object(hswap, "which_tool", return_value=None):
+            hswap._keep_once()
         self.assertEqual(self.calls(), ["config get usage.remote", "config set usage.remote codex,grok,opencode"])
 
     def test_maintain_checks_then_keeps_then_reads_claude_each_round(self):
@@ -515,17 +515,17 @@ class KeepTest(FakeHswapCase):
             order.append(("sleep", s))
             raise Stop
 
-        for claude, want in (("/x/claude", ["check", "keep", "claude", ("sleep", hswap_usage.KEEP_S)]),
-                             (None, ["check", "keep", ("sleep", hswap_usage.KEEP_S)])):
+        for claude, want in (("/x/claude", ["check", "keep", "claude", ("sleep", hswap.KEEP_S)]),
+                             (None, ["check", "keep", ("sleep", hswap.KEEP_S)])):
             order.clear()
-            with mock.patch.object(hswap_usage.claude_accounts, "check", side_effect=lambda: order.append("check") or 1 / 0), \
-                    mock.patch.object(hswap_usage, "inspect"), mock.patch.object(hswap_usage.threading, "Thread"), \
-                    mock.patch.object(hswap_usage, "_keep_once", side_effect=lambda: order.append("keep")), \
-                    mock.patch.object(hswap_usage.claude_accounts, "read", side_effect=lambda: order.append("claude")), \
-                    mock.patch.object(hswap_usage, "which_tool", return_value=claude), \
-                    mock.patch.object(hswap_usage.time, "sleep", side_effect=sleep):
+            with mock.patch.object(hswap.claude, "check", side_effect=lambda: order.append("check") or 1 / 0), \
+                    mock.patch.object(hswap, "inspect"), mock.patch.object(hswap.threading, "Thread"), \
+                    mock.patch.object(hswap, "_keep_once", side_effect=lambda: order.append("keep")), \
+                    mock.patch.object(hswap.claude, "read", side_effect=lambda: order.append("claude")), \
+                    mock.patch.object(hswap, "which_tool", return_value=claude), \
+                    mock.patch.object(hswap.time, "sleep", side_effect=sleep):
                 with self.assertRaises(Stop):
-                    hswap_usage.maintain()
+                    hswap.maintain()
             self.assertEqual(order, want)  # 앞 단계가 실패해도(check 의 예외) 다음 단계를 한다
 
 
@@ -544,15 +544,15 @@ class TickStartTest(unittest.TestCase):
                 rounds.append(s)
                 if len(rounds) == 2:
                     raise Stop
-            with mock.patch.object(hswap_usage.sys, "platform", platform), \
-                    mock.patch.object(hswap_usage.threading, "Thread", side_effect=lambda target, **kw: mock.Mock(start=lambda: started.append(target))), \
-                    mock.patch.object(hswap_usage, "_check"), mock.patch.object(hswap_usage, "schedule"), mock.patch.object(hswap_usage, "inspect"), \
-                    mock.patch.object(hswap_usage, "_keep_once"), mock.patch.object(hswap_usage, "which_tool", return_value=None), \
-                    mock.patch.object(hswap_usage.claude_accounts, "_aqua", aqua), \
-                    mock.patch.object(hswap_usage.time, "sleep", side_effect=sleep):
+            with mock.patch.object(hswap.sys, "platform", platform), \
+                    mock.patch.object(hswap.threading, "Thread", side_effect=lambda target, **kw: mock.Mock(start=lambda: started.append(target))), \
+                    mock.patch.object(hswap, "_check"), mock.patch.object(hswap, "schedule"), mock.patch.object(hswap, "inspect"), \
+                    mock.patch.object(hswap, "_keep_once"), mock.patch.object(hswap, "which_tool", return_value=None), \
+                    mock.patch.object(hswap.claude, "_aqua", aqua), \
+                    mock.patch.object(hswap.time, "sleep", side_effect=sleep):
                 with self.assertRaises(Stop):
-                    hswap_usage.maintain()
-            self.assertEqual(started, [hswap_usage.tick] * want, (platform, aqua))  # 세션 안의 macOS 는 hswap 예약이 돌아 tick 이 할 일이 없다
+                    hswap.maintain()
+            self.assertEqual(started, [hswap.tick] * want, (platform, aqua))  # 세션 안의 macOS 는 hswap 예약이 돌아 tick 이 할 일이 없다
 
 
 class ScheduleTest(FakeHswapCase):
@@ -565,13 +565,13 @@ class ScheduleTest(FakeHswapCase):
 
     def setUp(self):
         super().setUp()
-        for p in (mock.patch.object(hswap_usage.sys, "platform", "darwin"),
-                  mock.patch.object(hswap_usage, "which_tool", side_effect=lambda n: "/x/" + n),
-                  mock.patch.object(hswap_usage.claude_accounts, "_version", "0.2.8"),
-                  mock.patch.object(hswap_usage.claude_accounts, "_store_read", return_value={"accounts": [{}]}),
-                  mock.patch.object(hswap_usage.claude_accounts, "service", None),
-                  mock.patch.object(hswap_usage.claude_accounts, "service_note", None),
-                  mock.patch.object(hswap_usage.claude_accounts, "doctor", None)):
+        for p in (mock.patch.object(hswap.sys, "platform", "darwin"),
+                  mock.patch.object(hswap, "which_tool", side_effect=lambda n: "/x/" + n),
+                  mock.patch.object(hswap.claude, "_version", "0.2.8"),
+                  mock.patch.object(hswap.claude, "_store_read", return_value={"accounts": [{}]}),
+                  mock.patch.object(hswap.claude, "service", None),
+                  mock.patch.object(hswap.claude, "service_note", None),
+                  mock.patch.object(hswap.claude, "doctor", None)):
             p.start()
             self.addCleanup(p.stop)
 
@@ -581,43 +581,43 @@ class ScheduleTest(FakeHswapCase):
 
     def test_installs_when_missing(self):
         self.script({self.STATUS: self.st(installed=False, managed=None, loaded=False), self.INSTALL: ['{"schemaVersion": 1, "ok": true}', 0]})
-        hswap_usage.schedule()
+        hswap.schedule()
         self.assertEqual(self.calls(), [self.STATUS, "claude config --json", self.INSTALL, self.STATUS])  # 자동 전환을 켜 두었는지 본다(USAGE-14)
 
     def test_missing_service_keeps_rotation_that_was_turned_on(self):
         """covers: USAGE-14. 켜 둔 자동 전환(순서 전략)은 예약을 새로 설치할 때 --then-auto 로 이어진다"""
-        cfg = json.dumps({"schemaVersion": 1, "settings": [{"key": "autoswitch.strategy", "value": hswap_usage.ROTATION}]})
+        cfg = json.dumps({"schemaVersion": 1, "settings": [{"key": "autoswitch.strategy", "value": hswap.ROTATION}]})
         install = "claude keepalive --install-service --ahead 7200 --then-auto --json"
         self.script({self.STATUS: self.st(installed=False, managed=None, loaded=False), "claude config --json": [cfg, 0], install: ['{"schemaVersion": 1}', 0]})
-        hswap_usage.schedule()
+        hswap.schedule()
         self.assertEqual(self.calls(), [self.STATUS, "claude config --json", install, self.STATUS])
 
     def test_loaded_managed_service_keeps_the_settings_people_chose(self):
         self.script({self.STATUS: self.st(ahead=3600, thenAuto=True)})
-        self.assertEqual(hswap_usage.schedule()["loaded"], True)
+        self.assertEqual(hswap.schedule()["loaded"], True)
         self.assertEqual(self.calls(), [self.STATUS])  # 적재돼 있으면 다시 설치하지 않는다(사람이 고른 ahead·then-auto 를 덮지 않는다)
-        self.assertEqual(hswap_usage.claude_accounts.service["managed"], True)
+        self.assertEqual(hswap.claude.service["managed"], True)
 
     def test_unloaded_managed_service_is_reinstalled_with_its_own_settings(self):
         again = "claude keepalive --install-service --ahead 3600 --then-auto --json"
         self.script({self.STATUS: self.st(loaded=False, ahead=3600, thenAuto=True), again: ['{"schemaVersion": 1, "ok": true}', 3]})
-        hswap_usage.schedule()
+        hswap.schedule()
         self.assertEqual(self.calls(), [self.STATUS, again, self.STATUS])
 
     def test_jarvis_never_installs_keepalive_with_an_ahead_hswap_refuses(self):
         """covers: USAGE-15. hswap 0.3.0 은 --ahead 600초 이하를 거절한다(ahead_too_short). 옛 예약의 짧은 ahead 는 이어받지 않는다"""
-        self.assertGreater(hswap_usage.AHEAD_S, hswap_usage.MIN_AHEAD_S)
-        self.assertEqual(hswap_usage.MIN_AHEAD_S, 600)
+        self.assertGreater(hswap.AHEAD_S, hswap.MIN_AHEAD_S)
+        self.assertEqual(hswap.MIN_AHEAD_S, 600)
         for old in (600, 300):
-            again = f"claude keepalive --install-service --ahead {hswap_usage.AHEAD_S} --json"
+            again = f"claude keepalive --install-service --ahead {hswap.AHEAD_S} --json"
             self.script({self.STATUS: self.st(loaded=False, ahead=old, thenAuto=False), again: ['{"schemaVersion": 1, "ok": true}', 0]})
             if os.path.exists(os.path.join(self.dir, "argv")):
                 os.remove(os.path.join(self.dir, "argv"))
-            hswap_usage.schedule()
+            hswap.schedule()
             self.assertIn(again, self.calls(), old)
         self.script({self.STATUS: self.st(loaded=False, ahead=601, thenAuto=False)})
         os.remove(os.path.join(self.dir, "argv"))
-        hswap_usage.schedule()
+        hswap.schedule()
         self.assertIn("claude keepalive --install-service --ahead 601 --json", self.calls())  # 그보다 길면 사람이 고른 값을 지킨다
 
     def test_the_reinstall_plan_follows_hswap_0_3_1_reasons(self):
@@ -635,74 +635,74 @@ class ScheduleTest(FakeHswapCase):
                  ({"outdated": True, "outdatedReason": "caller_env_only", "reinstallNeedsSudo": True}, (False, "caller_env_only")),
                  ({"platform": "unsupported"}, (False, None)))
         for over, want in cases:
-            self.assertEqual(hswap_usage._service_plan({**base, **over}), want, over)
-        self.assertEqual(hswap_usage._service_plan(None), (False, None))
+            self.assertEqual(hswap._service_plan({**base, **over}), want, over)
+        self.assertEqual(hswap._service_plan(None), (False, None))
 
     def test_a_caller_only_difference_is_not_reinstalled_and_says_next_install(self):
         self.script({self.STATUS: self.st(outdated=True, outdatedReason="caller_env_only", reinstallNeedsSudo=False, ahead=3600)})
-        hswap_usage.schedule()
+        hswap.schedule()
         self.assertEqual(self.calls(), [self.STATUS])
-        self.assertEqual(hswap_usage.claude_accounts.service_note, "keepalive 예약: 다음 설치 때 갱신")
-        with mock.patch.object(hswap_usage.claude_accounts, "_version", hswap_usage.claude_accounts.VERSION):
-            self.assertEqual(hswap_usage.claude_accounts.status()["service_note"], "keepalive 예약: 다음 설치 때 갱신")
+        self.assertEqual(hswap.claude.service_note, "keepalive 예약: 다음 설치 때 갱신")
+        with mock.patch.object(hswap.claude, "_version", hswap.claude.VERSION):
+            self.assertEqual(hswap.claude.status()["service_note"], "keepalive 예약: 다음 설치 때 갱신")
 
     def test_a_daemon_that_needs_sudo_is_left_to_a_person_and_logged_once_an_hour(self):
         self.script({self.STATUS: self.st(outdated=True, outdatedReason="job_changed", reinstallNeedsSudo=True, domain="system", ahead=3600, thenAuto=True)})
         said = {}
-        with mock.patch.object(hswap_usage, "_said", said), mock.patch.object(hswap_usage, "print", create=True) as log:
-            hswap_usage.schedule()
-            hswap_usage.schedule()  # 한 시간 안: 다시 남기지 않는다
-            said["service"] = (said["service"][0], said["service"][1] - hswap_usage.claude_accounts.LOG_AGAIN_S - 1)
-            hswap_usage.schedule()
+        with mock.patch.object(hswap, "_said", said), mock.patch.object(hswap, "print", create=True) as log:
+            hswap.schedule()
+            hswap.schedule()  # 한 시간 안: 다시 남기지 않는다
+            said["service"] = (said["service"][0], said["service"][1] - hswap.claude.LOG_AGAIN_S - 1)
+            hswap.schedule()
         self.assertFalse([c for c in self.calls() if "--install-service" in c])
         lines = [c.args[0] for c in log.call_args_list if "sudo" in c.args[0]]
         self.assertEqual(len(lines), 2, lines)
         want = "sudo hswap claude keepalive --install-service --system --ahead 3600 --then-auto"  # 지금 예약의 설정 그대로
         self.assertTrue(lines[0].endswith(want), lines[0])
-        with mock.patch.object(hswap_usage.claude_accounts, "_version", hswap_usage.claude_accounts.VERSION):
-            self.assertTrue(hswap_usage.claude_accounts.status()["service_note"].endswith(want))
-        self.assertEqual(hswap_usage._sudo_command({"ahead": 300, "thenAuto": False}),
-                         f"sudo hswap claude keepalive --install-service --system --ahead {hswap_usage.AHEAD_S}")  # hswap 이 거절할 짧은 ahead 는 쓰지 않는다
+        with mock.patch.object(hswap.claude, "_version", hswap.claude.VERSION):
+            self.assertTrue(hswap.claude.status()["service_note"].endswith(want))
+        self.assertEqual(hswap._sudo_command({"ahead": 300, "thenAuto": False}),
+                         f"sudo hswap claude keepalive --install-service --system --ahead {hswap.AHEAD_S}")  # hswap 이 거절할 짧은 ahead 는 쓰지 않는다
 
     def test_a_busy_store_postpones_the_reinstall_without_a_failure(self):
         """covers: USAGE-11. service_busy(exit 1): keepalive·reconcile 실행이 잠금을 쥐었다. 실패로 세지 않고 다음 주기(KEEP_S)에 다시 한다"""
         again = "claude keepalive --install-service --ahead 3600 --json"
         busy = json.dumps({"schemaVersion": 1, "error": {"type": "service_busy", "message": "A keepalive or reconcile run held the store lock"}})
         self.script({self.STATUS: self.st(outdated=True, outdatedReason="job_changed", reinstallNeedsSudo=False, ahead=3600), again: [busy, 1]})
-        with mock.patch.object(hswap_usage, "_said", {}), mock.patch.object(hswap_usage, "print", create=True) as log:
-            hswap_usage.schedule()
+        with mock.patch.object(hswap, "_said", {}), mock.patch.object(hswap, "print", create=True) as log:
+            hswap.schedule()
         printed = [c.args[0] for c in log.call_args_list]
         self.assertFalse([x for x in printed if "설치 실패" in x], printed)
         self.assertTrue([x for x in printed if x.startswith("[jarvis] hswap:") and "service_busy" in x and "다음 주기" in x], printed)
-        self.assertIn("service_busy", hswap_usage.claude_accounts.HSWAP_ERRORS)
+        self.assertIn("service_busy", hswap.claude.HSWAP_ERRORS)
 
     def test_outdated_managed_service_is_reinstalled_with_its_own_settings(self):
         """적재돼 있어도 hswap 이 낡았다고 하면(예: 자격이 바뀌면 바로 깨우는 WatchPaths 가 없다) 사람이 고른 설정 그대로 다시 설치한다"""
         again = "claude keepalive --install-service --ahead 3600 --json"
         self.script({self.STATUS: self.st(outdated=True, ahead=3600, thenAuto=False), again: ['{"schemaVersion": 1, "ok": true}', 0]})
-        hswap_usage.schedule()
+        hswap.schedule()
         self.assertEqual(self.calls(), [self.STATUS, again, self.STATUS])
 
     def test_switch_off_and_stale_answers(self):
         self.script({self.STATUS: self.st(installed=False)})
-        hswap_usage.claude_accounts.service = {"installed": False}
-        with mock.patch.object(hswap_usage.config, "CSWAP_INSTALL", False):
-            self.assertIsNone(hswap_usage.schedule())
-        self.assertIsNone(hswap_usage.claude_accounts.service)  # 할 일이 아니면 지난 답도 쓰지 않는다
+        hswap.claude.service = {"installed": False}
+        with mock.patch.object(hswap.config, "CSWAP_INSTALL", False):
+            self.assertIsNone(hswap.schedule())
+        self.assertIsNone(hswap.claude.service)  # 할 일이 아니면 지난 답도 쓰지 않는다
         self.assertEqual(self.calls(), [])
 
     def test_foreign_service_is_left_alone(self):
         self.script({self.STATUS: self.st(managed=False)})
-        hswap_usage.schedule()
+        hswap.schedule()
         self.assertEqual(self.calls(), [self.STATUS])
 
     def test_skips_old_hswap_other_platforms_and_empty_stores(self):
         self.script({self.STATUS: self.st(installed=False)})
-        for patch in (mock.patch.object(hswap_usage.claude_accounts, "_version", "0.2.7"),
-                      mock.patch.object(hswap_usage.sys, "platform", "linux"),
-                      mock.patch.object(hswap_usage.claude_accounts, "_store_read", return_value=None)):
+        for patch in (mock.patch.object(hswap.claude, "_version", "0.2.7"),
+                      mock.patch.object(hswap.sys, "platform", "linux"),
+                      mock.patch.object(hswap.claude, "_store_read", return_value=None)):
             with patch:
-                self.assertIsNone(hswap_usage.schedule())
+                self.assertIsNone(hswap.schedule())
         self.assertEqual(self.calls(), [])
 
 
@@ -712,18 +712,18 @@ class MacSessionTest(FakeHswapCase):
     script = KeepTest.script
     DOCTOR = "claude doctor --json"
     CONFIG = "claude config --json"
-    KEEP = f"claude keepalive --ahead {hswap_usage.AHEAD_S} --json"
+    KEEP = f"claude keepalive --ahead {hswap.AHEAD_S} --json"
     AUTO = "claude auto --once --json"
 
     def setUp(self):
         super().setUp()
-        for p in (mock.patch.object(hswap_usage.sys, "platform", "darwin"),
-                  mock.patch.object(hswap_usage, "which_tool", side_effect=lambda n: "/x/" + n),
-                  mock.patch.object(hswap_usage.claude_accounts, "_store_read", return_value={"accounts": [{}]}),
-                  mock.patch.object(hswap_usage.claude_accounts, "doctor", None),
-                  mock.patch.object(hswap_usage.claude_accounts, "service", None),
-                  mock.patch.object(hswap_usage.claude_accounts, "_aqua", False),
-                  mock.patch.object(hswap_usage.claude_accounts, "_version", "0.3.0")):
+        for p in (mock.patch.object(hswap.sys, "platform", "darwin"),
+                  mock.patch.object(hswap, "which_tool", side_effect=lambda n: "/x/" + n),
+                  mock.patch.object(hswap.claude, "_store_read", return_value={"accounts": [{}]}),
+                  mock.patch.object(hswap.claude, "doctor", None),
+                  mock.patch.object(hswap.claude, "service", None),
+                  mock.patch.object(hswap.claude, "_aqua", False),
+                  mock.patch.object(hswap.claude, "_version", "0.3.0")):
             p.start()
             self.addCleanup(p.stop)
 
@@ -739,54 +739,54 @@ class MacSessionTest(FakeHswapCase):
     def tick_once(self):
         class Stop(Exception):
             pass
-        with mock.patch.object(hswap_usage.time, "sleep", side_effect=Stop):
+        with mock.patch.object(hswap.time, "sleep", side_effect=Stop):
             with self.assertRaises(Stop):
-                hswap_usage.tick()
+                hswap.tick()
 
     def test_inspect_reads_doctor_without_the_keychain(self):
         self.script({self.DOCTOR: self.doctor(problems=["slot_without_backup", {"code": "file_mode_insecure"}, "Bad Code!"], slotsWithoutBackup=[2])})
-        d = hswap_usage.inspect()
-        self.assertEqual(d, hswap_usage.claude_accounts.doctor)
+        d = hswap.inspect()
+        self.assertEqual(d, hswap.claude.doctor)
         self.assertEqual((d["store"], d["problems"], d["keepalive_loaded"], d["keepalive_domain"]), ("file", ["slot_without_backup", "file_mode_insecure"], False, "gui"))
         self.assertEqual(self.calls(), [self.DOCTOR])
 
     def test_old_hswap_without_doctor_falls_back_to_the_store_setting(self):
         for settings, want in (([{"key": "credentials.store", "value": "file"}], "file"), ([{"key": "credentials.store", "value": None}], "auto")):
             self.script({self.DOCTOR: ["usage: hswap claude ...", 2], self.CONFIG: [json.dumps({"schemaVersion": 1, "settings": settings}), 0]})
-            d = hswap_usage.inspect()
+            d = hswap.inspect()
             self.assertEqual((d["store"], d["problems"], d["keepalive_loaded"]), (want, [], None), settings)
         envelope = json.dumps({"schemaVersion": 1, "ok": False, "error": {"type": "SwitchError", "message": "m"}})
         self.script({self.DOCTOR: [envelope, 1], self.CONFIG: [json.dumps({"schemaVersion": 1, "settings": [{"key": "credentials.store", "value": "auto"}]}), 0]})
-        self.assertEqual(hswap_usage.inspect()["store"], "auto")  # doctor 의 오류 봉투는 답이 아니다
-        with mock.patch.object(hswap_usage.config, "CSWAP_INSTALL", False):
-            self.assertIsNone(hswap_usage.inspect())
+        self.assertEqual(hswap.inspect()["store"], "auto")  # doctor 의 오류 봉투는 답이 아니다
+        with mock.patch.object(hswap.config, "CSWAP_INSTALL", False):
+            self.assertIsNone(hswap.inspect())
         self.script({})  # 둘 다 답하지 않으면 모른다
-        self.assertIsNone(hswap_usage.inspect())
+        self.assertIsNone(hswap.inspect())
 
     def test_hswap_before_0_3_0_is_not_asked_for_doctor(self):
         self.script({self.DOCTOR: self.doctor(), self.CONFIG: [json.dumps({"schemaVersion": 1, "settings": [{"key": "credentials.store", "value": "file"}]}), 0]})
         for v in ("0.2.9", None):
-            with mock.patch.object(hswap_usage.claude_accounts, "_version", v):
-                self.assertEqual(hswap_usage.inspect()["store"], "file", v)
+            with mock.patch.object(hswap.claude, "_version", v):
+                self.assertEqual(hswap.inspect()["store"], "file", v)
         self.assertNotIn(self.DOCTOR, self.calls())
 
     def test_new_doctor_fields_are_read_and_old_ones_still_work(self):
         self.script({self.DOCTOR: self.doctor(keychainBackups=3, lastReconcileError="reconcile_ambiguous", problems=["keychain_item_present", "reconcile_ambiguous"])})
-        d = hswap_usage.inspect()
+        d = hswap.inspect()
         self.assertEqual((d["keychain_backups"], d["problems"]), (3, ["keychain_item_present", "reconcile_ambiguous"]))
         self.script({self.DOCTOR: self.doctor()})  # 그 필드가 없는 0.3.0
-        self.assertIsNone(hswap_usage.inspect()["keychain_backups"])
+        self.assertIsNone(hswap.inspect()["keychain_backups"])
 
     def test_outside_macos_or_without_claude_it_does_nothing(self):
         self.script({self.DOCTOR: self.doctor()})
-        hswap_usage.claude_accounts.doctor = {"store": "file"}
-        with mock.patch.object(hswap_usage.sys, "platform", "linux"):
-            self.assertIsNone(hswap_usage.inspect())
-        self.assertIsNone(hswap_usage.claude_accounts.doctor)
+        hswap.claude.doctor = {"store": "file"}
+        with mock.patch.object(hswap.sys, "platform", "linux"):
+            self.assertIsNone(hswap.inspect())
+        self.assertIsNone(hswap.claude.doctor)
         self.assertEqual(self.calls(), [])
 
     def test_headless_file_store_ticks_keepalive_and_rotation(self):
-        self.script({self.DOCTOR: self.doctor(), self.KEEP: ["{}", 0], self.CONFIG: self.strategy(hswap_usage.ROTATION)})
+        self.script({self.DOCTOR: self.doctor(), self.KEEP: ["{}", 0], self.CONFIG: self.strategy(hswap.ROTATION)})
         self.tick_once()
         self.assertEqual(self.calls(), [self.DOCTOR, self.KEEP, self.CONFIG, self.AUTO])
 
@@ -795,35 +795,35 @@ class MacSessionTest(FakeHswapCase):
                              (False, self.doctor(store="auto"))):
             os.remove(os.path.join(self.dir, "argv")) if os.path.exists(os.path.join(self.dir, "argv")) else None
             self.script({self.DOCTOR: doctor, self.KEEP: ["{}", 0]})
-            with mock.patch.object(hswap_usage.claude_accounts, "_aqua", aqua):
+            with mock.patch.object(hswap.claude, "_aqua", aqua):
                 self.tick_once()
             self.assertEqual(self.calls(), [self.DOCTOR], (aqua, doctor))
 
     def test_linux_tick_is_unchanged(self):
         self.script({self.KEEP: ["{}", 0], self.CONFIG: self.strategy("best")})
-        with mock.patch.object(hswap_usage.sys, "platform", "linux"):
+        with mock.patch.object(hswap.sys, "platform", "linux"):
             self.tick_once()
         self.assertEqual(self.calls(), [self.KEEP, self.CONFIG])
 
     def test_rotation_follows_the_tick_when_the_gateway_runs_it(self):
         st = json.dumps({"schemaVersion": 1, "platform": "launchd", "installed": True, "managed": True, "loaded": False, "ahead": 7200, "thenAuto": False})
-        cfg = json.dumps({"schemaVersion": 1, "settings": [{"key": "autoswitch.strategy", "value": hswap_usage.ROTATION}]})
+        cfg = json.dumps({"schemaVersion": 1, "settings": [{"key": "autoswitch.strategy", "value": hswap.ROTATION}]})
         self.script({"claude config --json": [cfg, 0], "claude priority": ["  Account-1  a@example.com  1\n", 0],
                      "claude keepalive --service-status --json": [st, 0]})
-        hswap_usage.claude_accounts.doctor = {"store": "file", "problems": [], "keepalive_loaded": False, "keepalive_domain": "gui"}
-        with mock.patch.object(hswap_usage.claude_accounts, "_version", "0.3.0"):
-            self.assertTrue(hswap_usage.rotation()[1]["on"])  # 세션 밖에서는 예약이 아니라 게이트웨이 tick 이 전환한다
-            with mock.patch.object(hswap_usage.claude_accounts, "_aqua", True):
-                self.assertFalse(hswap_usage.rotation()[1]["on"])
+        hswap.claude.doctor = {"store": "file", "problems": [], "keepalive_loaded": False, "keepalive_domain": "gui"}
+        with mock.patch.object(hswap.claude, "_version", "0.3.0"):
+            self.assertTrue(hswap.rotation()[1]["on"])  # 세션 밖에서는 예약이 아니라 게이트웨이 tick 이 전환한다
+            with mock.patch.object(hswap.claude, "_aqua", True):
+                self.assertFalse(hswap.rotation()[1]["on"])
 
     def test_an_unloaded_system_keepalive_toggles_by_strategy_only(self):
         """데몬 예약이 적재되지 않아 tick 이 도는 동안: gui 예약을 설치하지 않고(hswap 이 ServiceConflict 로 거절한다) 전략만 바꾼다"""
         st = json.dumps({"schemaVersion": 1, "platform": "launchd", "domain": "system", "installed": True, "managed": True, "loaded": False, "ahead": 7200, "thenAuto": False})
         self.script({"claude config --json": [self.strategy("best")[0], 0], "claude priority": ["  Account-1  a@example.com  0\n", 0],
                      "claude keepalive --service-status --json": [st, 0]})
-        hswap_usage.claude_accounts.doctor = {"store": "file", "problems": [], "keepalive_loaded": False, "keepalive_domain": "system"}
-        with mock.patch.object(hswap_usage.claude_accounts, "_version", "0.3.0"):
-            code, body = hswap_usage.set_rotation("1", "1", "90")
+        hswap.claude.doctor = {"store": "file", "problems": [], "keepalive_loaded": False, "keepalive_domain": "system"}
+        with mock.patch.object(hswap.claude, "_version", "0.3.0"):
+            code, body = hswap.set_rotation("1", "1", "90")
         self.assertEqual(code, 200, body)
         self.assertIn("claude config set autoswitch.strategy priority-consume-first", self.calls())
         self.assertFalse([c for c in self.calls() if "--install-service" in c])
@@ -832,13 +832,13 @@ class MacSessionTest(FakeHswapCase):
         st = json.dumps({"schemaVersion": 1, "platform": "launchd", "installed": True, "managed": True, "loaded": True, "ahead": 7200, "thenAuto": False})
         self.script({"claude config --json": [self.strategy("best")[0], 0], "claude priority": ["  Account-1  a@example.com  0\n", 0],
                      "claude keepalive --service-status --json": [st, 0]})
-        hswap_usage.claude_accounts.doctor = {"store": "file", "problems": [], "keepalive_loaded": True, "keepalive_domain": "system"}
-        with mock.patch.object(hswap_usage.claude_accounts, "_version", "0.3.0"):
-            code, body = hswap_usage.set_rotation("1", "1", "90")
+        hswap.claude.doctor = {"store": "file", "problems": [], "keepalive_loaded": True, "keepalive_domain": "system"}
+        with mock.patch.object(hswap.claude, "_version", "0.3.0"):
+            code, body = hswap.set_rotation("1", "1", "90")
             self.assertEqual(code, 409, body)
             self.assertIn("sudo hswap claude keepalive --install-service --system --then-auto", body["error"])
             self.assertFalse([c for c in self.calls() if " set " in c or "--install-service" in c or c.startswith("claude priority ")])
-            hswap_usage.schedule()
+            hswap.schedule()
             self.assertFalse([c for c in self.calls() if "--install-service" in c])  # 데몬 예약 옆에 gui 예약을 만들지 않는다
 
 
@@ -849,9 +849,9 @@ class DebugLogTest(FakeHswapCase):
 
     def setUp(self):
         super().setUp()
-        for p in (mock.patch.object(hswap_usage.claude_accounts, "_logged", {}), mock.patch.object(hswap_usage, "_said", {}),
-                  mock.patch.object(hswap_usage.claude_accounts, "doctor", None), mock.patch.object(hswap_usage.claude_accounts, "_aqua", False),
-                  mock.patch.object(hswap_usage.claude_accounts, "_version", "0.3.1")):
+        for p in (mock.patch.object(hswap.claude, "_logged", {}), mock.patch.object(hswap, "_said", {}),
+                  mock.patch.object(hswap.claude, "doctor", None), mock.patch.object(hswap.claude, "_aqua", False),
+                  mock.patch.object(hswap.claude, "_version", "0.3.1")):
             p.start()
             self.addCleanup(p.stop)
 
@@ -868,26 +868,26 @@ class DebugLogTest(FakeHswapCase):
 
     def test_the_gateway_and_the_ui_name_themselves(self):
         self.caller_fake()
-        hswap_usage._run(self.exe, "claude", "doctor", "--json")
-        hswap_usage._run(self.exe, "claude", "priority", caller="jarvis-ui")
+        hswap._run(self.exe, "claude", "doctor", "--json")
+        hswap._run(self.exe, "claude", "priority", caller="jarvis-ui")
         self.assertEqual(self.calls(), ["jarvis-gateway claude doctor --json", "jarvis-ui claude priority"])
         seen = []
-        real = hswap_usage._run
-        with mock.patch.object(hswap_usage, "_run", side_effect=lambda exe, *a, caller="jarvis-gateway": seen.append(caller) or real(exe, *a, caller=caller)), \
-                mock.patch.object(hswap_usage.sys, "platform", "linux"):
-            hswap_usage.set_rotation("1", "1", "90")
+        real = hswap._run
+        with mock.patch.object(hswap, "_run", side_effect=lambda exe, *a, caller="jarvis-gateway": seen.append(caller) or real(exe, *a, caller=caller)), \
+                mock.patch.object(hswap.sys, "platform", "linux"):
+            hswap.set_rotation("1", "1", "90")
         self.assertTrue(seen and set(seen) == {"jarvis-ui"}, seen)  # 사람 버튼이 부른 설정 읽기·쓰기
 
     def test_a_tick_decision_is_logged_once_an_hour_and_at_once_when_it_changes(self):
-        with mock.patch.object(hswap_usage, "print", create=True) as log, \
-                mock.patch.object(hswap_usage.time, "monotonic", side_effect=[0.0, 10.0, 20.0, 30.0, 3700.0]):
+        with mock.patch.object(hswap, "print", create=True) as log, \
+                mock.patch.object(hswap.time, "monotonic", side_effect=[0.0, 10.0, 20.0, 30.0, 3700.0]):
             for reason in (None, None, "in_session", "in_session", "in_session"):
-                hswap_usage._note_tick(reason)
+                hswap._note_tick(reason)
         self.assertEqual(self.logs(log), ["[jarvis] hswap: tick keepalive 실행", "[jarvis] hswap: tick 건너뜀(in_session)",
                                           "[jarvis] hswap: tick 건너뜀(in_session)"])
 
     def test_tick_reasons(self):
-        ca = hswap_usage.claude_accounts
+        ca = hswap.claude
         file_doc = {"store": "file", "problems": [], "keepalive_loaded": False}
         cases = (("linux", {}, None), ("win32", {}, None),
                  ("darwin", {"_aqua": True, "doctor": file_doc}, "in_session"),
@@ -906,15 +906,15 @@ class DebugLogTest(FakeHswapCase):
                 self.assertEqual(ca.gateway_ticks(), want is None, (platform, state))
 
     def test_the_linux_tick_logs_that_it_ran_and_reads_no_doctor(self):
-        self.script({f"claude keepalive --ahead {hswap_usage.AHEAD_S} --json": ['{"schemaVersion": 1, "ok": true}', 0]})
+        self.script({f"claude keepalive --ahead {hswap.AHEAD_S} --json": ['{"schemaVersion": 1, "ok": true}', 0]})
         class Stop(Exception):
             pass
-        with mock.patch.object(hswap_usage.sys, "platform", "linux"), mock.patch.object(hswap_usage, "which_tool", side_effect=lambda n: "/x/" + n), \
-                mock.patch.object(hswap_usage.claude_accounts, "_store_read", return_value={"accounts": [{}]}), \
-                mock.patch.object(hswap_usage, "print", create=True) as log, mock.patch.object(hswap_usage.claude_accounts, "print", create=True) as call_log, \
-                mock.patch.object(hswap_usage.time, "sleep", side_effect=Stop):
+        with mock.patch.object(hswap.sys, "platform", "linux"), mock.patch.object(hswap, "which_tool", side_effect=lambda n: "/x/" + n), \
+                mock.patch.object(hswap.claude, "_store_read", return_value={"accounts": [{}]}), \
+                mock.patch.object(hswap, "print", create=True) as log, mock.patch.object(hswap.claude, "print", create=True) as call_log, \
+                mock.patch.object(hswap.time, "sleep", side_effect=Stop):
             with self.assertRaises(Stop):
-                hswap_usage.tick()
+                hswap.tick()
         self.assertEqual(self.logs(log), ["[jarvis] hswap: tick keepalive 실행"])
         self.assertTrue(any(line.startswith("[jarvis] hswap: claude keepalive --ahead 종료 0 ") for line in self.logs(call_log)), self.logs(call_log))
         self.assertNotIn("claude doctor --json", self.calls())
@@ -922,10 +922,10 @@ class DebugLogTest(FakeHswapCase):
     def test_each_call_is_logged_with_its_type_only_and_repeats_once_an_hour(self):
         leak = "sk-ant-oat01-SECRET /Users/alice/.claude/.credentials.json"
         self.caller_fake(json.dumps({"schemaVersion": 1, "error": {"type": "CredentialReadError", "message": leak}}), 1)
-        with mock.patch.object(hswap_usage.claude_accounts, "print", create=True) as log, \
-                mock.patch.object(hswap_usage.claude_accounts, "_clock", side_effect=[0.0, 5.0, 4000.0]):
+        with mock.patch.object(hswap.claude, "print", create=True) as log, \
+                mock.patch.object(hswap.claude, "_clock", side_effect=[0.0, 5.0, 4000.0]):
             for _ in range(3):
-                hswap_usage._run(self.exe, "claude", "switch", "2", "--email", "a@example.com", "--json")
+                hswap._run(self.exe, "claude", "switch", "2", "--email", "a@example.com", "--json")
         lines = self.logs(log)
         self.assertEqual(len(lines), 2, lines)  # 같은 결과는 한 시간에 한 번
         self.assertRegex(lines[0], r"^\[jarvis\] hswap: claude switch --email 종료 1 \d+ms CredentialReadError$")
@@ -935,11 +935,11 @@ class DebugLogTest(FakeHswapCase):
     def test_doctor_changes_are_logged_once(self):
         doc = lambda store: [json.dumps({"schemaVersion": 1, "store": store, "problems": ["keepalive_service_missing"],
                                           "keepaliveService": {"loaded": False}, "reconcileService": {"installed": True}}), 2]
-        with mock.patch.object(hswap_usage.sys, "platform", "darwin"), mock.patch.object(hswap_usage, "which_tool", side_effect=lambda n: "/x/" + n), \
-                mock.patch.object(hswap_usage, "print", create=True) as log:
+        with mock.patch.object(hswap.sys, "platform", "darwin"), mock.patch.object(hswap, "which_tool", side_effect=lambda n: "/x/" + n), \
+                mock.patch.object(hswap, "print", create=True) as log:
             for store in ("file", "file", "auto"):
                 self.script({"claude doctor --json": doc(store)})
-                hswap_usage.inspect()
+                hswap.inspect()
         self.assertEqual([x for x in self.logs(log) if "doctor" in x], [
             "[jarvis] hswap: doctor store=file problems=keepalive_service_missing session=out",
             "[jarvis] hswap: doctor store=auto problems=keepalive_service_missing session=out"])
@@ -952,12 +952,12 @@ class DebugLogTest(FakeHswapCase):
 
     def test_the_log_api_needs_hswap_0_3_1(self):
         self.script({})
-        with mock.patch.object(hswap_usage.claude_accounts, "_version", "0.3.0"):
-            self.assertEqual(hswap_usage.hswap_log("1h"), (409, {"error": "hswap 0.3.1 이상 필요"}))
-        with mock.patch.object(hswap_usage.claude_accounts, "binary", return_value=None):
-            self.assertEqual(hswap_usage.hswap_log("1h")[0], 409)
+        with mock.patch.object(hswap.claude, "_version", "0.3.0"):
+            self.assertEqual(hswap.hswap_log("1h"), (409, {"error": "hswap 0.3.1 이상 필요"}))
+        with mock.patch.object(hswap.claude, "binary", return_value=None):
+            self.assertEqual(hswap.hswap_log("1h")[0], 409)
         for bad in ("", "1y", "abc", "99999h", "1h;rm"):
-            self.assertEqual(hswap_usage.hswap_log(bad)[0], 400, bad)
+            self.assertEqual(hswap.hswap_log(bad)[0], 400, bad)
         self.assertEqual(self.calls(), [])
 
     def test_the_log_api_reads_json_lines_first(self):
@@ -968,27 +968,27 @@ class DebugLogTest(FakeHswapCase):
                                 (json.dumps([self.event(1), self.event(2)], indent=2), 0, [1, 2]),  # 여러 줄로 쓴 배열
                                 (json.dumps({"schemaVersion": 1, "events": [self.event(5)]}), 0, [5])):
             self.script({self.LOG: [out, code]})
-            status, body = hswap_usage.hswap_log("1h")
+            status, body = hswap.hswap_log("1h")
             self.assertEqual((status, [e["details"]["n"] for e in body["events"]]), (200, want), out[:60])
         for out, code in (("", 1), ("{broken", 0), ("not json\nat all", 0)):
             self.script({self.LOG: [out, code]})
-            self.assertEqual(hswap_usage.hswap_log("1h")[0], 502, out)
+            self.assertEqual(hswap.hswap_log("1h")[0], 502, out)
 
     def test_the_log_api_has_its_own_short_timeout_and_one_reader_at_a_time(self):
-        self.assertLess(hswap_usage.LOG_TIMEOUT_S, 40)  # core 의 HSWAP_LOG_TIMEOUT_S 안에 끝난다
+        self.assertLess(hswap.LOG_TIMEOUT_S, 40)  # core 의 HSWAP_LOG_TIMEOUT_S 안에 끝난다
         seen = []
-        with mock.patch.object(hswap_usage, "_run", side_effect=lambda *a, **kw: seen.append(kw) or (0, "")):
-            self.assertEqual(hswap_usage.hswap_log("1h")[0], 200)
-        self.assertEqual((seen[0]["timeout"], seen[0]["caller"]), (hswap_usage.LOG_TIMEOUT_S, "jarvis-ui"))
-        with hswap_usage._log_lock:
-            code, body = hswap_usage.hswap_log("1h")
+        with mock.patch.object(hswap, "_run", side_effect=lambda *a, **kw: seen.append(kw) or (0, "")):
+            self.assertEqual(hswap.hswap_log("1h")[0], 200)
+        self.assertEqual((seen[0]["timeout"], seen[0]["caller"]), (hswap.LOG_TIMEOUT_S, "jarvis-ui"))
+        with hswap._log_lock:
+            code, body = hswap.hswap_log("1h")
         self.assertEqual(code, 429)
         self.assertIn("이미", body["error"])
 
     def test_the_log_api_filters_keys_like_values(self):
         leak = self.event(1, details={"/Users/alice/.claude/x": 1, "sk-ant-oat01-KEY": 2, "plain": 3})
         self.script({self.LOG: [json.dumps(leak), 0]})
-        text = json.dumps(hswap_usage.hswap_log("1h")[1], ensure_ascii=False)
+        text = json.dumps(hswap.hswap_log("1h")[1], ensure_ascii=False)
         for bad in ("alice", "sk-ant", "KEY"):
             self.assertNotIn(bad, text)
         self.assertIn('"plain": 3', text)
@@ -997,7 +997,7 @@ class DebugLogTest(FakeHswapCase):
         events = [self.event(i) for i in range(250)]
         for out in (json.dumps({"schemaVersion": 1, "events": events}), json.dumps(events), "\n".join(json.dumps(e) for e in events)):
             self.script({self.LOG: [out, 0]})
-            code, body = hswap_usage.hswap_log("1h")
+            code, body = hswap.hswap_log("1h")
             self.assertEqual(code, 200)
             self.assertEqual((len(body["events"]), body["truncated"], body["since"]), (200, True, "1h"))
             self.assertEqual(body["events"][-1]["details"], {"n": 249})
@@ -1007,7 +1007,7 @@ class DebugLogTest(FakeHswapCase):
                           details={"note": "token sk-ant-ort01-ZZZ in C:\\Users\\bob\\x.json and ~/.claude/x", "deep": [{"p": "/home/carol/.local/share/claude-swap/x"}]},
                           extra="dropped")
         self.script({self.LOG: [json.dumps({"schemaVersion": 1, "events": [leak]}), 0]})
-        code, body = hswap_usage.hswap_log("1h")
+        code, body = hswap.hswap_log("1h")
         text = json.dumps(body, ensure_ascii=False)
         self.assertEqual(code, 200)
         for bad in ("sk-ant", "ABCdef", "alice", "bob", "carol", "~/.claude", "dropped"):
@@ -1016,12 +1016,12 @@ class DebugLogTest(FakeHswapCase):
 
     def test_the_log_is_read_as_the_ui(self):
         self.caller_fake(json.dumps({"schemaVersion": 1, "events": []}))
-        self.assertEqual(hswap_usage.hswap_log("30m"), (200, {"since": "30m", "events": [], "truncated": False}))
+        self.assertEqual(hswap.hswap_log("30m"), (200, {"since": "30m", "events": [], "truncated": False}))
         self.assertEqual(self.calls(), ["jarvis-ui claude log --since 30m --json"])
 
     def test_a_failed_log_read_is_502(self):
         self.script({self.LOG: ["not json", 1]})
-        code, body = hswap_usage.hswap_log("1h")
+        code, body = hswap.hswap_log("1h")
         self.assertEqual(code, 502)
         self.assertIn("종료 코드 1", body["error"])
 
@@ -1040,7 +1040,7 @@ class RotationTest(FakeHswapCase):
 
     def setUp(self):
         super().setUp()
-        p = mock.patch.object(hswap_usage.claude_accounts, "_version", "0.2.9")
+        p = mock.patch.object(hswap.claude, "_version", "0.2.9")
         p.start()
         self.addCleanup(p.stop)
 
@@ -1050,25 +1050,25 @@ class RotationTest(FakeHswapCase):
         self.script({self.CONFIG: [json.dumps(cfg), 0], self.PRIORITY: [lines, 0], **extra})
 
     def test_reads_order_from_priorities_highest_first(self):
-        self.answers(hswap_usage.ROTATION, pri=(("1", 1), ("2", 0), ("3", 2)))
-        with mock.patch.object(hswap_usage.sys, "platform", "linux"):
-            code, body = hswap_usage.rotation()
+        self.answers(hswap.ROTATION, pri=(("1", 1), ("2", 0), ("3", 2)))
+        with mock.patch.object(hswap.sys, "platform", "linux"):
+            code, body = hswap.rotation()
         self.assertEqual(code, 200)
         self.assertEqual(body, {"on": True, "ordered": True, "order": ["3", "1"], "threshold": 90.0, "service": None})
 
     def test_linux_save_sets_priorities_threshold_and_strategy(self):
         self.answers(pri=(("1", 0), ("2", 5), ("3", 0)))
-        with mock.patch.object(hswap_usage.sys, "platform", "linux"):
-            code, _ = hswap_usage.set_rotation("1", "3,1", "85")
+        with mock.patch.object(hswap.sys, "platform", "linux"):
+            code, _ = hswap.set_rotation("1", "3,1", "85")
         self.assertEqual(code, 200)
         writes = [c for c in self.calls() if c not in (self.CONFIG, self.PRIORITY)]
         self.assertEqual(writes, ["claude priority 2 --unset", "claude priority 3 2", "claude priority 1 1",
                                   "claude config set autoswitch.threshold 85", "claude config set autoswitch.strategy priority-consume-first"])
 
     def test_turning_off_keeps_order_and_unsets_strategy(self):
-        self.answers(hswap_usage.ROTATION, pri=(("1", 1), ("2", 0), ("3", 0)))
-        with mock.patch.object(hswap_usage.sys, "platform", "linux"):
-            hswap_usage.set_rotation("0", "1", "90")
+        self.answers(hswap.ROTATION, pri=(("1", 1), ("2", 0), ("3", 0)))
+        with mock.patch.object(hswap.sys, "platform", "linux"):
+            hswap.set_rotation("0", "1", "90")
         self.assertIn("claude config unset autoswitch.strategy", self.calls())
         self.assertNotIn("claude priority 1 --unset", self.calls())
 
@@ -1076,17 +1076,17 @@ class RotationTest(FakeHswapCase):
         st = json.dumps({"schemaVersion": 1, "platform": "launchd", "installed": True, "managed": True, "loaded": True, "ahead": 3600, "thenAuto": False})
         again = "claude keepalive --install-service --ahead 3600 --then-auto --json"
         self.answers(**{self.STATUS: [st, 0], again: ['{"schemaVersion": 1}', 0]})
-        with mock.patch.object(hswap_usage.sys, "platform", "darwin"):
-            code, _ = hswap_usage.set_rotation("1", "2", "90")
+        with mock.patch.object(hswap.sys, "platform", "darwin"):
+            code, _ = hswap.set_rotation("1", "2", "90")
         self.assertEqual(code, 200)
         self.assertIn(again, self.calls())
 
     def test_macos_rotation_does_not_carry_a_too_short_ahead(self):
         st = json.dumps({"schemaVersion": 1, "platform": "launchd", "installed": True, "managed": True, "loaded": True, "ahead": 300, "thenAuto": False})
-        again = f"claude keepalive --install-service --ahead {hswap_usage.AHEAD_S} --then-auto --json"
+        again = f"claude keepalive --install-service --ahead {hswap.AHEAD_S} --then-auto --json"
         self.answers(**{self.STATUS: [st, 0], again: ['{"schemaVersion": 1}', 0]})
-        with mock.patch.object(hswap_usage.sys, "platform", "darwin"), mock.patch.object(hswap_usage.claude_accounts, "doctor", None):
-            code, _ = hswap_usage.set_rotation("1", "2", "90")
+        with mock.patch.object(hswap.sys, "platform", "darwin"), mock.patch.object(hswap.claude, "doctor", None):
+            code, _ = hswap.set_rotation("1", "2", "90")
         self.assertEqual(code, 200)
         self.assertIn(again, self.calls())
 
@@ -1095,37 +1095,37 @@ class RotationTest(FakeHswapCase):
         again = "claude keepalive --install-service --ahead 3600 --then-auto --json"
         busy = json.dumps({"schemaVersion": 1, "error": {"type": "service_busy", "message": "m"}})
         self.answers(**{self.STATUS: [st, 0], again: [busy, 1]})
-        with mock.patch.object(hswap_usage.sys, "platform", "darwin"), mock.patch.object(hswap_usage.claude_accounts, "doctor", None):
-            code, body = hswap_usage.set_rotation("1", "2", "90")
-        self.assertEqual((code, body["error"]), (409, hswap_usage.claude_accounts.HSWAP_ERRORS["service_busy"]))
+        with mock.patch.object(hswap.sys, "platform", "darwin"), mock.patch.object(hswap.claude, "doctor", None):
+            code, body = hswap.set_rotation("1", "2", "90")
+        self.assertEqual((code, body["error"]), (409, hswap.claude.HSWAP_ERRORS["service_busy"]))
 
     def test_macos_human_made_service_is_not_changed(self):
         st = json.dumps({"schemaVersion": 1, "platform": "launchd", "installed": True, "managed": False, "loaded": True})
         self.answers(**{self.STATUS: [st, 0]})
-        with mock.patch.object(hswap_usage.sys, "platform", "darwin"):
-            code, body = hswap_usage.set_rotation("1", "2", "90")
+        with mock.patch.object(hswap.sys, "platform", "darwin"):
+            code, body = hswap.set_rotation("1", "2", "90")
         self.assertEqual(code, 409, body)
         self.assertFalse([c for c in self.calls() if "set" in c or "--install-service" in c or c.startswith("claude priority ")])
 
     def test_bad_input_and_old_hswap_do_not_write(self):
         self.answers()
         for args in (("2", "1", "90"), ("1", "1,1", "90"), ("1", "a", "90"), ("1", "1", "49"), ("1", "1", "100"), ("1", "1", "x"), ("1", "", "90")):
-            self.assertEqual(hswap_usage.set_rotation(*args)[0], 400, args)
-        with mock.patch.object(hswap_usage.claude_accounts, "_version", "0.2.8"):
-            self.assertEqual(hswap_usage.set_rotation("1", "1", "90")[0], 409)  # 404 면 core 가 jarvis 갱신 필요로 보인다
+            self.assertEqual(hswap.set_rotation(*args)[0], 400, args)
+        with mock.patch.object(hswap.claude, "_version", "0.2.8"):
+            self.assertEqual(hswap.set_rotation("1", "1", "90")[0], 409)  # 404 면 core 가 jarvis 갱신 필요로 보인다
         self.assertEqual(self.calls(), [])
 
     def test_macos_unknown_service_state_is_not_guessed(self):
         self.answers()  # --service-status 가 빈 출력이다
-        with mock.patch.object(hswap_usage.sys, "platform", "darwin"):
-            self.assertEqual(hswap_usage.rotation()[0], 502)
-            self.assertEqual(hswap_usage.set_rotation("0", "1", "90")[0], 502)
+        with mock.patch.object(hswap.sys, "platform", "darwin"):
+            self.assertEqual(hswap.rotation()[0], 502)
+            self.assertEqual(hswap.set_rotation("0", "1", "90")[0], 502)
         self.assertFalse([c for c in self.calls() if " set " in c or "--unset" in c or "--install-service" in c])
 
     def test_failed_step_stops_and_names_it(self):
         self.answers(**{"claude priority 1 1": ["", 1]})
-        with mock.patch.object(hswap_usage.sys, "platform", "linux"):
-            code, body = hswap_usage.set_rotation("1", "1", "90")
+        with mock.patch.object(hswap.sys, "platform", "linux"):
+            code, body = hswap.set_rotation("1", "1", "90")
         self.assertEqual(code, 409)
         self.assertIn("우선순위 지정", body["error"])
         self.assertFalse([c for c in self.calls() if c.startswith("claude config set")])

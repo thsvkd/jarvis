@@ -10,9 +10,9 @@ import re
 import time
 import urllib.request
 
-from . import antigravity_usage
-from .usage_common import UNNAMED, account, email, fetch_json, private_json, valid_token
-from .util import parse_iso
+from . import antigravity
+from .common import UNNAMED, account, email, fetch_json, private_json, valid_token
+from ..util import parse_iso
 
 
 def _http(token, project):
@@ -50,7 +50,7 @@ def read():
         if not buckets:
             return unavailable
         try:
-            info = antigravity_usage._http("https://openidconnect.googleapis.com/v1/userinfo", token)
+            info = antigravity._http("https://openidconnect.googleapis.com/v1/userinfo", token)
             label = email(info) if isinstance(info, dict) and info.get("email_verified") is True else UNNAMED
         except (OSError, ValueError, TypeError):
             label = UNNAMED

@@ -16,7 +16,8 @@ if sys.argv[1:] == ["bridge"]:  # core 의 SSH bridge(jarvis/ipc.py): 표준 출
     from .ipc import bridge
     sys.exit(bridge())
 
-from . import config, hswap_usage, logrotate, relocate, self_update, tray  # noqa: E402
+from . import config, logrotate, relocate, self_update, tray  # noqa: E402
+from .usage import hswap  # noqa: E402
 from .util import hide_child_consoles  # noqa: E402
 from .collector import Collector  # noqa: E402
 from .core import Core, devices_from  # noqa: E402
@@ -94,7 +95,7 @@ def main():
     logrotate.start()
     col = Collector()
     col.start()
-    threading.Thread(target=hswap_usage.maintain, name="jarvis-hswap", daemon=True).start()
+    threading.Thread(target=hswap.maintain, name="jarvis-hswap", daemon=True).start()
     devices = devices_from(config.DEVICES)
     core = Core(devices) if devices else None
     if core:

@@ -16,7 +16,7 @@ import re
 import sys
 import time
 
-# jarvis/hswap_usage.py 의 NO_CREDIT_USAGE·INACTIVE_CONSOLE·PATH_RE 와 같아야 한다(tests/test_hswap_fixtures.py 가 맞춰 본다)
+# jarvis/usage/hswap.py 의 NO_CREDIT_USAGE·INACTIVE_CONSOLE·PATH_RE 와 같아야 한다(tests/test_hswap_fixtures.py 가 맞춰 본다)
 NO_CREDIT_USAGE = "Grok reported no included-credit usage"
 INACTIVE_CONSOLE = "measured only while it is the active OpenCode Console account"
 PATH_RE = re.compile(r"(?:[A-Za-z]:\\|~[/\\]|/)(?:[^\s/\\\"']+[/\\])+[^\s/\\\"']*")

@@ -1,6 +1,6 @@
 """Claude 계정의 모든 규칙을 한 곳에 둔다: 신선도, 만료 경고, 상태 문구, 사용 중 판정, 창·Fable·버킷 이름, 기기 로그인 상태.
 
-바깥 인터페이스는 read(force)와 switch(slot)·remove(slot)이다. 사용량 경로(independent_usage)가 read 를 거친다.
+바깥 인터페이스는 read(force)와 switch(slot)·remove(slot)이다. 사용량 경로(independent)가 read 를 거친다.
 저장값이 지금 로그인에 아직 맞는지는 판정 함수(_judge_shape, _judge_ask, _judge_rows, _judge_login)가 값만 받아 정한다. 새 신선도·유효성 규칙은 그 함수와 표 테스트만 고친다.
 파일과 프로세스를 읽는 순서는 _read 가, 기억(_state)을 고치는 것은 live·switch·login 이 맡는다.
 안에 어댑터가 둘 있다.
@@ -26,8 +26,9 @@ import sys
 import threading
 import time
 
-from . import config, macos_daemon, usage_common
-from .util import Installer, org, parse_iso, run, scrub_home, which_local, which_tool
+from .. import config, macos_daemon
+from . import common
+from ..util import Installer, org, parse_iso, run, scrub_home, which_local, which_tool
 
 CONFIG_MAX = 32 << 20  # Claude Code 전역 설정은 프로젝트 기록이 쌓여 수 MB 까지 큰다
 KNOWN_BUCKETS = {"opus", "sonnet", "haiku"}  # 첫 단어가 이것인 이름만 그대로 내보낸다. 나머지는 번호로 적는다
@@ -65,7 +66,7 @@ STATUS = {
     "no_credentials": ("자격 증명이 없습니다.", True),
     "no_saved_usage": ("저장된 사용량이 없습니다.", False),  # 저장소 캐시 어댑터만 쓴다
 }
-# usageStatus → failure 코드(USAGE-17, provider_usage.FAILURES). unavailable 은 usageError 가 USAGE_ERRORS 로 정하고, 표에 없는 상태는 unknown 이다
+# usageStatus → failure 코드(USAGE-17, caam.FAILURES). unavailable 은 usageError 가 USAGE_ERRORS 로 정하고, 표에 없는 상태는 unknown 이다
 CODES = {"ok": None, "api_key": None, "token_expired": "wait", "no_saved_usage": "wait", "relogin_required": "auth",
          "keychain_unavailable": "keychain", "keychain_item_present": "keychain", "config_conflict": "perm", "foreign_credential": "perm",
          "no_credentials": "auth", "unavailable": "unknown"}
@@ -97,16 +98,16 @@ class _State:
 
 _state = _State()
 # 자동 설치·올리기: 검증한 버전으로 고정한다(서비스가 최신판을 저절로 받아 실행하지 않게). PyPI 배포본이 그 태그의 소스와 같은지
-# 대조한 뒤 여기 버전을 올려 릴리스하면, 게이트웨이(hswap_usage.maintain)가 이보다 낮은 hswap 을 이 버전으로 올린다
+# 대조한 뒤 여기 버전을 올려 릴리스하면, 게이트웨이(hswap.maintain)가 이보다 낮은 hswap 을 이 버전으로 올린다
 # ponytail: 버전만 고정한다. 같은 버전에 나중에 더해진 배포 파일은 대조 없이 받을 수 있다. 막으려면 파일 해시로 고정한다
 VERSION = "0.4.1"  # 태그 v0.4.1 = 4e73b08 (PyPI wheel 의 파일 93개를 태그 소스와 대조함, 2026-11-17)
 PACKAGE = f"harness-swap=={VERSION}"
 INSTALL_TIMEOUT_S = 600  # 처음이면 uv 가 Python 3.12+ 까지 받는다
 CLIS = ("claude", "codex", "grok", "opencode")  # hswap 이 다루는 하네스. 하나라도 있으면 hswap 을 설치한다
 _version = None  # 마지막으로 확인한 설치 버전("0.2.7"). 화면의 기기 행에 보인다
-service = None  # macOS: hswap claude keepalive --service-status 의 마지막 답(hswap_usage.schedule 이 쓴다). 모르면 None
-service_note = None  # 그 답의 화면 안내(hswap_usage.schedule 이 쓴다). 없으면 None
-doctor = None  # macOS: hswap claude doctor 의 요약(macos_daemon.summary, hswap_usage.inspect 가 쓴다). 모르면 None
+service = None  # macOS: hswap claude keepalive --service-status 의 마지막 답(hswap.schedule 이 쓴다). 모르면 None
+service_note = None  # 그 답의 화면 안내(hswap.schedule 이 쓴다). 없으면 None
+doctor = None  # macOS: hswap claude doctor 의 요약(macos_daemon.summary, hswap.inspect 가 쓴다). 모르면 None
 _aqua = None  # macOS: 로그인 세션(Aqua) 안에서 도는가. 한 번 답을 받으면 다시 묻지 않는다
 _aqua_failed = None  # 마지막으로 묻지 못한 때(monotonic). AQUA_RETRY_S 동안은 다시 묻지 않는다
 AQUA_RETRY_S = 60
@@ -137,7 +138,7 @@ def in_session():
 
 
 def tick_reason():
-    """게이트웨이 tick(hswap_usage.tick)이 keepalive·auto 를 건너뛰는 이유 코드. 부르면 None. 화면의 keepalive 표시도 같은 판정을 쓴다.
+    """게이트웨이 tick(hswap.tick)이 keepalive·auto 를 건너뛰는 이유 코드. 부르면 None. 화면의 keepalive 표시도 같은 판정을 쓴다.
     macOS 밖은 늘 부른다. macOS 는 doctor 를 아는 hswap(DOCTOR_FROM)이 파일 저장 방식이라 답하고 적재된 keepalive 예약(gui·system)이 없으며
     로그인 세션 밖일 때만이다(세션 안에서는 hswap 예약이 돌고, 키체인 저장 방식은 세션 밖에서 읽지 못한다). launchctl 을 묻는 세션 확인은 맨 뒤다.
     버전을 한 번도 읽지 못했으면 doctor 대신 설정(credentials.store)으로 판단한다: 파일이면 1.15.0 전처럼 돌고, 아니면 version_unknown."""
@@ -564,9 +565,9 @@ def _store_read():
     """저장소 캐시 어댑터. 명령 실행과 토큰 갱신은 하지 않는다. 계정이 없거나 읽지 못하면 None."""
     root = _root()
     try:
-        roster = usage_common.private_json(os.path.join(root, "sequence.json"))
+        roster = common.private_json(os.path.join(root, "sequence.json"))
         try:
-            cache = usage_common.private_json(os.path.join(root, "cache", "usage.json"))
+            cache = common.private_json(os.path.join(root, "cache", "usage.json"))
         except (OSError, ValueError):
             cache = {}
         accounts = roster.get("accounts", {}) if isinstance(roster, dict) else {}
@@ -595,7 +596,7 @@ def _store_read():
             dead = isinstance(strikes, int) and strikes >= 1
             name = ident.get("organizationName")
             # 저장소 값도 hswap 한 줄 모양으로 바꿔 account() 의 규칙을 그대로 태운다. 조직 UUID·별칭은 넘기지 않는다
-            a = account({"number": number, "email": usage_common.email(ident), "organizationName": name if isinstance(name, str) else None,
+            a = account({"number": number, "email": common.email(ident), "organizationName": name if isinstance(name, str) else None,
                          # 사용 중: 실제 로그인과 이메일·조직 UUID 가 같은 슬롯(엔진의 _find_account_slot 과 같은 비교)
                          "active": identity is not None and _identity(*identity) == who,
                          "usageStatus": "relogin_required" if dead else "ok" if any(_windows(usage)) else "no_saved_usage",
@@ -615,7 +616,7 @@ def _store_read():
 def _keepalive():
     """hswap claude keepalive 가 남긴 저장소의 cache/keepalive.json(토큰 없음). 없거나 안전하지 않거나 모르는 형식이면 None."""
     try:
-        body = usage_common.private_json(os.path.join(_root(), "cache", "keepalive.json"))
+        body = common.private_json(os.path.join(_root(), "cache", "keepalive.json"))
     except (OSError, ValueError, RecursionError):
         return None
     return body if isinstance(body, dict) and body.get("schemaVersion") == 1 else None
@@ -826,7 +827,7 @@ def read(force=False):
     force 이거나, hswap 에 물은 지 신선도 기준이 지났거나, 보일 실값 중 기준보다 오래된 것이 있으면 hswap list 를 실행한다
     (저장소에는 로그인 기한·상태가 없어 만료 경고는 실값에서만 나온다. 예약 실행이 저장소를 늘 새로 써도 경고가 사라지지 않게 한다).
     그 사이에는 마지막 실값을 그대로 준다. 오래된 저장소 값은 실값이 없을 때만 보이므로 따로 보지 않는다. hswap 이 없거나 실패하면 저장소 값을 대체값으로 쓰고 이유를 붙인다.
-    읽기는 설치하지 않는다(USAGE-3). hswap 설치는 hswap_usage.maintain() 이 맡는다.
+    읽기는 설치하지 않는다(USAGE-3). hswap 설치는 hswap.maintain() 이 맡는다.
     읽는 사이 switch() 가 끝나거나 저장소 모습이 바뀌면 옛 값을 내지 않고 다시 읽는다(진행 중인 이 읽기를 함께 기다리는 쪽도 옛 값을 받지 않는다).
     재시도는 2번까지이고 전체 시한은 READ_BUDGET_S 다. 그 안에 확정하지 못하면 CLI 값 대신 지금 저장소 값과 로그인 상태를 준다."""
     deadline = time.monotonic() + READ_BUDGET_S

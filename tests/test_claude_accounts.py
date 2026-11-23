@@ -10,10 +10,11 @@ import unittest
 import urllib.request
 from unittest import mock
 
-from jarvis import claude_accounts, independent_usage, util
+from jarvis import util
+from jarvis.usage import claude, independent
 
 _GUARDS = []
-LIVE_IDENTITY = claude_accounts._live_identity  # StoreCase 가 가짜로 바꾸기 전의 실제 함수
+LIVE_IDENTITY = claude._live_identity  # StoreCase 가 가짜로 바꾸기 전의 실제 함수
 
 
 def setUpModule():
@@ -49,9 +50,9 @@ class StoreCase(unittest.TestCase):
         self.root = tmp.name
         os.mkdir(os.path.join(self.root, "cache"), 0o700)
         for name, kw in (("_root", {"return_value": self.root}), ("_live_identity", {"return_value": ("a@example.com", "o1")}),
-                         ("binary", {"return_value": None}), ("_state", {"new": claude_accounts._State()}),
+                         ("binary", {"return_value": None}), ("_state", {"new": claude._State()}),
                          ("ensure", {"side_effect": AssertionError("독립 경로는 설치하지 않는다")})):
-            p = mock.patch.object(claude_accounts, name, **kw)
+            p = mock.patch.object(claude, name, **kw)
             setattr(self, name.strip("_"), p.start())
             self.addCleanup(p.stop)
         self.root = tmp.name  # 위의 _root 패치가 같은 이름의 속성을 덮었다
@@ -73,21 +74,21 @@ class StoreCase(unittest.TestCase):
     def hswap(self, *rows, **top):
         """가짜 hswap: 프로세스를 띄우지 않고 _json 응답만 준다."""
         self.binary.return_value = "/fake/hswap"
-        p = mock.patch.object(claude_accounts, "_json", return_value={"accounts": list(rows), **top})
+        p = mock.patch.object(claude, "_json", return_value={"accounts": list(rows), **top})
         self.addCleanup(p.stop)
         return p.start()
 
     def independent_mocks(self):
         """사용량 경로의 Claude 밖 수집기를 비운다."""
         empty = {"status": "unavailable", "accounts": []}
-        patches = [mock.patch.object(independent_usage.hswap_usage, "_start", return_value=None),  # 가짜 hswap 은 Claude 응답만 준다
-                   mock.patch.object(independent_usage, "_caam", side_effect=RuntimeError("없음")),
-                   mock.patch.object(independent_usage, "_opencode", return_value=empty),
-                   mock.patch.object(independent_usage.codex_native_usage, "read", return_value=[]),
-                   *[mock.patch.object(m, "read", return_value=empty) for m in (independent_usage.antigravity_usage, independent_usage.kimi_usage,
-                                                                               independent_usage.zcode_usage, independent_usage.gemini_usage, independent_usage.minimax_usage)],
-                   mock.patch.object(independent_usage.cli_login, "available", return_value=[]),
-                   mock.patch.object(independent_usage.cli_login, "fresh", return_value=[])]
+        patches = [mock.patch.object(independent.hswap, "_start", return_value=None),  # 가짜 hswap 은 Claude 응답만 준다
+                   mock.patch.object(independent, "_caam", side_effect=RuntimeError("없음")),
+                   mock.patch.object(independent, "_opencode", return_value=empty),
+                   mock.patch.object(independent.codex, "read", return_value=[]),
+                   *[mock.patch.object(m, "read", return_value=empty) for m in (independent.antigravity, independent.kimi,
+                                                                               independent.zcode, independent.gemini, independent.minimax)],
+                   mock.patch.object(independent.login, "available", return_value=[]),
+                   mock.patch.object(independent.login, "fresh", return_value=[])]
 
         class Together:
             def __enter__(self):
@@ -100,11 +101,11 @@ class StoreCase(unittest.TestCase):
         return Together()
 
     def full_body(self):
-        """화면이 부르는 전체 경로(independent_usage.read)의 응답."""
+        """화면이 부르는 전체 경로(independent.read)의 응답."""
         with self.independent_mocks():
-            independent_usage._tasks.clear()
-            self.addCleanup(independent_usage._tasks.clear)
-            return independent_usage.read(force=True)
+            independent._tasks.clear()
+            self.addCleanup(independent._tasks.clear)
+            return independent.read(force=True)
 
     def full_read(self):
         """전체 경로의 Claude 프로바이더."""
@@ -120,7 +121,7 @@ class FreshnessTest(StoreCase):
     def test_old_cache_without_hswap_says_why_and_how_old(self):
         """covers: USAGE-6"""
         self.store(time.time() - 9 * 3600)
-        a = claude_accounts.read()["accounts"][0]
+        a = claude.read()["accounts"][0]
         self.assertTrue(a["attention"])
         self.assertIn("9시간 전 값", a["note"])
         self.assertIn("hswap 이 없습니다", a["note"])
@@ -131,7 +132,7 @@ class FreshnessTest(StoreCase):
         """covers: USAGE-6"""
         self.store(time.time() - 9 * 3600)
         run = self.hswap(hswap_row())
-        a = claude_accounts.read()["accounts"][0]
+        a = claude.read()["accounts"][0]
         run.assert_called_once()
         self.assertEqual(run.call_args.args, ("/fake/hswap", "list"))
         self.assertEqual((a["source"], a["note"], a["attention"]), ("cswap", None, False))
@@ -140,7 +141,7 @@ class FreshnessTest(StoreCase):
         """covers: USAGE-6"""
         self.store(time.time() - 9 * 3600)
         self.hswap().side_effect = RuntimeError("hswap 이 15초 안에 답하지 않았습니다")
-        a = claude_accounts.read(force=True)["accounts"][0]
+        a = claude.read(force=True)["accounts"][0]
         self.assertEqual(a["source"], "cswap-cache")
         self.assertIn("15초 안에 답하지 않았습니다. 저장된 값을 보입니다.", a["note"])
         self.assertTrue(a["attention"])
@@ -149,8 +150,8 @@ class FreshnessTest(StoreCase):
         """covers: USAGE-6"""
         self.store(time.time() - 60)
         run = self.hswap(hswap_row())
-        claude_accounts.read()
-        claude_accounts.read(force=True)
+        claude.read()
+        claude.read(force=True)
         self.assertEqual(run.call_count, 2)
 
     def test_recent_real_values_are_reused_until_the_threshold(self):
@@ -159,10 +160,10 @@ class FreshnessTest(StoreCase):
         soon = iso(time.time() + 2 * 86400)
         run = self.hswap(hswap_row(loginExpiresAt=soon))
         for _ in range(3):
-            self.assertIn("로그인 만료", claude_accounts.read()["accounts"][0]["note"])
+            self.assertIn("로그인 만료", claude.read()["accounts"][0]["note"])
         self.assertEqual(run.call_count, 1)
-        claude_accounts._state.cache = (time.monotonic() - claude_accounts.config.CLAUDE_STALE_S - 1, *claude_accounts._state.cache[1:])
-        claude_accounts.read()
+        claude._state.cache = (time.monotonic() - claude.config.CLAUDE_STALE_S - 1, *claude._state.cache[1:])
+        claude.read()
         self.assertEqual(run.call_count, 2)
 
     def test_a_healthy_scheduled_device_gets_no_false_alarm(self):
@@ -170,47 +171,47 @@ class FreshnessTest(StoreCase):
         self.store(time.time() - 60)
         now = time.time()
         run = self.hswap(hswap_row(usageFetchedAt=iso(now - 590)))
-        with mock.patch.object(claude_accounts.time, "time", return_value=now):
-            claude_accounts.read()
+        with mock.patch.object(claude.time, "time", return_value=now):
+            claude.read()
         run.return_value = {"accounts": [hswap_row(usageFetchedAt=iso(now + 300))]}
-        held = claude_accounts._state.cache
-        claude_accounts._state.cache = (held[0] - 31, *held[1:])  # 30초 묶음이 지났다
-        with mock.patch.object(claude_accounts.time, "time", return_value=now + 320):
-            a = claude_accounts.read()["accounts"][0]
+        held = claude._state.cache
+        claude._state.cache = (held[0] - 31, *held[1:])  # 30초 묶음이 지났다
+        with mock.patch.object(claude.time, "time", return_value=now + 320):
+            a = claude.read()["accounts"][0]
         self.assertEqual(run.call_count, 2)
         self.assertEqual((a["note"], a["attention"]), (None, False))
 
     def test_threshold_is_configurable(self):
         """covers: USAGE-6"""
         self.store(time.time() - 3600)
-        self.assertTrue(claude_accounts.read()["accounts"][0]["attention"])
-        with mock.patch.object(claude_accounts.config, "CLAUDE_STALE_S", 7200):
-            self.assertFalse(claude_accounts.read()["accounts"][0]["attention"])
+        self.assertTrue(claude.read()["accounts"][0]["attention"])
+        with mock.patch.object(claude.config, "CLAUDE_STALE_S", 7200):
+            self.assertFalse(claude.read()["accounts"][0]["attention"])
 
     def test_old_real_values_are_flagged_without_touching_the_held_result(self):
         """covers: USAGE-6"""
         self.store(time.time() - 60)
         self.hswap(hswap_row(usageFetchedAt=iso(time.time() - 2 * 3600)))
-        self.assertIn("2시간 전 값", claude_accounts.read()["accounts"][0]["note"])
-        self.assertIsNone(claude_accounts._state.cache[1]["accounts"][0]["note"])
+        self.assertIn("2시간 전 값", claude.read()["accounts"][0]["note"])
+        self.assertIsNone(claude._state.cache[1]["accounts"][0]["note"])
 
     def test_no_store_and_no_force_does_not_run_hswap(self):
         """covers: USAGE-6"""
         run = self.hswap(hswap_row())
-        self.assertIsNone(claude_accounts.read())
+        self.assertIsNone(claude.read())
         run.assert_not_called()
-        self.assertEqual(claude_accounts.read(force=True)["accounts"][0]["label"], "a@example.com")
+        self.assertEqual(claude.read(force=True)["accounts"][0]["label"], "a@example.com")
 
     def test_no_store_and_hswap_error_is_an_error(self):
         """covers: USAGE-6. 대체값이 없으면 독립 경로의 unavailable 이 되도록 오류를 그대로 준다"""
         self.hswap().side_effect = RuntimeError("locked")
-        self.assertEqual(claude_accounts.read(force=True), {"error": "locked"})
+        self.assertEqual(claude.read(force=True), {"error": "locked"})
 
     def test_page_refresh_reaches_hswap_through_independent_read(self):
         """covers: USAGE-6"""
         self.store(time.time() - 9 * 3600)
-        with mock.patch.object(claude_accounts, "live", return_value=None) as live:
-            self.assertEqual(independent_usage._claude(True)["accounts"][0]["source"], "cswap-cache")
+        with mock.patch.object(claude, "live", return_value=None) as live:
+            self.assertEqual(independent._claude(True)["accounts"][0]["source"], "cswap-cache")
         live.assert_called_once()
         self.assertEqual(live.call_args.args, (True,))
 
@@ -221,8 +222,8 @@ class SameRulesTest(StoreCase):
     def test_window_and_bucket_names(self):
         """covers: USAGE-6"""
         self.store(time.time() - 60)
-        cached = claude_accounts._store_read()["accounts"][0]
-        real = claude_accounts.account(hswap_row(usage={"scoped": [{"name": "fable", "pct": 3}, {"name": "Opus", "pct": 4}, {"name": "private-name", "pct": 5}]}))
+        cached = claude._store_read()["accounts"][0]
+        real = claude.account(hswap_row(usage={"scoped": [{"name": "fable", "pct": 3}, {"name": "Opus", "pct": 4}, {"name": "private-name", "pct": 5}]}))
         for a in (cached, real):
             self.assertIn("fable", [w["key"] for w in a["windows"]])
             self.assertEqual([b["name"] for b in a["buckets"]], ["Opus", "모델별 한도 2"])
@@ -233,14 +234,14 @@ class SameRulesTest(StoreCase):
         self.write("sequence.json", {"sequence": [1, 2], "accounts": {
             "1": {"email": "a@example.com", "organizationUuid": " O1 ", "organizationName": "케이골프", "added": "2026-11-05T09:34:05Z"},
             "2": {"email": "b@example.com", "organizationUuid": "", "organizationName": "b@example.com's Organization", "added": "2026-11-05T09:34:05Z"}}})
-        at = claude_accounts.parse_iso("2026-11-05T09:34:05Z")
-        key = claude_accounts._store_read()["orgs"]["1"]["org_key"]
-        stored = claude_accounts.read()["accounts"]
+        at = claude.parse_iso("2026-11-05T09:34:05Z")
+        key = claude._store_read()["orgs"]["1"]["org_key"]
+        stored = claude.read()["accounts"]
         self.assertEqual((stored[0]["org_key"], stored[0]["org_at"]), (key, at))
         self.assertNotIn("org_key", stored[1])
-        claude_accounts._state.cache = None
+        claude._state.cache = None
         self.hswap(hswap_row(organizationUuid="o1", organizationName="K-Golf"))
-        live = claude_accounts.read(force=True)["accounts"][0]
+        live = claude.read(force=True)["accounts"][0]
         self.assertEqual((live["org"], live["org_key"], live["org_at"]), ("케이골프", key, at))  # 이름과 시각은 같은 저장소 읽기의 값이다
         self.assertNotIn("o1", [v for a in (*stored, live) for v in a.values()])
 
@@ -249,24 +250,24 @@ class SameRulesTest(StoreCase):
         seq = lambda name, added: {"sequence": [1], "accounts": {"1": {"email": "a@example.com", "organizationUuid": "o1", "organizationName": name, "added": added}}}
         self.write("sequence.json", seq("케이골프", "2026-11-02T00:00:00Z"))
         call = self.hswap(hswap_row(organizationName="케이골프"))
-        self.assertEqual(claude_accounts.read()["accounts"][0]["org"], "케이골프")
+        self.assertEqual(claude.read()["accounts"][0]["org"], "케이골프")
         self.write("sequence.json", seq("K-Golf", "2026-11-05T00:00:00Z"))
-        row = claude_accounts.read()["accounts"][0]
+        row = claude.read()["accounts"][0]
         self.assertEqual(call.call_count, 1)  # hswap 에 다시 묻지 않고 묶음을 그대로 썼다
-        self.assertEqual((row["org"], row["org_at"]), ("K-Golf", claude_accounts.parse_iso("2026-11-05T00:00:00Z")))
+        self.assertEqual((row["org"], row["org_at"]), ("K-Golf", claude.parse_iso("2026-11-05T00:00:00Z")))
 
     def test_org_key_only_goes_on_a_row_whose_slot_is_the_same_account(self):
         """covers: USAGE-1. 슬롯 번호만 같은 다른 계정의 행은 저장소의 조직 키와 이름을 받지 않는다"""
         self.store(time.time() - 60)
         self.hswap(hswap_row(organizationUuid="other", organizationName="Other"))
-        row = claude_accounts.read(force=True)["accounts"][0]
+        row = claude.read(force=True)["accounts"][0]
         self.assertEqual(row["org"], "Other")
         self.assertNotIn("org_key", row)
 
     def test_default_named_org_still_sends_its_key(self):
         """covers: USAGE-1. 이름이 기본값이라 화면에 안 보이는 조직도 개명한 기기와 묶이도록 키를 준다"""
         self.write("sequence.json", {"sequence": [1], "accounts": {"1": {"email": "a@example.com", "organizationUuid": "o1", "organizationName": "a@example.com's Organization"}}})
-        row = claude_accounts.read()["accounts"][0]
+        row = claude.read()["accounts"][0]
         self.assertIsNone(row["org"])
         self.assertIn("org_key", row)
 
@@ -275,9 +276,9 @@ class SameRulesTest(StoreCase):
         for empty in ({"organizationName": ""}, {"organizationName": None}, {}):
             with self.subTest(empty):
                 self.write("sequence.json", {"sequence": [1], "accounts": {"1": {"email": "a@example.com", "organizationUuid": "o1", **empty}}})
-                claude_accounts._state.cache = None
+                claude._state.cache = None
                 self.hswap(hswap_row(organizationName="Team"))
-                row = claude_accounts.read(force=True)["accounts"][0]
+                row = claude.read(force=True)["accounts"][0]
                 self.assertEqual(row["org"], "Team")
                 self.assertIn("org_key", row)
 
@@ -285,36 +286,36 @@ class SameRulesTest(StoreCase):
         """covers: USAGE-6. hswap 의 active 가 어긋나도 실제 로그인과 같은 슬롯이 사용 중이다. 로그인을 읽지 못하면 hswap 값"""
         self.store(time.time() - 60)
         self.hswap(hswap_row(active=False))
-        self.assertTrue(claude_accounts.read()["accounts"][0]["active"])
+        self.assertTrue(claude.read()["accounts"][0]["active"])
         self.live_identity.return_value = None
-        claude_accounts._state.cache = None
+        claude._state.cache = None
         self.hswap(hswap_row(active=True))
-        self.assertTrue(claude_accounts.read()["accounts"][0]["active"])
+        self.assertTrue(claude.read()["accounts"][0]["active"])
 
     def test_personal_org_is_dropped_on_the_real_path_too(self):
         """covers: USAGE-6"""
         self.hswap(hswap_row(organizationName="a@example.com's Organization"))
-        self.assertIsNone(claude_accounts.read(force=True)["accounts"][0]["org"])
+        self.assertIsNone(claude.read(force=True)["accounts"][0]["org"])
 
     def test_active_is_the_same_on_the_full_path(self):
         """covers: USAGE-6"""
         self.store(time.time() - 60)
         self.hswap(hswap_row(active=False))
-        self.assertTrue(claude_accounts.read(force=True)["accounts"][0]["active"])
-        claude_accounts._state.cache = None
+        self.assertTrue(claude.read(force=True)["accounts"][0]["active"])
+        claude._state.cache = None
         self.assertTrue(self.full_read()["accounts"][0]["active"])
 
     def test_bucket_name_with_a_version_keeps_its_name(self):
         """covers: USAGE-6"""
-        a = claude_accounts.account(hswap_row(usage={"scoped": [{"name": "Sonnet 4.6", "pct": 1}, {"name": "sonnetish", "pct": 2}]}))
+        a = claude.account(hswap_row(usage={"scoped": [{"name": "Sonnet 4.6", "pct": 1}, {"name": "sonnetish", "pct": 2}]}))
         self.assertEqual([b["name"] for b in a["buckets"]], ["Sonnet 4.6", "모델별 한도 2"])
 
     def test_same_old_value_gets_the_same_flag_on_the_full_path(self):
         """covers: USAGE-6"""
         self.store(time.time() - 60)
         self.hswap(hswap_row(usageFetchedAt=iso(time.time() - 2 * 3600)))
-        mine = claude_accounts.read(force=True)["accounts"][0]
-        claude_accounts._state.cache = None
+        mine = claude.read(force=True)["accounts"][0]
+        claude._state.cache = None
         theirs = self.full_read()["accounts"][0]
         self.assertTrue(mine["attention"])
         self.assertIn("2시간 전 값", mine["note"])
@@ -328,9 +329,9 @@ class SameRulesTest(StoreCase):
                     hswap_row(usageStatus="keychain_unavailable", usage=None, lastGoodUsage={"sevenDay": {"pct": 1}}, lastGoodFetchedAt=iso(time.time() - 60)),
                     hswap_row(usageStatus="foreign_credential", usage=None, lastGoodUsage={"sevenDay": {"pct": 1}}, lastGoodFetchedAt=iso(time.time() - 60))):
             self.hswap(row)
-            claude_accounts._state.cache = None
-            mine = claude_accounts.read(force=True)["accounts"][0]
-            claude_accounts._state.cache = None
+            claude._state.cache = None
+            mine = claude.read(force=True)["accounts"][0]
+            claude._state.cache = None
             theirs = self.full_read()["accounts"][0]
             self.assertTrue(mine["note"])
             self.assertEqual((mine["note"], mine["attention"]), (theirs["note"], theirs["attention"]))
@@ -339,8 +340,8 @@ class SameRulesTest(StoreCase):
         """covers: USAGE-7"""
         self.keepalive(ok=False, error={"type": "refresh_failed", "message": "network"})
         self.hswap(hswap_row())
-        self.assertEqual(claude_accounts.read(force=True)["login"]["state"], "failed")
-        claude_accounts._state.cache = None
+        self.assertEqual(claude.read(force=True)["login"]["state"], "failed")
+        claude._state.cache = None
         self.assertEqual(self.full_read()["login"]["state"], "failed")
 
 
@@ -348,7 +349,7 @@ class LoginStateTest(StoreCase):
     def test_ok(self):
         """covers: USAGE-7"""
         self.keepalive()
-        s = claude_accounts.login([{"active": True, "slot": "1"}])
+        s = claude.login([{"active": True, "slot": "1"}])
         self.assertEqual((s["state"], s["attention"], s["slot"]), ("ok", False, "1"))
         self.assertEqual(s["text"], "로그인됨, 자동 갱신 5분 전")
         self.assertEqual(s["note"], "접근 토큰 3시간 뒤 만료(자동 갱신)")
@@ -356,49 +357,49 @@ class LoginStateTest(StoreCase):
     def test_expiring(self):
         """covers: USAGE-7"""
         self.keepalive(loginExpiresAt=iso(time.time() + 2 * 86400 + 30))
-        s = claude_accounts.login()
+        s = claude.login()
         self.assertEqual((s["state"], s["attention"], s["text"]), ("expiring", True, "로그인 만료 임박(2일)"))
 
     def test_relogin_from_keepalive_and_from_the_active_row(self):
         """covers: USAGE-7"""
         self.keepalive(ok=False, error={"type": "relogin_required", "message": "m"})
-        self.assertEqual(claude_accounts.login()["state"], "relogin")
+        self.assertEqual(claude.login()["state"], "relogin")
         os.remove(os.path.join(self.root, "cache", "keepalive.json"))
         # 저장소의 authDeadStrikes 는 사용 중 계정일 때만 기기 상태가 된다
         self.store(time.time() - 60, authDeadStrikes=1)
-        rows = claude_accounts._store_read()["accounts"]
-        self.assertEqual(claude_accounts.login(rows)["state"], "relogin")
+        rows = claude._store_read()["accounts"]
+        self.assertEqual(claude.login(rows)["state"], "relogin")
         self.live_identity.return_value = ("other@example.com", "")
-        self.assertIsNone(claude_accounts.login(claude_accounts._store_read()["accounts"]))
+        self.assertIsNone(claude.login(claude._store_read()["accounts"]))
 
     def test_keychain_from_keepalive_and_from_hswap(self):
         """covers: USAGE-7"""
         self.keepalive(ok=False, error={"type": "keychain_unavailable", "message": "m"})
-        self.assertEqual(claude_accounts.login()["state"], "keychain")
+        self.assertEqual(claude.login()["state"], "keychain")
         os.remove(os.path.join(self.root, "cache", "keepalive.json"))
         self.hswap(hswap_row(), keychainUnavailable=True)
-        s = claude_accounts.read(force=True)["login"]
+        s = claude.read(force=True)["login"]
         self.assertEqual((s["state"], s["attention"]), ("keychain", True))
         self.assertIn("키체인에 접근할 수 없는 곳에서 실행됨", s["text"])
-        self.assertEqual(claude_accounts.read()["login"]["state"], "keychain")  # 보통 읽기에서도 남는다
+        self.assertEqual(claude.read()["login"]["state"], "keychain")  # 보통 읽기에서도 남는다
 
     def test_keychain_field_is_ignored_when_absent(self):
         """covers: USAGE-7"""
         self.hswap(hswap_row())
-        out = claude_accounts.read(force=True)
+        out = claude.read(force=True)
         self.assertNotIn("login", out)
-        self.assertNotIn("login", claude_accounts.read())
+        self.assertNotIn("login", claude.read())
 
     def test_stalled(self):
         """covers: USAGE-7"""
         self.keepalive(checkedAt=time.time() - 2 * 3600, accessExpiresAt=time.time() + 5 * 3600)
-        s = claude_accounts.login()
+        s = claude.login()
         self.assertEqual((s["state"], s["attention"], s["text"]), ("stalled", True, "자동 갱신 멈춤(마지막 2시간 전)"))
         self.assertIsNone(s["note"])  # 갱신이 멈췄는데 "(자동 갱신)"을 약속하지 않는다
-        with mock.patch.object(claude_accounts.config, "CLAUDE_KEEPALIVE_STALE_S", 3 * 3600):
-            self.assertEqual(claude_accounts.login()["state"], "ok")
+        with mock.patch.object(claude.config, "CLAUDE_KEEPALIVE_STALE_S", 3 * 3600):
+            self.assertEqual(claude.login()["state"], "ok")
         self.keepalive(checkedAt="soon")
-        self.assertEqual(claude_accounts.login()["state"], "stalled")
+        self.assertEqual(claude.login()["state"], "stalled")
 
     def test_failed_shows_only_the_fixed_text_for_the_type(self):
         """covers: USAGE-7. 파일의 자유 문구는 내보내지 않고, 허용 목록의 type 만 고정 문구로 바꾼다. 나머지는 알 수 없는 오류다"""
@@ -406,21 +407,21 @@ class LoginStateTest(StoreCase):
                            ("locked", "다른 프로세스가 잠금을 쥐고 있음"), ("unmanaged", "저장 슬롯에 없는 로그인"),
                            ("something_new", "알 수 없는 오류"), (["list"], "알 수 없는 오류"), (None, "알 수 없는 오류")):
             self.keepalive(ok=False, error={"type": kind, "message": "x" * 500})
-            s = claude_accounts.login()
+            s = claude.login()
             self.assertEqual((s["state"], s["attention"], s["text"]), ("failed", True, f"자동 갱신 실패({want})"), kind)
         self.keepalive(ok=False, error=None)
-        self.assertEqual(claude_accounts.login()["text"], "자동 갱신 실패(알 수 없는 오류)")
+        self.assertEqual(claude.login()["text"], "자동 갱신 실패(알 수 없는 오류)")
 
     def test_every_allowed_type_has_a_fixed_text(self):
         """covers: USAGE-7"""
-        self.assertEqual(set(claude_accounts.KEEPALIVE_ERRORS),
+        self.assertEqual(set(claude.KEEPALIVE_ERRORS),
                          {"keychain_unavailable", "relogin_required", "split_brain", "refresh_failed", "no_credentials", "locked", "unmanaged",
                           "keychain_item_present", "config_conflict"})
 
     def test_ok_shows_the_file_store(self):
         """covers: USAGE-7"""
         self.keepalive(store="file", keychainItemPresent=False)
-        s = claude_accounts.login()
+        s = claude.login()
         self.assertEqual((s["state"], s["attention"], s["store"]), ("ok", False, "file"))
         self.assertTrue(s["text"].startswith("로그인됨 · 파일 저장소, 자동 갱신 "), s["text"])
 
@@ -428,50 +429,50 @@ class LoginStateTest(StoreCase):
         """covers: USAGE-7. store 가 없는 옛 형식과 auto·keychain 은 키체인 경고를 그대로 보이고 저장소를 표시하지 않는다"""
         for extra in ({}, {"store": "auto"}, {"store": "keychain"}, {"store": ["file"]}):
             self.keepalive(**extra)
-            s = claude_accounts.login()
+            s = claude.login()
             self.assertEqual((s["state"], s["store"]), ("ok", None), extra)
             self.assertTrue(s["text"].startswith("로그인됨, 자동 갱신 "), extra)
-            self.assertEqual(claude_accounts.login(keychain=True)["state"], "keychain", extra)
+            self.assertEqual(claude.login(keychain=True)["state"], "keychain", extra)
             self.keepalive(**extra, ok=False, error={"type": "keychain_unavailable"})
-            self.assertEqual(claude_accounts.login()["state"], "keychain", extra)
+            self.assertEqual(claude.login()["state"], "keychain", extra)
 
     def test_file_store_ignores_an_unreachable_keychain(self):
         """covers: USAGE-7. hswap list 의 keychainUnavailable 과 keepalive 의 같은 오류 모두 파일 저장소에서는 주의가 아니다"""
         self.keepalive(store="file", keychainItemPresent=False)
         self.store(time.time() - 60)
         self.hswap(hswap_row(), keychainUnavailable=True)
-        out = claude_accounts.read(force=True)
+        out = claude.read(force=True)
         self.assertEqual((out["login"]["state"], out["login"]["attention"]), ("ok", False))
         self.assertNotIn("키체인", out["login"]["text"])
         # 다른 실패는 파일 저장소에서도 그대로 실패다
         self.keepalive(store="file", ok=False, error={"type": "refresh_failed"})
-        self.assertEqual(claude_accounts.login()["text"], "자동 갱신 실패(토큰 갱신 실패)")
+        self.assertEqual(claude.login()["text"], "자동 갱신 실패(토큰 갱신 실패)")
 
     def test_file_store_failure_never_reads_as_success(self):
         """covers: USAGE-7. 파일 저장소의 keychain_unavailable 실패는 경고가 아니지만 성공도 아니다. 기록이 새로워도 계속되면 attention 으로 올린다"""
         self.keepalive(store="file", ok=False, error={"type": "keychain_unavailable", "message": "m"})
-        s = claude_accounts.login()
+        s = claude.login()
         self.assertEqual((s["state"], s["text"], s["attention"], s["note"], s["store"]), ("unconfirmed", "자동 갱신 확인되지 않음", False, None, "file"))
-        self.assertEqual(claude_accounts.login(keychain=True)["state"], "unconfirmed")
+        self.assertEqual(claude.login(keychain=True)["state"], "unconfirmed")
         # checkedAt 이 새로워도 시한은 처음 본 때부터 잰다
-        claude_accounts._state.unconfirmed = time.time() - claude_accounts.config.CLAUDE_KEEPALIVE_STALE_S - 60
+        claude._state.unconfirmed = time.time() - claude.config.CLAUDE_KEEPALIVE_STALE_S - 60
         self.keepalive(store="file", ok=False, error={"type": "keychain_unavailable"}, checkedAt=time.time())
-        s = claude_accounts.login()
+        s = claude.login()
         self.assertEqual((s["state"], s["attention"]), ("unconfirmed", True))
         self.assertNotIn("로그인됨", s["text"])
         self.assertIn("자동 갱신 확인되지 않음", s["text"])
         # ok:true 가 오면 끝나고, 다시 실패하면 처음부터 잰다
         self.keepalive(store="file")
-        s = claude_accounts.login()
+        s = claude.login()
         self.assertEqual((s["state"], s["attention"]), ("ok", False))
         self.assertIn("로그인됨 · 파일 저장소", s["text"])
-        self.assertEqual(claude_accounts.read()["login"]["state"], "ok")
+        self.assertEqual(claude.read()["login"]["state"], "ok")
         self.keepalive(store="file", ok=False, error={"type": "keychain_unavailable"})
-        self.assertFalse(claude_accounts.login()["attention"])
+        self.assertFalse(claude.login()["attention"])
         # 그 밖의 ok:false 와 ok 값이 없는 기록은 어떤 경우에도 성공 문구가 아니다
         for extra in ({"ok": False, "error": {"type": "refresh_failed"}}, {"ok": False, "error": {"type": "new_kind"}}, {"ok": False, "error": None}, {"ok": "true"}):
             self.keepalive(store="file", **extra)
-            s = claude_accounts.login()
+            s = claude.login()
             self.assertEqual((s["state"], s["attention"]), ("failed", True), extra)
             self.assertNotIn("로그인됨", s["text"], extra)
 
@@ -479,7 +480,7 @@ class LoginStateTest(StoreCase):
         """가짜 hswap 프로세스: 실제 _json 을 거친다."""
         self.binary.return_value = "/fake/hswap"
         body = {"schemaVersion": 1, "error": error} if error is not None else {"schemaVersion": 1, "accounts": list(rows)}
-        p = mock.patch.object(claude_accounts.subprocess, "run", return_value=types.SimpleNamespace(stdout=json.dumps(body), returncode=1 if error is not None else 0))
+        p = mock.patch.object(claude.subprocess, "run", return_value=types.SimpleNamespace(stdout=json.dumps(body), returncode=1 if error is not None else 0))
         p.start()
         self.addCleanup(p.stop)
 
@@ -496,14 +497,14 @@ class LoginStateTest(StoreCase):
             for stored in (False, True):
                 if stored:
                     self.store(time.time() - 60)
-                claude_accounts._state.cache = None
-                body = claude_accounts.read(force=True)
-                claude_accounts._state.cache = None
+                claude._state.cache = None
+                body = claude.read(force=True)
+                claude._state.cache = None
                 text = json.dumps([body, self.full_body()], ensure_ascii=False)
                 self.assertIn(want, text, error)
                 for s in (*secrets, "alice", "SECRET", "brand_new_error", "aaaaa"):
                     self.assertNotIn(s, text, error)
-            code, answer = claude_accounts.switch("1")
+            code, answer = claude.switch("1")
             self.assertEqual(code, 409)
             self.assertIn(want, answer["error"])
             self.assertNotIn("SECRET", answer["error"])
@@ -512,11 +513,11 @@ class LoginStateTest(StoreCase):
     def test_unknown_hswap_type_goes_only_to_the_log_filtered_and_cut(self):
         """covers: USAGE-6. 표에 있는 type 은 로그에 남기지 않는다"""
         for kind, want in (("brand_new_error", "brand_new_error"), ("BrandNewError", "BrandNewError"), ("Sk-1/ab_c", "Skab_c"), ("a" * 41, "a" * 40), (["list"], ""), (None, "")):
-            with mock.patch.object(claude_accounts, "print", create=True) as log:
-                self.assertEqual(str(claude_accounts._HswapError(kind)), "hswap 오류(알 수 없는 종류)")
+            with mock.patch.object(claude, "print", create=True) as log:
+                self.assertEqual(str(claude._HswapError(kind)), "hswap 오류(알 수 없는 종류)")
             self.assertEqual(log.call_args[0][0], f"[jarvis] hswap 의 모르는 오류 종류: {want}", kind)
-        with mock.patch.object(claude_accounts, "print", create=True) as log:
-            claude_accounts._HswapError("config_conflict")
+        with mock.patch.object(claude, "print", create=True) as log:
+            claude._HswapError("config_conflict")
         log.assert_not_called()
 
     def test_fatal_hswap_errors_reach_the_login_state_over_an_old_record(self):
@@ -525,91 +526,91 @@ class LoginStateTest(StoreCase):
         for kind, want in (("config_conflict", "config_conflict"), ("keychain_item_present", "keychain_item_present"), ("relogin_required", "relogin")):
             self.keepalive()
             self.reply(error={"type": kind, "message": "m"})
-            s = claude_accounts.read(force=True)["login"]
+            s = claude.read(force=True)["login"]
             self.assertEqual((s["state"], s["attention"]), (want, True), kind)
-            self.assertEqual(claude_accounts.read()["login"]["state"], want, kind)  # 보통 읽기에서도 남는다
+            self.assertEqual(claude.read()["login"]["state"], want, kind)  # 보통 읽기에서도 남는다
             self.reply(hswap_row())
-            s = claude_accounts.read(force=True)["login"]
+            s = claude.read(force=True)["login"]
             self.assertEqual((s["state"], s["attention"]), ("ok", False), kind)
         # 파일이 없어도 보인다. 답이 없는 실패는 판정을 지우지 않고, 치명적이지 않은 답은 지운다
         os.remove(os.path.join(self.root, "cache", "keepalive.json"))
         self.reply(error={"type": "config_conflict"})
-        self.assertEqual(claude_accounts.read(force=True)["login"]["state"], "config_conflict")
-        with mock.patch.object(claude_accounts.subprocess, "run", side_effect=subprocess.TimeoutExpired("x", 1)):
-            self.assertEqual(claude_accounts.read(force=True)["login"]["state"], "config_conflict")
+        self.assertEqual(claude.read(force=True)["login"]["state"], "config_conflict")
+        with mock.patch.object(claude.subprocess, "run", side_effect=subprocess.TimeoutExpired("x", 1)):
+            self.assertEqual(claude.read(force=True)["login"]["state"], "config_conflict")
         self.reply(error={"type": "LockError"})
-        self.assertNotIn("login", claude_accounts.read(force=True))
+        self.assertNotIn("login", claude.read(force=True))
         # 다시 확인하지 못한 옛 답은 쓰지 않는다
-        claude_accounts._state.fatal = (time.monotonic() - claude_accounts.config.CLAUDE_STALE_S - 1, "config_conflict")
-        self.assertNotIn("login", claude_accounts.read())
+        claude._state.fatal = (time.monotonic() - claude.config.CLAUDE_STALE_S - 1, "config_conflict")
+        self.assertNotIn("login", claude.read())
 
     def test_fatal_error_without_a_store_is_asked_again(self):
         """covers: USAGE-7. 저장소도 계정도 없는 기기에서도 보통 읽기로 사라지지 않고, 고쳐지면 다시 물어 지운다"""
         self.reply(error={"type": "config_conflict"})
-        self.assertEqual(claude_accounts.read(force=True)["login"]["state"], "config_conflict")
-        self.assertEqual(claude_accounts.read()["login"]["state"], "config_conflict")
+        self.assertEqual(claude.read(force=True)["login"]["state"], "config_conflict")
+        self.assertEqual(claude.read()["login"]["state"], "config_conflict")
         self.reply()
-        claude_accounts._state.cache = None
-        self.assertIsNone(claude_accounts.read())
-        self.assertIsNone(claude_accounts.read())
+        claude._state.cache = None
+        self.assertIsNone(claude.read())
+        self.assertIsNone(claude.read())
 
     def test_file_store_stops_are_reported_with_fixed_text(self):
         """covers: USAGE-7. 이전 계정의 기록이어도, 만료 임박이어도, 사용 중 계정이 재로그인 필요여도 기기의 사실이 먼저다"""
-        relogin = [{"active": True, "slot": "2", "note": claude_accounts.STATUS["relogin_required"][0]}]
+        relogin = [{"active": True, "slot": "2", "note": claude.STATUS["relogin_required"][0]}]
         for kind, want in (("keychain_item_present", "키체인에 Claude 로그인이 있거나 확인하지 못해 자동 갱신을 멈췄습니다"),
                            ("config_conflict", "hswap 설정 충돌(파일 저장소와 키체인 필수 모드)")):
             self.keepalive(store="file", ok=False, error={"type": kind, "message": "x" * 500}, loginExpiresAt=iso(time.time() + 3600))
             for rows in ((), relogin):
-                s = claude_accounts.login(rows, signed_in=True)
+                s = claude.login(rows, signed_in=True)
                 self.assertEqual((s["state"], s["text"], s["attention"], s["store"], s["note"]), (kind, want, True, "file", None), kind)
-            self.assertEqual(claude_accounts.STATUS[kind], (want + ".", True))
+            self.assertEqual(claude.STATUS[kind], (want + ".", True))
             self.keepalive(ok=False, error={"type": kind})  # store 가 없는 기록에서도 같은 오류다
-            self.assertEqual((claude_accounts.login()["state"], claude_accounts.login()["store"]), (kind, None))
+            self.assertEqual((claude.login()["state"], claude.login()["store"]), (kind, None))
         # 오류 없이 항목만 보고돼도 파일 저장소면 멈춤으로 보인다. 다른 저장소의 값은 뜻이 없다
         self.keepalive(store="file", keychainItemPresent=True)
-        self.assertEqual(claude_accounts.login()["state"], "keychain_item_present")
+        self.assertEqual(claude.login()["state"], "keychain_item_present")
         self.keepalive(store="auto", keychainItemPresent=True)
-        self.assertEqual(claude_accounts.login()["state"], "ok")
+        self.assertEqual(claude.login()["state"], "ok")
         self.keepalive(store="file", keychainItemPresent="true")
-        self.assertEqual(claude_accounts.login()["state"], "ok")
+        self.assertEqual(claude.login()["state"], "ok")
 
     def test_keychain_item_status_on_a_row_needs_a_person(self):
         """covers: USAGE-7"""
         for kind in ("keychain_item_present", "config_conflict"):
-            a = claude_accounts.account(hswap_row(usageStatus=kind, usage=None))
-            self.assertEqual((a["status"], a["error"], a["attention"]), ("error", claude_accounts.STATUS[kind][0], True))
+            a = claude.account(hswap_row(usageStatus=kind, usage=None))
+            self.assertEqual((a["status"], a["error"], a["attention"]), ("error", claude.STATUS[kind][0], True))
 
     def test_unknown_when_the_file_is_missing(self):
         """covers: USAGE-7. keepalive 를 쓰지 않는 기기에는 경고하지 않는다"""
-        self.assertIsNone(claude_accounts.login())
+        self.assertIsNone(claude.login())
 
     def test_unsafe_or_foreign_files_are_ignored(self):
-        """covers: USAGE-7. usage_common.private_json 과 같은 안전 규칙"""
+        """covers: USAGE-7. common.private_json 과 같은 안전 규칙"""
         path = os.path.join(self.root, "cache", "keepalive.json")
         self.keepalive(ok=False, error={"type": "refresh_failed"})
         os.chmod(path, 0o644)
-        self.assertIsNone(claude_accounts.login())
+        self.assertIsNone(claude.login())
         os.remove(path)
         self.write("real.json", {"schemaVersion": 1, "ok": False})
         os.symlink(os.path.join(self.root, "real.json"), path)
-        self.assertIsNone(claude_accounts.login())
+        self.assertIsNone(claude.login())
         os.remove(path)
         self.write("cache/keepalive.json", json.dumps({"schemaVersion": 1, "pad": "x" * 70000}))
-        self.assertIsNone(claude_accounts.login())
+        self.assertIsNone(claude.login())
         for body in ("{broken", '["x"]', '{"schemaVersion": 2, "ok": false}'):
             self.write("cache/keepalive.json", body)
-            self.assertIsNone(claude_accounts.login())
+            self.assertIsNone(claude.login())
 
     def test_odd_values_never_break_the_response(self):
         """covers: USAGE-7. 선택 기능의 상태 파일 하나가 사용량 표시를 막지 않는다"""
         huge = "1" + "0" * 400
         for field in ("checkedAt", "loginExpiresAt", "accessExpiresAt"):
             self.write("cache/keepalive.json", json.dumps({"schemaVersion": 1, "ok": True, "checkedAt": time.time()})[:-1] + f', "{field}": {huge}}}')
-            json.dumps(claude_accounts.login())
+            json.dumps(claude.login())
         self.write("cache/keepalive.json", '{"schemaVersion": 1, "x": ' + "[" * 30000 + "]" * 30000 + "}")
-        self.assertIsNone(claude_accounts.login())
+        self.assertIsNone(claude.login())
         self.keepalive(activeSlot=int(huge), checkedAt=-1e308, accessExpiresAt=1e308)
-        s = claude_accounts.login()
+        s = claude.login()
         self.assertEqual((s["state"], s["slot"], s["note"]), ("stalled", None, None))
         self.assertEqual(s["text"], "자동 갱신 멈춤")
 
@@ -624,9 +625,9 @@ class LoginStateTest(StoreCase):
                 self.write("cache/keepalive.json", json.dumps({"schemaVersion": 1, "checkedAt": time.time(), "ok": False, "action": leak, "note": leak, "store": leak, "activeSlot": slot,
                                                                "error": {"type": kind, "message": leak, "detail": leak}, "extra": leak}))
                 self.hswap(hswap_row(usageStatus="unavailable", usage=None, usageError=leak, lastGoodUsage={"sevenDay": {"pct": 1}}, lastGoodFetchedAt=iso(time.time() - 60)))
-                claude_accounts._state.cache = None
-                mine = claude_accounts.read(force=True)
-                claude_accounts._state.cache = None
+                claude._state.cache = None
+                mine = claude.read(force=True)
+                claude._state.cache = None
                 theirs = self.full_body()
                 for body in (mine, theirs):
                     text = json.dumps(body, ensure_ascii=False)
@@ -638,38 +639,38 @@ class LoginStateTest(StoreCase):
     def test_usage_error_takes_http_codes_and_listed_tokens(self):
         """covers: USAGE-3, USAGE-7, USAGE-17. hswap 의 usageError 는 http-NNN 꼴과 정확히 일치하는 허용 토큰만 받는다"""
         row = lambda err: hswap_row(usageStatus="unavailable", usage=None, usageError=err, lastGoodUsage={"sevenDay": {"pct": 1}}, lastGoodFetchedAt=iso(time.time() - 60))
-        a = claude_accounts.account(row("http-429"))
+        a = claude.account(row("http-429"))
         self.assertEqual((a["failure"], a["attention"]), ("rate", False))
         self.assertIn("(http-429)", a["note"])
         for err, code in (("http-401", "auth"), ("http-503", "server"), ("http-403", "perm"), ("http-418", "unknown")):
-            a = claude_accounts.account(row(err))
+            a = claude.account(row(err))
             self.assertEqual((a["failure"], a["note"], a["attention"]), (code, f"사용량을 읽지 못했습니다({err}).", code == "auth"), err)
         for err in ("relogin_required", "invalid_grant", "no_refresh_token", "no-access-token"):
-            a = claude_accounts.account(row(err))
-            self.assertEqual((a["failure"], a["attention"], a["note"]), ("auth", True, claude_accounts.STATUS["relogin_required"][0]), err)
-        a = claude_accounts.account(row("keychain_item_present"))
+            a = claude.account(row(err))
+            self.assertEqual((a["failure"], a["attention"], a["note"]), ("auth", True, claude.STATUS["relogin_required"][0]), err)
+        a = claude.account(row("keychain_item_present"))
         self.assertEqual((a["failure"], a["attention"]), ("keychain", True))
         for err, code, text in (("timeout", "net", "시간 초과"), ("network", "net", "네트워크 오류"),
                                 ("refresh-failed", "wait", "토큰 갱신 실패"), ("consume-busy", "wait", "다른 hswap 작업이 슬롯을 쓰는 중")):
-            a = claude_accounts.account(row(err))
+            a = claude.account(row(err))
             self.assertEqual((a["failure"], a["attention"], a["note"]), (code, False, f"사용량을 읽지 못했습니다({text})."), err)
         for bad in ("http-429 Bearer abc", "Bearer abc", "http-999", "http-42", "\nhttp-429", ["http-429"], 429, "stores-disagree", "Relogin_required", None):
-            a = claude_accounts.account(row(bad))
+            a = claude.account(row(bad))
             self.assertEqual((a["note"], a["failure"]), ("사용량을 읽지 못했습니다.", "unknown"), bad)
 
     def test_long_unreadable_slot_is_a_relogin(self):
         """covers: USAGE-7. 마지막 성공 값이 6시간보다 오래된 429·refresh-failed 는 일시 제한이 아니라 죽은 자격이다"""
         def row(err, hours):
             good = {} if hours is None else {"lastGoodFetchedAt": iso(time.time() - hours * 3600)}
-            return claude_accounts.account(hswap_row(usageStatus="unavailable", usage=None, usageError=err, active=False, lastGoodUsage={"sevenDay": {"pct": 78}}, **good))
+            return claude.account(hswap_row(usageStatus="unavailable", usage=None, usageError=err, active=False, lastGoodUsage={"sevenDay": {"pct": 78}}, **good))
         for err, why in (("http-429", "http-429"), ("refresh-failed", "토큰 갱신 실패")):
             a = row(err, 7)
             self.assertEqual((a["status"], a["failure"], a["attention"]), ("ok", "auth", True), err)
             self.assertTrue(a["note"].startswith(f"사용량을 6시간 넘게 읽지 못했습니다({why}). 다시 로그인해야 합니다"), a["note"])
-            self.assertNotEqual(a["note"], claude_accounts.STATUS["relogin_required"][0])  # 묶음 모습(_is_relogin)은 바꾸지 않는다
+            self.assertNotEqual(a["note"], claude.STATUS["relogin_required"][0])  # 묶음 모습(_is_relogin)은 바꾸지 않는다
         self.assertEqual((row("consume-busy", 7)["failure"], row("consume-busy", 7)["attention"]), ("wait", False))
         for hours in (5, None):  # 6시간 안이거나 마지막 성공 시각을 모르면 올리지 않는다
-            a = claude_accounts.account(hswap_row(usageStatus="unavailable", usage=None, usageError="http-429", active=False)) if hours is None else row("http-429", hours)
+            a = claude.account(hswap_row(usageStatus="unavailable", usage=None, usageError="http-429", active=False)) if hours is None else row("http-429", hours)
             self.assertEqual((a["failure"], a["attention"]), ("rate", False), hours)
 
     def test_every_status_has_a_failure_code(self):
@@ -677,17 +678,17 @@ class LoginStateTest(StoreCase):
         want = {"ok": None, "api_key": None, "token_expired": "wait", "no_saved_usage": "wait", "relogin_required": "auth",
                 "keychain_unavailable": "keychain", "keychain_item_present": "keychain", "config_conflict": "perm",
                 "foreign_credential": "perm", "no_credentials": "auth", "something_new": "unknown"}
-        self.assertLessEqual(set(claude_accounts.STATUS), set(want))
+        self.assertLessEqual(set(claude.STATUS), set(want))
         for status, code in want.items():
-            self.assertEqual(claude_accounts.account(hswap_row(usageStatus=status))["failure"], code, status)
+            self.assertEqual(claude.account(hswap_row(usageStatus=status))["failure"], code, status)
         soon = iso(time.time() + 86400)
-        self.assertEqual(claude_accounts.account(hswap_row(loginExpiresAt=soon))["failure"], "expiring")
-        rate = claude_accounts.account(hswap_row(usageStatus="unavailable", usageError="http-429", loginExpiresAt=soon))
+        self.assertEqual(claude.account(hswap_row(loginExpiresAt=soon))["failure"], "expiring")
+        rate = claude.account(hswap_row(usageStatus="unavailable", usageError="http-429", loginExpiresAt=soon))
         self.assertEqual((rate["failure"], rate["attention"]), ("expiring", True))
-        self.assertEqual(claude_accounts.account(hswap_row(usageStatus="relogin_required", loginExpiresAt=soon))["failure"], "auth")
-        self.assertEqual(claude_accounts.account(hswap_row(usageStatus="no_credentials"), headless=True)["failure"], "keychain")
+        self.assertEqual(claude.account(hswap_row(usageStatus="relogin_required", loginExpiresAt=soon))["failure"], "auth")
+        self.assertEqual(claude.account(hswap_row(usageStatus="no_credentials"), headless=True)["failure"], "keychain")
         dead = store_value(shown_row(active=True, note=RELOGIN, attention=True))
-        self.assertEqual(claude_accounts._judge_rows(cli_answer(shown_row(failure=None)), dead, True, NOW)[0][0]["failure"], "auth")
+        self.assertEqual(claude._judge_rows(cli_answer(shown_row(failure=None)), dead, True, NOW)[0][0]["failure"], "auth")
 
     def test_record_of_another_account_says_only_that(self):
         """covers: USAGE-7. 전환 뒤에는 이전 슬롯의 만료·오류·접근 토큰을 붙이지 않고, 옛 슬롯을 덮어쓰게 안내하지 않는다"""
@@ -695,7 +696,7 @@ class LoginStateTest(StoreCase):
         for kw in ({}, {"loginExpiresAt": soon}, {"ok": False, "error": {"type": "relogin_required"}},
                    {"ok": False, "error": {"type": "refresh_failed", "message": "old slot"}}):
             self.keepalive(activeSlot=2, **kw)
-            s = claude_accounts.login([{"active": True, "slot": "1"}])
+            s = claude.login([{"active": True, "slot": "1"}])
             self.assertEqual((s["state"], s["attention"], s["slot"], s["note"], s["other"]), ("other_account", True, None, None, True), kw)
             self.assertEqual(s["text"], "자동 갱신 기록이 이전 계정의 것입니다")
 
@@ -712,7 +713,7 @@ class LoginStateTest(StoreCase):
         self.hswap(hswap_row())
         for name, record in self.unknown_slot_records(ok=False, error={"type": "no_credentials", "message": "m"}):
             self.write("cache/keepalive.json", record)
-            for got in (claude_accounts.login([{"active": True, "slot": "1"}], signed_in=True), claude_accounts.read()["login"]):
+            for got in (claude.login([{"active": True, "slot": "1"}], signed_in=True), claude.read()["login"]):
                 self.assertEqual((got["state"], got["text"], got["attention"], got["slot"], got["other"]),
                                  ("failed", "자동 갱신 실패(자격 증명 없음)", True, None, False), name)
 
@@ -727,34 +728,34 @@ class LoginStateTest(StoreCase):
                          ({"ok": True}, "ok")):
             for name, record in self.unknown_slot_records(**kw):
                 self.write("cache/keepalive.json", record)
-                s = claude_accounts.login([{"active": True, "slot": "1"}], signed_in=True)
+                s = claude.login([{"active": True, "slot": "1"}], signed_in=True)
                 self.assertEqual((s["state"], s["slot"], s["other"]), (want, None, False), (want, name))
 
     def test_only_a_differing_slot_number_means_another_account(self):
         """covers: USAGE-7"""
         self.keepalive(activeSlot=2, ok=False, error={"type": "refresh_failed"})
-        self.assertEqual(claude_accounts.login([{"active": True, "slot": "1"}], signed_in=True)["state"], "other_account")
+        self.assertEqual(claude.login([{"active": True, "slot": "1"}], signed_in=True)["state"], "other_account")
         self.keepalive(activeSlot=1, ok=False, error={"type": "refresh_failed"})
-        s = claude_accounts.login([{"active": True, "slot": "1"}], signed_in=True)
+        s = claude.login([{"active": True, "slot": "1"}], signed_in=True)
         self.assertEqual((s["state"], s["slot"], s["other"]), ("failed", "1", False))
 
     def test_missing_credential_is_never_hidden_as_another_accounts_record(self):
         """covers: USAGE-7. 자격 부재는 add 만으로 고칠 수 없다: 슬롯이 달라도 /login 안내로 이어질 상태를 지킨다"""
         self.keepalive(activeSlot=2, ok=False, error={"type": "no_credentials", "message": "m"})
-        s = claude_accounts.login([{"active": True, "slot": "1"}], signed_in=True)
+        s = claude.login([{"active": True, "slot": "1"}], signed_in=True)
         self.assertEqual((s["state"], s["text"], s["slot"], s["other"]), ("failed", "자동 갱신 실패(자격 증명 없음)", None, True))
 
     def test_row_slot_is_kept_when_there_is_no_record_at_all(self):
         """covers: USAGE-7. 파일이 없으면 슬롯을 흐리게 할 기록도 없다: 재로그인 판정의 사용 중 슬롯을 그대로 준다"""
-        relogin = claude_accounts.STATUS["relogin_required"][0]
-        s = claude_accounts.login([{"active": True, "slot": "3", "note": relogin}], signed_in=True)
+        relogin = claude.STATUS["relogin_required"][0]
+        s = claude.login([{"active": True, "slot": "3", "note": relogin}], signed_in=True)
         self.assertEqual((s["state"], s["slot"], s["other"]), ("relogin", "3", False))
 
     def test_device_failures_stay_visible_over_another_accounts_record(self):
         """covers: USAGE-7. 키체인·멈춤은 계정이 아니라 기기의 문제다. 슬롯은 여전히 빼고 새 슬롯 안내를 쓴다"""
         for kw, want in (({"ok": False, "error": {"type": "keychain_unavailable"}}, "keychain"), ({"checkedAt": time.time() - 9 * 3600}, "stalled")):
             self.keepalive(activeSlot=2, **kw)
-            s = claude_accounts.login([{"active": True, "slot": "1"}])
+            s = claude.login([{"active": True, "slot": "1"}])
             self.assertEqual((s["state"], s["slot"], s["other"]), (want, None, True))
 
     def test_login_saved_in_no_slot_never_gets_the_old_slot(self):
@@ -763,7 +764,7 @@ class LoginStateTest(StoreCase):
         self.live_identity.return_value = ("other@example.com", "")
         self.keepalive(loginExpiresAt=iso(time.time() + 86400))
         self.hswap(hswap_row(active=True))
-        out = claude_accounts.read(force=True)
+        out = claude.read(force=True)
         self.assertFalse(out["accounts"][0]["active"])
         self.assertEqual((out["login"]["state"], out["login"]["slot"]), ("other_account", None))
 
@@ -772,14 +773,14 @@ class LoginStateTest(StoreCase):
         self.store(time.time() - 60)
         self.live_identity.return_value = ("other@example.com", "")
         self.keepalive(activeSlot=None, loginExpiresAt=iso(time.time() + 86400))
-        s = claude_accounts.read()["login"]
+        s = claude.read()["login"]
         self.assertEqual((s["state"], s["slot"], s["other"]), ("expiring", None, False))
 
     def test_matching_record_keeps_slot_and_details(self):
         """covers: USAGE-7"""
         self.store(time.time() - 60)
         self.keepalive(activeSlot=1, ok=False, error={"type": "refresh_failed", "message": "m"})
-        s = claude_accounts.read()["login"]
+        s = claude.read()["login"]
         self.assertEqual((s["state"], s["slot"], s["other"], s["text"]), ("failed", "1", False, "자동 갱신 실패(토큰 갱신 실패)"))
 
     def test_unknown_login_keeps_the_warning_without_a_slot(self):
@@ -787,14 +788,14 @@ class LoginStateTest(StoreCase):
         self.store(time.time() - 60)
         self.live_identity.return_value = None
         self.keepalive(activeSlot=1, ok=False, error={"type": "relogin_required"})
-        s = claude_accounts.read()["login"]
+        s = claude.read()["login"]
         self.assertEqual((s["state"], s["slot"], s["other"]), ("relogin", None, False))
 
     def test_current_rows_relogin_is_not_hidden_by_another_record(self):
         """covers: USAGE-7. 재로그인 판정이 행에서 왔으면 지금 계정의 사실이다"""
         self.keepalive(activeSlot=2)
-        relogin = claude_accounts.STATUS["relogin_required"][0]
-        self.assertEqual(claude_accounts.login([{"active": True, "slot": "1", "note": relogin}])["state"], "relogin")
+        relogin = claude.STATUS["relogin_required"][0]
+        self.assertEqual(claude.login([{"active": True, "slot": "1", "note": relogin}])["state"], "relogin")
 
     def test_order_when_several_apply(self):
         """covers: USAGE-7"""
@@ -805,37 +806,37 @@ class LoginStateTest(StoreCase):
                          ({"loginExpiresAt": soon, "ok": False, "error": {"type": "relogin_required"}}, "relogin"),
                          ({"checkedAt": old, "ok": False, "error": {"type": "locked"}}, "stalled")):
             self.keepalive(**kw)
-            self.assertEqual(claude_accounts.login()["state"], want, kw)
+            self.assertEqual(claude.login()["state"], want, kw)
 
     def test_access_expiry(self):
         """covers: USAGE-7"""
         self.keepalive(accessExpiresAt=iso(time.time() - 60))
-        self.assertEqual(claude_accounts.login()["note"], "접근 토큰 만료됨(자동 갱신 대기)")
+        self.assertEqual(claude.login()["note"], "접근 토큰 만료됨(자동 갱신 대기)")
         self.keepalive(accessExpiresAt=None)
-        self.assertIsNone(claude_accounts.login()["note"])
+        self.assertIsNone(claude.login()["note"])
 
     def test_provider_carries_login_only_when_there_is_something_to_say(self):
         """covers: USAGE-7"""
         self.store(time.time() - 60)
         empty = {"status": "unavailable", "accounts": []}
-        with mock.patch.object(independent_usage, "_caam", side_effect=RuntimeError("없음")), \
-                mock.patch.object(independent_usage, "_opencode", return_value=empty), \
-                mock.patch.object(independent_usage.codex_native_usage, "read", return_value=[]), \
-                mock.patch.object(independent_usage.antigravity_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.kimi_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.zcode_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.gemini_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.minimax_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.cli_login, "available", return_value=[]), \
-                mock.patch.object(independent_usage.cli_login, "fresh", return_value=[]):
-            independent_usage._tasks.clear()
-            self.addCleanup(independent_usage._tasks.clear)
-            claude = next(p for p in independent_usage.read(force=True)["providers"] if p["id"] == "claude")
-            self.assertNotIn("login", claude)
+        with mock.patch.object(independent, "_caam", side_effect=RuntimeError("없음")), \
+                mock.patch.object(independent, "_opencode", return_value=empty), \
+                mock.patch.object(independent.codex, "read", return_value=[]), \
+                mock.patch.object(independent.antigravity, "read", return_value=empty), \
+                mock.patch.object(independent.kimi, "read", return_value=empty), \
+                mock.patch.object(independent.zcode, "read", return_value=empty), \
+                mock.patch.object(independent.gemini, "read", return_value=empty), \
+                mock.patch.object(independent.minimax, "read", return_value=empty), \
+                mock.patch.object(independent.login, "available", return_value=[]), \
+                mock.patch.object(independent.login, "fresh", return_value=[]):
+            independent._tasks.clear()
+            self.addCleanup(independent._tasks.clear)
+            provider = next(p for p in independent.read(force=True)["providers"] if p["id"] == "claude")
+            self.assertNotIn("login", provider)
             self.keepalive()
-            claude = next(p for p in independent_usage.read(force=True)["providers"] if p["id"] == "claude")
-        self.assertEqual(claude["login"]["state"], "ok")
-        self.assertNotIn("error", claude["login"])
+            provider = next(p for p in independent.read(force=True)["providers"] if p["id"] == "claude")
+        self.assertEqual(provider["login"]["state"], "ok")
+        self.assertNotIn("error", provider["login"])
 
 
 class NoAccountsTest(StoreCase):
@@ -846,7 +847,7 @@ class NoAccountsTest(StoreCase):
         for kind, want in (("no_credentials", "failed"), ("relogin_required", "relogin")):
             self.keepalive(ok=False, activeSlot=None, error={"type": kind, "message": "m"})
             for force in (False, True):
-                out = claude_accounts.read(force=force)
+                out = claude.read(force=force)
                 self.assertEqual((out["accounts"], out["login"]["state"], out["login"]["attention"]), ([], want, True), (kind, force))
                 self.assertNotIn("error", out)
 
@@ -854,106 +855,106 @@ class NoAccountsTest(StoreCase):
         """covers: USAGE-7"""
         self.hswap().side_effect = RuntimeError("locked")
         self.keepalive(ok=False, error={"type": "relogin_required"})
-        out = claude_accounts.read(force=True)
+        out = claude.read(force=True)
         self.assertEqual((out["accounts"], out["error"], out["login"]["state"]), ([], "locked", "relogin"))
 
     def test_no_accounts_with_unreachable_keychain_is_reported(self):
         """covers: USAGE-7"""
         self.hswap(keychainUnavailable=True)
-        out = claude_accounts.read(force=True)
+        out = claude.read(force=True)
         self.assertEqual((out["accounts"], out["login"]["state"]), ([], "keychain"))
 
     def test_keychain_warning_survives_ordinary_reads_after_a_refresh(self):
         """covers: USAGE-7. 저장소도 keepalive 도 없는 기기: 새로고침 뒤의 보통 읽기에서 경고와 복구 버튼이 사라지지 않고, 그 사이 hswap 을 다시 부르지 않는다"""
         run = self.hswap(keychainUnavailable=True)
-        self.assertEqual(claude_accounts.read(force=True)["login"]["state"], "keychain")
+        self.assertEqual(claude.read(force=True)["login"]["state"], "keychain")
         for _ in range(3):
-            out = claude_accounts.read()
+            out = claude.read()
             self.assertEqual((out["accounts"], out["login"]["state"], out["login"]["attention"]), ([], "keychain", True))
         run.assert_called_once()
 
     def test_keychain_state_is_asked_again_after_the_threshold(self):
         """covers: USAGE-7"""
         run = self.hswap(keychainUnavailable=True)
-        claude_accounts.read(force=True)
+        claude.read(force=True)
         def age():
-            ago = time.monotonic() - claude_accounts.config.CLAUDE_STALE_S - 1
-            claude_accounts._state.device, claude_accounts._state.cache = (ago, claude_accounts._state.device[1]), (ago, *claude_accounts._state.cache[1:])
+            ago = time.monotonic() - claude.config.CLAUDE_STALE_S - 1
+            claude._state.device, claude._state.cache = (ago, claude._state.device[1]), (ago, *claude._state.cache[1:])
         age()
-        self.assertEqual(claude_accounts.read()["login"]["state"], "keychain")  # 아직 그렇다고 답한다
+        self.assertEqual(claude.read()["login"]["state"], "keychain")  # 아직 그렇다고 답한다
         self.assertEqual(run.call_count, 2)
         age()
         run.return_value = {"accounts": []}  # 이제 닿는다: 경고가 사라지고 더는 묻지 않는다
-        self.assertIsNone(claude_accounts.read())
+        self.assertIsNone(claude.read())
         self.assertEqual(run.call_count, 3)
-        claude_accounts._state.cache = None
-        self.assertIsNone(claude_accounts.read())
+        claude._state.cache = None
+        self.assertIsNone(claude.read())
         self.assertEqual(run.call_count, 3)
 
     def test_keychain_state_is_not_kept_past_the_threshold_when_hswap_fails(self):
         """covers: USAGE-7. 다시 확인하지 못한 상태를 지금 사실처럼 보이지 않고 hswap 오류를 보인다"""
         run = self.hswap(keychainUnavailable=True)
-        claude_accounts.read(force=True)
-        ago = time.monotonic() - claude_accounts.config.CLAUDE_STALE_S - 1
-        claude_accounts._state.device, claude_accounts._state.cache = (ago, True), (ago, None, None)
+        claude.read(force=True)
+        ago = time.monotonic() - claude.config.CLAUDE_STALE_S - 1
+        claude._state.device, claude._state.cache = (ago, True), (ago, None, None)
         run.side_effect = RuntimeError("locked")
-        self.assertEqual(claude_accounts.read(), {"error": "locked"})
+        self.assertEqual(claude.read(), {"error": "locked"})
 
     def test_hswap_failure_inside_the_threshold_keeps_the_device_state(self):
         """covers: USAGE-7. 기기 상태는 계정 행과 따로 둔다: 실패한 조회가 지우지 않는다"""
         run = self.hswap(keychainUnavailable=True)
-        claude_accounts.read(force=True)
+        claude.read(force=True)
         run.side_effect = RuntimeError("locked")
-        out = claude_accounts.read(force=True)
+        out = claude.read(force=True)
         self.assertEqual((out["accounts"], out["error"], out["login"]["state"]), ([], "locked", "keychain"))
-        self.assertEqual(claude_accounts.read()["login"]["state"], "keychain")
+        self.assertEqual(claude.read()["login"]["state"], "keychain")
 
     def test_keychain_warning_holds_over_held_rows_and_store_rows(self):
         """covers: USAGE-7"""
         run = self.hswap(hswap_row(), keychainUnavailable=True)
-        claude_accounts.read(force=True)
-        self.assertEqual(claude_accounts.read()["login"]["state"], "keychain")
+        claude.read(force=True)
+        self.assertEqual(claude.read()["login"]["state"], "keychain")
         self.store(time.time() - 60)
         run.return_value = {"accounts": [], "keychainUnavailable": True}
-        claude_accounts._state.cache = None
-        out = claude_accounts.read()
+        claude._state.cache = None
+        out = claude.read()
         self.assertEqual((out["accounts"][0]["source"], out["login"]["state"]), ("cswap-cache", "keychain"))
 
     def test_nothing_to_say_stays_none(self):
         """covers: USAGE-7"""
-        self.assertIsNone(claude_accounts.read())
+        self.assertIsNone(claude.read())
         self.keepalive()
-        self.assertEqual(claude_accounts.read(), {"accounts": [], "login": claude_accounts.login()})
+        self.assertEqual(claude.read(), {"accounts": [], "login": claude.login()})
 
     def test_independent_keeps_the_keychain_warning_after_a_refresh(self):
         """covers: USAGE-7. 화면 경로: 새로고침 다음의 보통 조회에도 Claude 칸의 경고가 남는다"""
         self.hswap(keychainUnavailable=True)
         with self.independent_mocks():
-            independent_usage._tasks.clear()
-            self.addCleanup(independent_usage._tasks.clear)
+            independent._tasks.clear()
+            self.addCleanup(independent._tasks.clear)
             for force in (True, False, False):
-                claude = next(p for p in independent_usage.read(force=force)["providers"] if p["id"] == "claude")
-                self.assertEqual((claude["accounts"], claude["login"]["state"]), ([], "keychain"), force)
+                provider = next(p for p in independent.read(force=force)["providers"] if p["id"] == "claude")
+                self.assertEqual((provider["accounts"], provider["login"]["state"]), ([], "keychain"), force)
 
     def test_independent_keeps_the_provider_for_login(self):
         """covers: USAGE-7. 계정이 없어 확인 불가로 남더라도 칸은 남아 복구 안내를 보인다"""
         self.keepalive(ok=False, error={"type": "no_credentials", "message": "m"})
         empty = {"status": "unavailable", "accounts": []}
-        with mock.patch.object(independent_usage, "_caam", side_effect=RuntimeError("없음")), \
-                mock.patch.object(independent_usage, "_opencode", return_value=empty), \
-                mock.patch.object(independent_usage.codex_native_usage, "read", return_value=[]), \
-                mock.patch.object(independent_usage.antigravity_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.kimi_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.zcode_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.gemini_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.minimax_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.cli_login, "available", return_value=[]), \
-                mock.patch.object(independent_usage.cli_login, "fresh", return_value=[]):
-            independent_usage._tasks.clear()
-            self.addCleanup(independent_usage._tasks.clear)
-            body = independent_usage.read()
-        claude = next(p for p in body["providers"] if p["id"] == "claude")
-        self.assertEqual((claude["accounts"], claude["login"]["state"]), ([], "failed"))
+        with mock.patch.object(independent, "_caam", side_effect=RuntimeError("없음")), \
+                mock.patch.object(independent, "_opencode", return_value=empty), \
+                mock.patch.object(independent.codex, "read", return_value=[]), \
+                mock.patch.object(independent.antigravity, "read", return_value=empty), \
+                mock.patch.object(independent.kimi, "read", return_value=empty), \
+                mock.patch.object(independent.zcode, "read", return_value=empty), \
+                mock.patch.object(independent.gemini, "read", return_value=empty), \
+                mock.patch.object(independent.minimax, "read", return_value=empty), \
+                mock.patch.object(independent.login, "available", return_value=[]), \
+                mock.patch.object(independent.login, "fresh", return_value=[]):
+            independent._tasks.clear()
+            self.addCleanup(independent._tasks.clear)
+            body = independent.read()
+        provider = next(p for p in body["providers"] if p["id"] == "claude")
+        self.assertEqual((provider["accounts"], provider["login"]["state"]), ([], "failed"))
         self.assertIn("claude", body["unavailable"])
 
 
@@ -967,10 +968,10 @@ class SwitchRaceTest(StoreCase):
         self.lists = 0
         self.gate = None
         self.binary.return_value = "/fake/hswap"
-        p = mock.patch.object(claude_accounts, "_json", side_effect=self.fake_json)
+        p = mock.patch.object(claude, "_json", side_effect=self.fake_json)
         self.addCleanup(p.stop)
         p.start()
-        self.real_store = claude_accounts._store_read
+        self.real_store = claude._store_read
 
     def login_as_b(self):
         self.live_identity.return_value = ("b@example.com", "o2")
@@ -998,7 +999,7 @@ class SwitchRaceTest(StoreCase):
             got = self.real_store()
             on_call(len(calls))
             return got
-        p = mock.patch.object(claude_accounts, "_store_read", side_effect=run)
+        p = mock.patch.object(claude, "_store_read", side_effect=run)
         self.addCleanup(p.stop)
         p.start()
         return calls
@@ -1010,20 +1011,20 @@ class SwitchRaceTest(StoreCase):
         def changed_meanwhile(exe, *args, timeout=None, caller=None):
             self.login_as_b()
             return real(exe, *args, timeout=timeout)
-        claude_accounts._json.side_effect = changed_meanwhile
-        self.assertEqual(self.active(claude_accounts.read(force=True)), ["2"])
+        claude._json.side_effect = changed_meanwhile
+        self.assertEqual(self.active(claude.read(force=True)), ["2"])
 
     def test_reader_waiting_on_a_running_switch_sees_the_new_login(self):
         """covers: USAGE-6. 전환이 잠금을 쥔 동안 들어온 읽기가 먼저 잡은 저장소로 새 결과를 덮지 않는다"""
         self.gate = threading.Event()
         reader_read = threading.Event()
         self.store_then(lambda n: reader_read.set())
-        sw = threading.Thread(target=claude_accounts.switch, args=("2",))
+        sw = threading.Thread(target=claude.switch, args=("2",))
         sw.start()
-        while not claude_accounts._lock.locked():
+        while not claude._lock.locked():
             time.sleep(.001)
         box = {}
-        reader = threading.Thread(target=lambda: box.update(out=claude_accounts.read(force=True)))
+        reader = threading.Thread(target=lambda: box.update(out=claude.read(force=True)))
         reader.start()
         self.assertTrue(reader_read.wait(5))
         self.gate.set()
@@ -1033,46 +1034,46 @@ class SwitchRaceTest(StoreCase):
 
     def test_switch_finishing_after_the_answer_is_not_answered_with_old_values(self):
         """covers: USAGE-6. hswap 이 전환 전 값을 답한 뒤 전환이 끝나면 그 값을 내지 않고 다시 읽는다"""
-        self.store_then(lambda n: claude_accounts.switch("2") if n == 2 else None)
-        out = claude_accounts.read(force=True)
+        self.store_then(lambda n: claude.switch("2") if n == 2 else None)
+        out = claude.read(force=True)
         self.assertEqual(self.active(out), ["2"])
         self.assertEqual(self.lists, 2)
         self.assertEqual(out["accounts"][0]["windows"][0]["used"], 2)
 
     def test_held_values_are_not_reused_across_a_switch(self):
         """covers: USAGE-6. 묶어 둔 전환 전 실값을 잡은 뒤 전환이 끝나도 그 값을 내지 않는다"""
-        claude_accounts.read()
+        claude.read()
         self.assertEqual(self.lists, 1)
-        pending = [lambda: claude_accounts.switch("2")]
+        pending = [lambda: claude.switch("2")]
         # login() 은 묶음을 잡은 뒤에 불린다: 그 자리에서 전환이 끝나는 순서를 만든다
-        with mock.patch.object(claude_accounts, "_keepalive", side_effect=lambda: pending and pending.pop()() and None):
-            out = claude_accounts.read()
+        with mock.patch.object(claude, "_keepalive", side_effect=lambda: pending and pending.pop()() and None):
+            out = claude.read()
         self.assertEqual(self.active(out), ["2"])
         self.assertEqual(self.lists, 2)
         self.assertEqual(out["accounts"][0]["windows"][0]["used"], 2)
 
     def test_failed_switch_also_invalidates_the_read(self):
         """covers: USAGE-6. 실패한 전환도 로그인을 바꿨을 수 있어 다시 묻는다"""
-        claude_accounts.read()
+        claude.read()
         real = self.fake_json
 
         def fail(exe, *args, timeout=None, caller=None):
             if args[0] == "switch":
                 raise RuntimeError("locked")
             return real(exe, *args, timeout=timeout)
-        claude_accounts._json.side_effect = fail
-        self.assertEqual(claude_accounts.switch("2")[0], 409)
-        claude_accounts.read()
+        claude._json.side_effect = fail
+        self.assertEqual(claude.switch("2")[0], 409)
+        claude.read()
         self.assertEqual(self.lists, 2)
 
     def test_endless_switching_does_not_hang_the_read(self):
         """covers: USAGE-6"""
-        self.store_then(lambda n: claude_accounts.switch("2"))
-        self.assertEqual(self.active(claude_accounts.read(force=True)), ["2"])
+        self.store_then(lambda n: claude.switch("2"))
+        self.assertEqual(self.active(claude.read(force=True)), ["2"])
 
     def test_no_switch_no_extra_list(self):
         """covers: USAGE-6"""
-        self.assertEqual(self.active(claude_accounts.read(force=True)), ["1"])
+        self.assertEqual(self.active(claude.read(force=True)), ["1"])
         self.assertEqual(self.lists, 1)
 
 
@@ -1082,18 +1083,18 @@ class RemoveTest(StoreCase):
     def run_with(self, rc, out="", err=""):
         self.binary.return_value = "/fake/hswap"
         done = subprocess.CompletedProcess([], rc, out, err)
-        with mock.patch.object(claude_accounts.subprocess, "run", return_value=done) as run:
-            result = claude_accounts.remove("3")
+        with mock.patch.object(claude.subprocess, "run", return_value=done) as run:
+            result = claude.remove("3")
         return result, run
 
     def test_remove_passes_yes_and_reports_removed(self):
         """covers: USAGE-12"""
-        claude_accounts._state.cache = (time.monotonic(), {"accounts": []}, None)
+        claude._state.cache = (time.monotonic(), {"accounts": []}, None)
         (code, body), run = self.run_with(0, "Removed Account-3 (b@example.com)\n")
         self.assertEqual((code, body), (200, {"removed": True}))
         self.assertEqual(run.call_args.args[0], ["/fake/hswap", "claude", "remove", "3"])
         self.assertEqual(run.call_args.kwargs["input"], "y\n")
-        self.assertIsNone(claude_accounts._state.cache)  # 다음 읽기는 hswap 에 다시 묻는다
+        self.assertIsNone(claude._state.cache)  # 다음 읽기는 hswap 에 다시 묻는다
 
     def test_refusal_and_cancel_are_not_success(self):
         """covers: USAGE-12. 거절 이유는 색·Error: 머리를 떼고 홈 경로를 지워 준다"""
@@ -1108,10 +1109,10 @@ class RemoveTest(StoreCase):
 
     def test_bad_slot_and_missing_hswap_do_not_run(self):
         """covers: USAGE-12"""
-        with mock.patch.object(claude_accounts.subprocess, "run", side_effect=AssertionError("실행했다")):
+        with mock.patch.object(claude.subprocess, "run", side_effect=AssertionError("실행했다")):
             for slot in ("", "a1", "12345", None, "../1"):
-                self.assertEqual(claude_accounts.remove(slot)[0], 400, slot)
-            self.assertEqual(claude_accounts.remove("1")[0], 404)
+                self.assertEqual(claude.remove(slot)[0], 400, slot)
+            self.assertEqual(claude.remove("1")[0], 404)
 
 
 class DiscoveryTest(StoreCase):
@@ -1120,79 +1121,79 @@ class DiscoveryTest(StoreCase):
     def setUp(self):
         super().setUp()
         self.store(time.time() - 60)
-        os.chmod(os.path.join(self.root, "sequence.json"), 0o644)  # _private_json 이 거부한다
-        self.assertIsNone(claude_accounts._store_read())
+        os.chmod(os.path.join(self.root, "sequence.json"), 0o644)  # private_json 이 거부한다
+        self.assertIsNone(claude._store_read())
 
     def age(self):
-        claude_accounts._state.cache = (time.monotonic() - claude_accounts.config.CLAUDE_STALE_S - 1, *claude_accounts._state.cache[1:])
+        claude._state.cache = (time.monotonic() - claude.config.CLAUDE_STALE_S - 1, *claude._state.cache[1:])
 
     def test_accounts_found_through_the_cli_do_not_vanish_after_the_threshold(self):
         """covers: USAGE-6"""
         run = self.hswap(hswap_row())
-        self.assertEqual(len(claude_accounts.read(force=True)["accounts"]), 1)
-        self.assertEqual(len(claude_accounts.read()["accounts"]), 1)  # 기준 안: 묶음을 쓰고 다시 부르지 않는다
+        self.assertEqual(len(claude.read(force=True)["accounts"]), 1)
+        self.assertEqual(len(claude.read()["accounts"]), 1)  # 기준 안: 묶음을 쓰고 다시 부르지 않는다
         self.assertEqual(run.call_count, 1)
         self.age()
-        self.assertEqual(len(claude_accounts.read()["accounts"]), 1)
+        self.assertEqual(len(claude.read()["accounts"]), 1)
         self.assertEqual(run.call_count, 2)
 
     def test_never_discovered_stays_none_without_spawning_hswap(self):
         """covers: USAGE-6"""
         run = self.hswap(hswap_row())
         for _ in range(3):
-            self.assertIsNone(claude_accounts.read())
+            self.assertIsNone(claude.read())
         run.assert_not_called()
 
     def test_failed_or_empty_discovery_is_not_discovery(self):
         """covers: USAGE-6"""
         run = self.hswap()
         run.side_effect = RuntimeError("locked")
-        self.assertEqual(claude_accounts.read(force=True), {"error": "locked"})
-        self.assertIsNone(claude_accounts.read())
+        self.assertEqual(claude.read(force=True), {"error": "locked"})
+        self.assertIsNone(claude.read())
         run.side_effect = None
         run.return_value = {"accounts": []}
-        self.assertIsNone(claude_accounts.read(force=True))
-        self.assertIsNone(claude_accounts.read())
+        self.assertIsNone(claude.read(force=True))
+        self.assertIsNone(claude.read())
         self.assertEqual(run.call_count, 2)
 
     def test_empty_answer_ends_discovery(self):
         """covers: USAGE-6. hswap 이 계정이 없다고 답하면 찾은 기록을 지워 다시 부르지 않는다"""
         run = self.hswap(hswap_row())
-        claude_accounts.read(force=True)
+        claude.read(force=True)
         self.age()
         run.return_value = {"accounts": []}
-        self.assertIsNone(claude_accounts.read())
+        self.assertIsNone(claude.read())
         self.assertEqual(run.call_count, 2)
         self.age()
-        self.assertIsNone(claude_accounts.read())
+        self.assertIsNone(claude.read())
         self.assertEqual(run.call_count, 2)
 
     def test_failed_recheck_reports_the_error_and_tries_again(self):
         """covers: USAGE-6. 일시 실패가 찾은 기록을 지우지 않는다"""
         run = self.hswap(hswap_row())
-        claude_accounts.read(force=True)
+        claude.read(force=True)
         self.age()
         run.side_effect = RuntimeError("locked")
-        self.assertEqual(claude_accounts.read(), {"error": "locked"})
+        self.assertEqual(claude.read(), {"error": "locked"})
         self.age()
         run.side_effect = None
-        self.assertEqual(len(claude_accounts.read()["accounts"]), 1)
+        self.assertEqual(len(claude.read()["accounts"]), 1)
         self.assertEqual(run.call_count, 3)
 
     def test_recheck_does_not_start_the_installer(self):
         """covers: USAGE-6"""
         self.hswap(hswap_row())
-        claude_accounts.read(force=True)
+        claude.read(force=True)
         self.age()
         self.binary.return_value = None
-        self.assertIsNone(claude_accounts.read())
+        self.assertIsNone(claude.read())
         self.ensure.assert_not_called()
 
 
 class StoreAuthFailureTest(StoreCase):
     """최근 CLI 행이 그 뒤에 저장소에 적힌 인증 실패를 가리지 않는다. 사용량 값은 CLI 값을 그대로 둔다."""
 
-    RELOGIN = claude_accounts.STATUS["relogin_required"][0]
+    RELOGIN = claude.STATUS["relogin_required"][0]
 
     def two_slots(self, strikes, b_email="b@example.com", b_org="Org"):
         self.write("sequence.json", {"sequence": [1, 2], "accounts": {
@@ -1209,11 +1210,11 @@ class StoreAuthFailureTest(StoreCase):
         """covers: USAGE-7. hswap 0.2.1, keepalive 없음: list 성공 뒤 수집기가 사용 중 계정에 authDeadStrikes 를 적으면 바로 경고한다"""
         self.two_slots((0, 0))
         run = self.hswap(*self.rows())
-        before = claude_accounts.read()
+        before = claude.read()
         self.assertNotIn("login", before)
         self.assertFalse(before["accounts"][0]["attention"])
         self.two_slots((1, 0))
-        out = claude_accounts.read()
+        out = claude.read()
         self.assertEqual(run.call_count, 2)  # 인증 실패가 바뀌면 다시 묻는다. hswap 이 아직 정상으로 답해도 저장소의 실패를 붙인다
         a = out["accounts"][0]
         self.assertEqual((a["status"], a["note"], a["error"], a["attention"]), ("ok", self.RELOGIN, None, True))
@@ -1225,9 +1226,9 @@ class StoreAuthFailureTest(StoreCase):
         """covers: USAGE-7"""
         self.two_slots((0, 0))
         self.hswap(*self.rows())
-        claude_accounts.read()
+        claude.read()
         self.two_slots((0, 1))
-        out = claude_accounts.read()
+        out = claude.read()
         self.assertEqual((out["accounts"][1]["note"], out["accounts"][1]["attention"]), (self.RELOGIN, True))
         self.assertFalse(out["accounts"][0]["attention"])
         self.assertNotIn("login", out)
@@ -1236,7 +1237,7 @@ class StoreAuthFailureTest(StoreCase):
         """covers: USAGE-7"""
         self.two_slots((1, 0))
         self.hswap(hswap_row(number=1, active=True, usage=None), hswap_row(number=2, email="b@example.com", organizationUuid="o2", active=False))
-        a = claude_accounts.read(force=True)["accounts"][0]
+        a = claude.read(force=True)["accounts"][0]
         self.assertEqual((a["status"], a["error"], a["note"], a["attention"], a["windows"]), ("error", self.RELOGIN, None, True, []))
 
     def test_only_the_same_slot_and_identity_match(self):
@@ -1245,19 +1246,19 @@ class StoreAuthFailureTest(StoreCase):
         for kw in ({"email": "other@example.com"}, {"email": "b@example.com", "organizationUuid": "other-org"}, {"email": "b@example.com", "number": 3}):
             self.two_slots((0, 1))
             self.hswap(self.rows()[0], hswap_row(**{**row, **kw}))
-            claude_accounts._state.cache = None
-            a = claude_accounts.read(force=True)["accounts"][1]
+            claude._state.cache = None
+            a = claude.read(force=True)["accounts"][1]
             self.assertEqual((a["note"], a["attention"]), (None, False), kw)
 
     def test_hswap_own_relogin_stays_as_it_is(self):
         """covers: USAGE-7"""
         row = hswap_row(usageStatus="relogin_required", usage=None, lastGoodUsage={"sevenDay": {"pct": 1}}, lastGoodFetchedAt=iso(time.time() - 60))
-        want = claude_accounts.account(row)
+        want = claude.account(row)
         for strikes in (0, 1):
             self.store(time.time() - 60, authDeadStrikes=strikes)
             self.hswap(row)
-            claude_accounts._state.cache = None
-            out = claude_accounts.read(force=True)
+            claude._state.cache = None
+            out = claude.read(force=True)
             a = out["accounts"][0]
             self.assertEqual((a["status"], a["note"], a["error"], a["attention"], a["windows"]), (want["status"], want["note"], want["error"], want["attention"], want["windows"]), strikes)
             self.assertEqual(out["login"]["state"], "relogin")
@@ -1266,12 +1267,12 @@ class StoreAuthFailureTest(StoreCase):
         """covers: USAGE-7. 묶음의 행은 고치지 않으므로 저장소가 고쳐지면 다음 읽기에서 경고가 사라진다"""
         self.two_slots((0, 0))
         self.hswap(*self.rows())
-        claude_accounts.read()
+        claude.read()
         self.two_slots((1, 0))
-        self.assertEqual(claude_accounts.read()["login"]["state"], "relogin")
-        self.assertEqual((claude_accounts._state.cache[1]["accounts"][0]["note"], claude_accounts._state.cache[1]["accounts"][0]["attention"]), (None, False))
+        self.assertEqual(claude.read()["login"]["state"], "relogin")
+        self.assertEqual((claude._state.cache[1]["accounts"][0]["note"], claude._state.cache[1]["accounts"][0]["attention"]), (None, False))
         self.two_slots((0, 0))
-        out = claude_accounts.read()
+        out = claude.read()
         self.assertNotIn("login", out)
         self.assertFalse(out["accounts"][0]["attention"])
 
@@ -1279,19 +1280,19 @@ class StoreAuthFailureTest(StoreCase):
         """covers: USAGE-7. 화면이 부르는 전체 경로"""
         self.two_slots((0, 0))
         self.hswap(*self.rows())
-        claude_accounts.read()
+        claude.read()
         self.two_slots((1, 0))
         with self.independent_mocks():
-            independent_usage._tasks.clear()
-            self.addCleanup(independent_usage._tasks.clear)
-            claude = next(p for p in independent_usage.read()["providers"] if p["id"] == "claude")
-        self.assertEqual((claude["login"]["state"], claude["accounts"][0]["attention"], claude["accounts"][0]["note"]), ("relogin", True, self.RELOGIN))
+            independent._tasks.clear()
+            self.addCleanup(independent._tasks.clear)
+            provider = next(p for p in independent.read()["providers"] if p["id"] == "claude")
+        self.assertEqual((provider["login"]["state"], provider["accounts"][0]["attention"], provider["accounts"][0]["note"]), ("relogin", True, self.RELOGIN))
 
 
 class SlotIdentityTest(StoreCase):
     """같은 슬롯에 다른 계정이 들어온 경우. 신원은 이메일과 조직 UUID 의 지문으로 비교하고 내보내지 않는다."""
 
-    RELOGIN = claude_accounts.STATUS["relogin_required"][0]
+    RELOGIN = claude.STATUS["relogin_required"][0]
 
     def slot_holds(self, email, uuid, strikes=0):
         self.write("sequence.json", {"sequence": [1], "accounts": {"1": {"email": email, "organizationUuid": uuid, "organizationName": "Org"}}})
@@ -1305,11 +1306,11 @@ class SlotIdentityTest(StoreCase):
         """covers: USAGE-6, USAGE-7. A 를 묶어 둔 뒤 그 슬롯에 B 가 들어오면 다음 보통 읽기가 hswap 을 다시 실행해 B 와 그 경고를 보인다"""
         self.slot_holds("a@example.com", "o1")
         run = self.hswap(hswap_row())
-        self.assertEqual(claude_accounts.read()["accounts"][0]["label"], "a@example.com")
+        self.assertEqual(claude.read()["accounts"][0]["label"], "a@example.com")
         self.slot_holds("b@example.com", "b-org", strikes=1)
         self.live_identity.return_value = ("b@example.com", "b-org")
         run.return_value = {"accounts": [self.b_row()]}
-        out = claude_accounts.read()
+        out = claude.read()
         self.assertEqual(run.call_count, 2)  # 30초 묶음 안이어도 다시 묻는다
         a = out["accounts"][0]
         self.assertEqual((a["label"], a["active"], a["note"], a["attention"]), ("b@example.com", True, self.RELOGIN, True))
@@ -1319,11 +1320,11 @@ class SlotIdentityTest(StoreCase):
         """covers: USAGE-6. 같은 이메일의 다른 조직. 조직 이름이 같아도 UUID 로 가른다"""
         self.slot_holds("a@example.com", "o1")
         run = self.hswap(hswap_row())
-        claude_accounts.read()
+        claude.read()
         self.slot_holds("a@example.com", "o2")
         self.live_identity.return_value = ("a@example.com", "o2")
         run.return_value = {"accounts": [hswap_row(organizationUuid="o2", active=False)]}
-        self.assertTrue(claude_accounts.read()["accounts"][0]["active"])
+        self.assertTrue(claude.read()["accounts"][0]["active"])
         self.assertEqual(run.call_count, 2)
 
     def test_unchanged_identity_does_not_rerun_hswap(self):
@@ -1331,7 +1332,7 @@ class SlotIdentityTest(StoreCase):
         self.slot_holds("a@example.com", "o1")
         run = self.hswap(hswap_row())
         for _ in range(4):
-            self.assertTrue(claude_accounts.read()["accounts"][0]["active"])
+            self.assertTrue(claude.read()["accounts"][0]["active"])
         run.assert_called_once()
 
     def test_missing_org_uuid_means_the_same_as_empty(self):
@@ -1340,21 +1341,21 @@ class SlotIdentityTest(StoreCase):
         self.write("cache/usage.json", {"schemaVersion": 2, "accounts": {}})
         self.live_identity.return_value = ("a@example.com", "")
         for uuid in ("", None):
-            claude_accounts._state.cache = None
+            claude._state.cache = None
             run = self.hswap(hswap_row(organizationUuid=uuid))
             for _ in range(2):
-                self.assertTrue(claude_accounts.read()["accounts"][0]["active"], uuid)
+                self.assertTrue(claude.read()["accounts"][0]["active"], uuid)
             run.assert_called_once()
 
     def test_failed_recheck_falls_back_to_the_new_account_in_the_store(self):
         """covers: USAGE-6, USAGE-7"""
         self.slot_holds("a@example.com", "o1")
         run = self.hswap(hswap_row())
-        claude_accounts.read()
+        claude.read()
         self.slot_holds("b@example.com", "b-org", strikes=1)
         self.live_identity.return_value = ("b@example.com", "b-org")
         run.side_effect = RuntimeError("locked")
-        out = claude_accounts.read()
+        out = claude.read()
         a = out["accounts"][0]
         self.assertEqual((a["label"], a["source"], a["active"], a["attention"]), ("b@example.com", "cswap-cache", True, True))
         self.assertEqual(out["login"]["state"], "relogin")
@@ -1363,10 +1364,10 @@ class SlotIdentityTest(StoreCase):
         """covers: USAGE-6, USAGE-7. hswap 이 아직 A 를 답해도 B 의 사용 중 표시와 인증 실패를 A 에 옮기지 않는다"""
         self.slot_holds("a@example.com", "o1")
         run = self.hswap(hswap_row())
-        claude_accounts.read()
+        claude.read()
         self.slot_holds("b@example.com", "b-org", strikes=1)
         self.live_identity.return_value = ("b@example.com", "b-org")
-        out = claude_accounts.read()
+        out = claude.read()
         self.assertEqual(run.call_count, 2)
         a = out["accounts"][0]
         self.assertEqual((a["label"], a["active"], a["note"], a["attention"]), ("a@example.com", False, None, False))
@@ -1377,12 +1378,12 @@ class SlotIdentityTest(StoreCase):
         self.slot_holds("a@example.com", "org-uuid-secret")
         self.live_identity.return_value = ("a@example.com", "org-uuid-secret")
         self.hswap(hswap_row(organizationUuid="org-uuid-secret"))
-        fingerprint = claude_accounts._fingerprint("a@example.com", "org-uuid-secret")
+        fingerprint = claude._fingerprint("a@example.com", "org-uuid-secret")
         with self.independent_mocks():
-            independent_usage._tasks.clear()
-            self.addCleanup(independent_usage._tasks.clear)
-            bodies = [claude_accounts.read(), claude_accounts.read(force=True), independent_usage.read(force=True)]
-        self.assertEqual(claude_accounts._state.cache[1]["ids"]["1"], fingerprint)  # 묶음에는 있어 비교할 수 있다
+            independent._tasks.clear()
+            self.addCleanup(independent._tasks.clear)
+            bodies = [claude.read(), claude.read(force=True), independent.read(force=True)]
+        self.assertEqual(claude._state.cache[1]["ids"]["1"], fingerprint)  # 묶음에는 있어 비교할 수 있다
         for body in bodies:
             text = json.dumps(body, ensure_ascii=False)
             for secret in ("org-uuid-secret", fingerprint, '"ids"'):
@@ -1392,7 +1393,7 @@ class SlotIdentityTest(StoreCase):
 class StoreShapeTest(StoreCase):
     """슬롯 추가·삭제·신원 변경·사용 중 슬롯 변경은 묶어 둔 hswap 값을 무효로 한다."""
 
-    RELOGIN = claude_accounts.STATUS["relogin_required"][0]
+    RELOGIN = claude.STATUS["relogin_required"][0]
     A = ("a@example.com", "o1")
     B = ("b@example.com", "o2")
 
@@ -1411,11 +1412,11 @@ class StoreShapeTest(StoreCase):
         """covers: USAGE-6, USAGE-7. A 를 묶어 둔 뒤 새 슬롯에 B 를 더해 활성화하고 인증 실패가 적히면 다음 보통 읽기에 보인다"""
         self.slots((1, self.A, 0))
         run = self.hswap(self.row(1, self.A, active=True))
-        self.assertEqual([a["label"] for a in claude_accounts.read()["accounts"]], ["a@example.com"])
+        self.assertEqual([a["label"] for a in claude.read()["accounts"]], ["a@example.com"])
         self.slots((1, self.A, 0), (2, self.B, 1))
         self.live_identity.return_value = self.B
         run.return_value = {"accounts": [self.row(1, self.A), self.row(2, self.B, active=True)]}
-        out = claude_accounts.read()
+        out = claude.read()
         self.assertEqual(run.call_count, 2)  # 30초 묶음 안이어도 다시 묻는다
         a, b = out["accounts"]
         self.assertEqual((a["label"], a["active"], a["attention"]), ("a@example.com", False, False))
@@ -1426,20 +1427,20 @@ class StoreShapeTest(StoreCase):
         """covers: USAGE-6"""
         self.slots((1, self.A, 0), (2, self.B, 0))
         run = self.hswap(self.row(1, self.A, active=True), self.row(2, self.B))
-        self.assertEqual(len(claude_accounts.read()["accounts"]), 2)
+        self.assertEqual(len(claude.read()["accounts"]), 2)
         self.slots((1, self.A, 0))
         run.return_value = {"accounts": [self.row(1, self.A, active=True)]}
-        self.assertEqual([a["slot"] for a in claude_accounts.read()["accounts"]], ["1"])
+        self.assertEqual([a["slot"] for a in claude.read()["accounts"]], ["1"])
         self.assertEqual(run.call_count, 2)
 
     def test_removed_slot_disappears_when_hswap_fails(self):
         """covers: USAGE-6. 다시 묻기가 실패하면 지금 저장소 값을 쓴다"""
         self.slots((1, self.A, 0), (2, self.B, 0))
         run = self.hswap(self.row(1, self.A, active=True), self.row(2, self.B))
-        claude_accounts.read()
+        claude.read()
         self.slots((1, self.A, 0))
         run.side_effect = RuntimeError("locked")
-        rows = claude_accounts.read()["accounts"]
+        rows = claude.read()["accounts"]
         self.assertEqual([(a["slot"], a["source"]) for a in rows], [("1", "cswap-cache")])
         self.assertIn("locked", rows[0]["note"])
 
@@ -1447,20 +1448,20 @@ class StoreShapeTest(StoreCase):
         """covers: USAGE-6"""
         self.slots((1, self.A, 0))
         run = self.hswap(self.row(1, self.A, active=True))
-        claude_accounts.read()
+        claude.read()
         self.slots((1, self.A, 0), (2, self.B, 0))
         run.return_value = {"accounts": [self.row(1, self.A, active=True), self.row(2, self.B)]}
-        self.assertEqual([a["slot"] for a in claude_accounts.read()["accounts"]], ["1", "2"])
+        self.assertEqual([a["slot"] for a in claude.read()["accounts"]], ["1", "2"])
         self.assertEqual(run.call_count, 2)
 
     def test_active_slot_change_alone_reruns_hswap(self):
         """covers: USAGE-6. 슬롯 구성이 같아도 사용 중 슬롯이 바뀌면 묶음을 쓰지 않는다"""
         self.slots((1, self.A, 0), (2, self.B, 0))
         run = self.hswap(self.row(1, self.A, active=True), self.row(2, self.B))
-        claude_accounts.read()
+        claude.read()
         self.live_identity.return_value = self.B
         run.return_value = {"accounts": [self.row(1, self.A), self.row(2, self.B, active=True)]}
-        self.assertEqual([a["active"] for a in claude_accounts.read()["accounts"]], [False, True])
+        self.assertEqual([a["active"] for a in claude.read()["accounts"]], [False, True])
         self.assertEqual(run.call_count, 2)
 
     def test_change_during_the_call_is_seen_by_the_same_read(self):
@@ -1473,9 +1474,9 @@ class StoreShapeTest(StoreCase):
             self.slots((1, self.A, 0), (2, self.B, 0))
             return answers.pop(0)
         run.side_effect = store_changes_meanwhile
-        self.assertEqual(len(claude_accounts.read()["accounts"]), 2)
+        self.assertEqual(len(claude.read()["accounts"]), 2)
         self.assertEqual(run.call_count, 2)
-        self.assertEqual(len(claude_accounts.read()["accounts"]), 2)
+        self.assertEqual(len(claude.read()["accounts"]), 2)
         self.assertEqual(run.call_count, 2)
 
     def hold_first_list(self):
@@ -1504,14 +1505,14 @@ class StoreShapeTest(StoreCase):
         self.assertEqual((out["login"]["state"], out["login"]["slot"]), ("relogin", "2"))
 
     def assert_cache_matches_the_store(self):
-        self.assertEqual(claude_accounts._state.cache[2], claude_accounts._store_shape(claude_accounts._store_read()))
-        self.assertEqual([a["slot"] for a in claude_accounts._state.cache[1]["accounts"]], ["1", "2"])
+        self.assertEqual(claude._state.cache[2], claude._store_shape(claude._store_read()))
+        self.assertEqual([a["slot"] for a in claude._state.cache[1]["accounts"]], ["1", "2"])
 
     def test_reader_does_not_coalesce_onto_a_call_from_an_older_store(self):
         """covers: USAGE-6, USAGE-7. A 의 호출이 진행 중일 때 저장소가 바뀌고 B 가 읽으면, B 는 A 의 답을 다시 쓰지 않고 새 호출을 한다"""
         self.slots((1, self.A, 0))
         run = self.hold_first_list()
-        real, b_waits = claude_accounts._lock, threading.Event()
+        real, b_waits = claude._lock, threading.Event()
 
         class SpyLock:  # B 가 잠금을 기다리기 시작한 때를 안다
             def acquire(self, timeout=-1):
@@ -1522,12 +1523,12 @@ class StoreShapeTest(StoreCase):
             def release(self):
                 real.release()
         box = {}
-        with mock.patch.object(claude_accounts, "_lock", SpyLock()):
-            a = threading.Thread(target=lambda: box.update(a=claude_accounts.read(force=True)), name="reader-a")
+        with mock.patch.object(claude, "_lock", SpyLock()):
+            a = threading.Thread(target=lambda: box.update(a=claude.read(force=True)), name="reader-a")
             a.start()
             self.assertTrue(self.entered.wait(5))
             self.change_store_to_b()
-            b = threading.Thread(target=lambda: box.update(b=claude_accounts.read()), name="reader-b")
+            b = threading.Thread(target=lambda: box.update(b=claude.read()), name="reader-b")
             b.start()
             self.assertTrue(b_waits.wait(5))
             self.gate.set()  # A 의 옛 답이 B 가 잠금을 기다리는 중에 도착한다
@@ -1538,7 +1539,7 @@ class StoreShapeTest(StoreCase):
         self.assert_b_is_current(box["b"])
         self.assert_b_is_current(box["a"])  # A 도 옛 답을 내지 않는다
         self.assert_cache_matches_the_store()  # 늦게 온 옛 답이 새 결과를 덮지 않았다
-        self.assert_b_is_current(claude_accounts.read())  # 다음 보통 읽기도 B 이고 다시 부르지 않는다
+        self.assert_b_is_current(claude.read())  # 다음 보통 읽기도 B 이고 다시 부르지 않는다
         self.assertEqual(run.call_count, 2)
 
     def test_old_answer_after_the_lock_wait_gave_up_is_not_taken_as_current(self):
@@ -1547,16 +1548,16 @@ class StoreShapeTest(StoreCase):
         run = self.hold_first_list()
         self.holding = False
         run.side_effect, later = (lambda *a, **k: {"accounts": [self.row(1, self.A, active=True)]}), run.side_effect
-        claude_accounts.read()  # 지금 저장소의 값을 묶어 둔다
+        claude.read()  # 지금 저장소의 값을 묶어 둔다
         self.holding = True
         run.side_effect = later
         box = {}
-        a = threading.Thread(target=lambda: box.update(a=claude_accounts.read(force=True)), name="reader-a")
+        a = threading.Thread(target=lambda: box.update(a=claude.read(force=True)), name="reader-a")
         a.start()
         self.assertTrue(self.entered.wait(5))
         self.change_store_to_b()
-        with mock.patch.object(claude_accounts, "TIMEOUT_S", -4.9):  # 잠금을 0.1초만 기다린다
-            out = claude_accounts.read()
+        with mock.patch.object(claude, "TIMEOUT_S", -4.9):  # 잠금을 0.1초만 기다린다
+            out = claude.read()
         self.assertEqual([(r["slot"], r["active"], r["source"]) for r in out["accounts"]], [("1", False, "cswap-cache"), ("2", True, "cswap-cache")])
         self.assertIn("hswap 이 응답하지 않습니다", out["accounts"][0]["note"])
         self.assertEqual(out["login"]["state"], "relogin")
@@ -1565,7 +1566,7 @@ class StoreShapeTest(StoreCase):
         self.assertFalse(a.is_alive())
         self.assert_b_is_current(box["a"])
         self.assert_cache_matches_the_store()
-        self.assert_b_is_current(claude_accounts.read())
+        self.assert_b_is_current(claude.read())
 
     def test_page_reader_sharing_a_running_job_gets_current_values(self):
         """covers: USAGE-6, USAGE-7. 독립 경로는 진행 중인 Claude 작업을 함께 기다린다: 그 작업도 옛 답을 내지 않는다"""
@@ -1573,14 +1574,14 @@ class StoreShapeTest(StoreCase):
         run = self.hold_first_list()
         box = {}
         with self.independent_mocks():
-            independent_usage._tasks.clear()
-            self.addCleanup(independent_usage._tasks.clear)
+            independent._tasks.clear()
+            self.addCleanup(independent._tasks.clear)
             pick = lambda body: next(p for p in body["providers"] if p["id"] == "claude")
-            a = threading.Thread(target=lambda: box.update(a=pick(independent_usage.read())))
+            a = threading.Thread(target=lambda: box.update(a=pick(independent.read())))
             a.start()
             self.assertTrue(self.entered.wait(5))
             self.change_store_to_b()
-            b = threading.Thread(target=lambda: box.update(b=pick(independent_usage.read())))
+            b = threading.Thread(target=lambda: box.update(b=pick(independent.read())))
             b.start()
             self.gate.set()
             a.join(20)
@@ -1594,19 +1595,19 @@ class StoreShapeTest(StoreCase):
         """covers: USAGE-6. hswap 답과 저장소가 계속 어긋나도 변경 한 번에 한 번만 다시 부른다"""
         self.slots((1, self.A, 0))
         run = self.hswap(self.row(1, self.A, active=True))
-        claude_accounts.read()
+        claude.read()
         self.slots((1, self.A, 0), (2, self.B, 0))
         for _ in range(4):
-            claude_accounts.read()
+            claude.read()
         self.assertEqual(run.call_count, 2)
 
     def test_new_usage_does_not_rerun(self):
         """covers: USAGE-6. 저장소의 사용량 값과 시각이 새로워진 것만으로는 묶음을 무효로 하지 않는다"""
         self.slots((1, self.A, 0))
         run = self.hswap(self.row(1, self.A, active=True))
-        claude_accounts.read()
+        claude.read()
         self.slots((1, self.A, 0))
-        self.assertEqual(claude_accounts.read()["accounts"][0]["source"], "cswap")
+        self.assertEqual(claude.read()["accounts"][0]["source"], "cswap")
         run.assert_called_once()
 
     def test_unreadable_store_keeps_using_held_values(self):
@@ -1614,21 +1615,21 @@ class StoreShapeTest(StoreCase):
         self.slots((1, self.A, 0))
         os.chmod(os.path.join(self.root, "sequence.json"), 0o644)
         run = self.hswap(self.row(1, self.A, active=True))
-        claude_accounts.read(force=True)
+        claude.read(force=True)
         for _ in range(3):
-            self.assertEqual(len(claude_accounts.read()["accounts"]), 1)
+            self.assertEqual(len(claude.read()["accounts"]), 1)
         run.assert_called_once()
 
 
 class ReadDeadlineTest(StoreCase):
     """읽기 한 번의 전체 시한. 가상 시계와 계속 바뀌는 저장소로 잠금 대기와 CLI 호출이 시한을 함께 쓰는지 본다."""
 
-    RELOGIN = claude_accounts.STATUS["relogin_required"][0]
+    RELOGIN = claude.STATUS["relogin_required"][0]
 
     def setUp(self):
         super().setUp()
         self.now = [1000.0]
-        p = mock.patch.object(claude_accounts.time, "monotonic", lambda: self.now[0])
+        p = mock.patch.object(claude.time, "monotonic", lambda: self.now[0])
         p.start()
         self.addCleanup(p.stop)
         self.live_identity.return_value = ("u1@example.com", "o1")
@@ -1658,8 +1659,8 @@ class ReadDeadlineTest(StoreCase):
         return run
 
     def assert_store_answer(self, out, run, most_calls):
-        self.assertLessEqual(self.now[0] - 1000.0, claude_accounts.READ_BUDGET_S)
-        self.assertLess(claude_accounts.READ_BUDGET_S, 55)  # independent_usage.read 의 대기 시간 안
+        self.assertLessEqual(self.now[0] - 1000.0, claude.READ_BUDGET_S)
+        self.assertLess(claude.READ_BUDGET_S, 55)  # independent.read 의 대기 시간 안
         self.assertLessEqual(run.call_count, most_calls)
         self.assertEqual([a["label"] for a in out["accounts"]], [f"u{n}@example.com" for n in range(1, self.slots + 1)])  # 지금 저장소
         self.assertEqual({a["source"] for a in out["accounts"]}, {"cswap-cache"})
@@ -1669,7 +1670,7 @@ class ReadDeadlineTest(StoreCase):
     def test_retries_run_out_on_a_changing_store(self):
         """covers: USAGE-6. 재시도는 2번까지이고, 확정하지 못한 CLI 값 대신 지금 저장소 값과 로그인 상태를 준다"""
         run = self.changing_cli(takes=1)
-        out = claude_accounts.read(force=True)
+        out = claude.read(force=True)
         self.assertEqual(run.call_count, 3)
         self.assert_store_answer(out, run, 3)
         self.assertIn("확정하지 못했습니다", out["accounts"][0]["note"])
@@ -1677,13 +1678,13 @@ class ReadDeadlineTest(StoreCase):
     def test_cli_calls_share_the_deadline(self):
         """covers: USAGE-6. 느린 CLI 는 남은 시간만 받는다"""
         run = self.changing_cli(takes=15)
-        out = claude_accounts.read(force=True)
-        self.assertEqual(self.timeouts, [15, 15, claude_accounts.READ_BUDGET_S - 30])
+        out = claude.read(force=True)
+        self.assertEqual(self.timeouts, [15, 15, claude.READ_BUDGET_S - 30])
         self.assert_store_answer(out, run, 3)
 
     def test_lock_waits_share_the_deadline(self):
         """covers: USAGE-6. 잠금 대기도 같은 시한에서 빠지고, 시한에 닿으면 CLI 를 부르지 않는다"""
-        real, now, waits = claude_accounts._lock, self.now, []
+        real, now, waits = claude._lock, self.now, []
 
         class WaitsAllItsTimeout:
             def acquire(self, timeout=-1):
@@ -1694,17 +1695,17 @@ class ReadDeadlineTest(StoreCase):
             def release(self):
                 real.release()
         run = self.changing_cli(takes=15)
-        with mock.patch.object(claude_accounts, "_lock", WaitsAllItsTimeout()):
-            out = claude_accounts.read(force=True)
+        with mock.patch.object(claude, "_lock", WaitsAllItsTimeout()):
+            out = claude.read(force=True)
         self.assertEqual(run.call_count, 1)
-        self.assertEqual(waits, [claude_accounts.TIMEOUT_S + 5, claude_accounts.READ_BUDGET_S - claude_accounts.TIMEOUT_S - claude_accounts.TIMEOUT_S - 5])
+        self.assertEqual(waits, [claude.TIMEOUT_S + 5, claude.READ_BUDGET_S - claude.TIMEOUT_S - claude.TIMEOUT_S - 5])
         self.assert_store_answer(out, run, 3)
 
     def test_deadline_reached_without_a_store(self):
         """covers: USAGE-6. 대체값이 없으면 오류와 로그인 상태만 준다"""
         os.chmod(os.path.join(self.root, "sequence.json"), 0o644)
         self.keepalive(activeSlot=None, ok=False, error={"type": "relogin_required"})
-        real, now = claude_accounts._lock, self.now
+        real, now = claude._lock, self.now
 
         class Stuck:
             def acquire(self, timeout=-1):
@@ -1714,15 +1715,15 @@ class ReadDeadlineTest(StoreCase):
             def release(self):
                 real.release()
         self.changing_cli(takes=1)
-        with mock.patch.object(claude_accounts, "_lock", Stuck()):
-            out = claude_accounts.read(force=True)
+        with mock.patch.object(claude, "_lock", Stuck()):
+            out = claude.read(force=True)
         self.assertEqual((out["accounts"], out["login"]["state"]), ([], "relogin"))
         self.assertIn("error", out)
 
     def test_settled_answer_is_still_the_cli_answer(self):
         """covers: USAGE-6"""
         run = self.hswap(hswap_row(email="u1@example.com", organizationUuid="o1"))
-        out = claude_accounts.read(force=True)
+        out = claude.read(force=True)
         run.assert_called_once()
         self.assertEqual(out["accounts"][0]["source"], "cswap")
 
@@ -1750,30 +1751,30 @@ class ForcedTaskTest(StoreCase):
         return next(p for p in body["providers"] if p["id"] == "claude")["accounts"][0]["windows"][0]["used"]
 
     def reader(self, box, key, force):
-        t = threading.Thread(target=lambda: box.update({key: self.used(independent_usage.read(force=force))}))
+        t = threading.Thread(target=lambda: box.update({key: self.used(independent.read(force=force))}))
         t.start()
         return t
 
     def run_page(self):
         p = self.independent_mocks()
-        independent_usage._tasks.clear()
-        self.addCleanup(independent_usage._tasks.clear)
+        independent._tasks.clear()
+        self.addCleanup(independent._tasks.clear)
         return p
 
     def test_refresh_does_not_ride_on_an_ordinary_read_of_cached_values(self):
         """covers: USAGE-6. 묶음만 다시 쓰는 보통 읽기가 진행 중이어도 새로고침은 hswap 에 묻고 새 값을 받는다"""
         box = {}
         with self.run_page():
-            self.assertEqual(self.used(independent_usage.read()), 10)
+            self.assertEqual(self.used(independent.read()), 10)
             self.assertEqual(self.calls, 1)
-            paused, gate, real = threading.Event(), threading.Event(), claude_accounts._store_read
+            paused, gate, real = threading.Event(), threading.Event(), claude._store_read
 
             def hold_the_ordinary_read():
                 paused.set()
                 gate.wait(10)
                 return real()
             self.addCleanup(gate.set)
-            with mock.patch.object(claude_accounts, "_store_read") as store:
+            with mock.patch.object(claude, "_store_read") as store:
                 def first_read_waits():
                     store.side_effect = real
                     return hold_the_ordinary_read()
@@ -1842,7 +1843,7 @@ class ForcedTaskTest(StoreCase):
 class IdentityNormalizationTest(StoreCase):
     """신원 비교는 한 규칙을 지난다: 조직 UUID 의 null·누락·빈 문자열은 같고, 이메일은 앞뒤 공백과 대소문자를 보지 않는다."""
 
-    RELOGIN = claude_accounts.STATUS["relogin_required"][0]
+    RELOGIN = claude.STATUS["relogin_required"][0]
     MISSING = object()
 
     def setUp(self):
@@ -1878,10 +1879,10 @@ class IdentityNormalizationTest(StoreCase):
         self.roster(uuid=None)
         self.logged_in(uuid=None)
         self.hswap(self.cli_row(uuid=None))
-        out = claude_accounts.read(force=True)
+        out = claude.read(force=True)
         self.assertTrue(out["accounts"][0]["active"])
         self.assertNotIn("login", out)
-        claude_accounts._state.cache = None
+        claude._state.cache = None
         self.assertTrue(self.full_read()["accounts"][0]["active"])
 
     def test_null_org_account_keeps_login_and_slot_with_keepalive(self):
@@ -1890,16 +1891,16 @@ class IdentityNormalizationTest(StoreCase):
         self.logged_in(uuid=None)
         self.hswap(self.cli_row(uuid=None))
         self.keepalive(activeSlot=1)
-        s = claude_accounts.read(force=True)["login"]
+        s = claude.read(force=True)["login"]
         self.assertEqual((s["state"], s["slot"], s["other"]), ("ok", "1", False))
         self.keepalive(activeSlot=1, ok=False, error={"type": "no_credentials", "message": "m"})
-        s = claude_accounts.read()["login"]
+        s = claude.read()["login"]
         self.assertEqual((s["state"], s["slot"], s["other"], s["text"]), ("failed", "1", False, "자동 갱신 실패(자격 증명 없음)"))
         self.keepalive(activeSlot=2)
-        self.assertEqual(claude_accounts.read()["login"]["state"], "other_account")  # 정말 다른 슬롯의 기록은 그대로 가린다
+        self.assertEqual(claude.read()["login"]["state"], "other_account")  # 정말 다른 슬롯의 기록은 그대로 가린다
         # 저장소가 기록보다 나중에 바뀌었다(전환·추가): 유지가 아직 돌지 않은 것이라 같은 상태를 attention 없이 보인다
         self.write("sequence.json", {"sequence": [1], "lastUpdated": iso(time.time() - 60), "accounts": {"1": {"email": "a@example.com", "organizationName": "Org"}}})
-        s = claude_accounts.read()["login"]
+        s = claude.read()["login"]
         self.assertEqual((s["state"], s["attention"], s["slot"], s["text"]), ("other_account", False, None, "사용 중 슬롯 1: 다음 자동 갱신 때 기록이 바뀝니다"))
 
     def test_null_org_account_gets_relogin_from_the_store(self):
@@ -1907,7 +1908,7 @@ class IdentityNormalizationTest(StoreCase):
         self.roster(uuid=None, strikes=1)
         self.logged_in(uuid=None)
         self.hswap(self.cli_row(uuid=None))
-        out = claude_accounts.read(force=True)
+        out = claude.read(force=True)
         a = out["accounts"][0]
         self.assertEqual((a["active"], a["note"], a["attention"]), (True, self.RELOGIN, True))
         self.assertEqual((out["login"]["state"], out["login"]["slot"], out["login"]["other"]), ("relogin", "1", False))
@@ -1916,7 +1917,7 @@ class IdentityNormalizationTest(StoreCase):
         """covers: USAGE-6. hswap 없이 저장소만 읽어도 같다"""
         self.roster(uuid=None)
         self.logged_in(uuid=None)
-        a = claude_accounts.read()["accounts"][0]
+        a = claude.read()["accounts"][0]
         self.assertEqual((a["active"], a["source"]), (True, "cswap-cache"))
 
     def test_null_missing_and_empty_uuid_are_the_same_account(self):
@@ -1929,12 +1930,12 @@ class IdentityNormalizationTest(StoreCase):
                         where = (stored, cached, live, cli)
                         self.roster(uuid=stored, usage_uuid=cached)
                         self.logged_in(uuid=live)
-                        direct = claude_accounts._store_read()["accounts"][0]
+                        direct = claude._store_read()["accounts"][0]
                         self.assertEqual((direct["active"], [w["used"] for w in direct["windows"]]), (True, [33]), where)  # 저장소↔로그인, 저장소↔사용량 캐시
                         run = self.hswap(self.cli_row(uuid=cli, active=False))
-                        claude_accounts._state.cache = None
+                        claude._state.cache = None
                         for _ in range(2):
-                            self.assertTrue(claude_accounts.read()["accounts"][0]["active"], where)  # CLI↔저장소
+                            self.assertTrue(claude.read()["accounts"][0]["active"], where)  # CLI↔저장소
                         run.assert_called_once()  # 모습이 달라졌다고 보아 다시 부르지 않는다
 
     def test_email_ignores_case_and_surrounding_space(self):
@@ -1942,7 +1943,7 @@ class IdentityNormalizationTest(StoreCase):
         self.roster(email="A@Example.com", uuid="ORG-1", strikes=1)
         self.logged_in(email=" a@EXAMPLE.com\n", uuid="org-1 ")
         self.hswap(self.cli_row(email="a@example.COM ", uuid="org-1", active=False))
-        out = claude_accounts.read(force=True)
+        out = claude.read(force=True)
         a = out["accounts"][0]
         self.assertEqual((a["active"], a["note"]), (True, self.RELOGIN))
         self.assertEqual(out["login"]["state"], "relogin")
@@ -1952,12 +1953,12 @@ class IdentityNormalizationTest(StoreCase):
         self.roster(uuid=None, strikes=1)
         for email, uuid in (("other@example.com", None), ("a@example.com", "org-1")):
             self.logged_in(email=email, uuid=uuid)
-            self.assertFalse(claude_accounts._store_read()["accounts"][0]["active"], (email, uuid))
-            self.assertNotEqual(claude_accounts._fingerprint("a@example.com", None), claude_accounts._fingerprint(email, uuid or "x@"))
+            self.assertFalse(claude._store_read()["accounts"][0]["active"], (email, uuid))
+            self.assertNotEqual(claude._fingerprint("a@example.com", None), claude._fingerprint(email, uuid or "x@"))
         self.logged_in(uuid=None)
         self.hswap(self.cli_row(uuid="org-1"))
-        claude_accounts._state.cache = None
-        a = claude_accounts.read(force=True)["accounts"][0]
+        claude._state.cache = None
+        a = claude.read(force=True)["accounts"][0]
         self.assertEqual((a["active"], a["note"]), (False, None))  # 같은 슬롯이라도 조직이 다른 CLI 행에 옮기지 않는다
 
 
@@ -1981,11 +1982,11 @@ class AuthRecordChangeTest(StoreCase):
         self.store(time.time() - 60, authDeadStrikes=1)
         self.keepalive(activeSlot=1, ok=False, error={"type": "relogin_required"}, loginExpiresAt=self.FAR)
         run = self.hswap(self.relogin_row())
-        self.assertEqual(claude_accounts.read()["login"]["state"], "relogin")
+        self.assertEqual(claude.read()["login"]["state"], "relogin")
         self.store(time.time() - 60, authDeadStrikes=0)
         self.keepalive(activeSlot=1, loginExpiresAt=self.FAR)
         self.healed(run)
-        out = claude_accounts.read()
+        out = claude.read()
         self.assertEqual(run.call_count, 2)
         self.assert_healthy(out)
         self.assertEqual(out["login"]["state"], "ok")
@@ -1994,26 +1995,26 @@ class AuthRecordChangeTest(StoreCase):
         """covers: USAGE-6, USAGE-7. 저장소 쪽만, keepalive 쪽만 바뀌어도 다시 묻는다"""
         self.store(time.time() - 60, authDeadStrikes=1)
         run = self.hswap(self.relogin_row())
-        claude_accounts.read()
+        claude.read()
         self.store(time.time() - 60, authDeadStrikes=0)  # keepalive 없는 기기: 저장소의 인증 실패만 지워진다
         self.healed(run)
-        out = claude_accounts.read()
+        out = claude.read()
         self.assertEqual(run.call_count, 2)
         self.assert_healthy(out)
         self.assertNotIn("login", out)
-        claude_accounts._state.cache = None
+        claude._state.cache = None
         self.keepalive(activeSlot=1, ok=False, error={"type": "refresh_failed"}, loginExpiresAt=self.FAR)
         run.return_value = {"accounts": [self.relogin_row()]}
-        claude_accounts.read()
+        claude.read()
         self.assertEqual(run.call_count, 3)
         self.keepalive(activeSlot=1, loginExpiresAt=self.FAR)  # 실패 종류가 정상으로
         self.healed(run)
-        self.assert_healthy(claude_accounts.read())
+        self.assert_healthy(claude.read())
         self.assertEqual(run.call_count, 4)
         self.keepalive(activeSlot=1, ok=False, error={"type": "locked"}, loginExpiresAt=self.FAR)  # 정상이 실패로
-        claude_accounts.read()
+        claude.read()
         self.keepalive(activeSlot=1, ok=False, error={"type": "refresh_failed"}, loginExpiresAt=self.FAR)  # 실패 종류끼리도 다르다
-        claude_accounts.read()
+        claude.read()
         self.assertEqual(run.call_count, 6)
 
     def test_expiry_warning_clears_when_keepalive_has_a_new_deadline(self):
@@ -2022,12 +2023,12 @@ class AuthRecordChangeTest(StoreCase):
         self.store(time.time() - 60)
         self.keepalive(activeSlot=1, loginExpiresAt=soon)
         run = self.hswap(hswap_row(loginExpiresAt=soon))
-        before = claude_accounts.read()
+        before = claude.read()
         self.assertIn("로그인 만료", before["accounts"][0]["note"])
         self.assertEqual(before["login"]["state"], "expiring")
         self.keepalive(activeSlot=1, loginExpiresAt=self.FAR)
         self.healed(run)
-        out = claude_accounts.read()
+        out = claude.read()
         self.assertEqual(run.call_count, 2)
         self.assert_healthy(out)
         self.assertEqual(out["login"]["state"], "ok")
@@ -2037,11 +2038,11 @@ class AuthRecordChangeTest(StoreCase):
         self.store(time.time() - 60)
         self.keepalive(activeSlot=1, loginExpiresAt=self.FAR, checkedAt=time.time() - 300)
         run = self.hswap(hswap_row())
-        self.assertEqual(claude_accounts.read()["login"]["text"], "로그인됨, 자동 갱신 5분 전")
+        self.assertEqual(claude.read()["login"]["text"], "로그인됨, 자동 갱신 5분 전")
         self.keepalive(activeSlot=1, loginExpiresAt=self.FAR, checkedAt=time.time() - 120, action="refreshed", note="split_brain",
                        accessExpiresAt=iso(time.time() + 7 * 3600))
         for _ in range(3):
-            out = claude_accounts.read()
+            out = claude.read()
         self.assertEqual(out["login"]["text"], "로그인됨, 자동 갱신 2분 전")  # 문구는 읽을 때마다 새로 만든다
         run.assert_called_once()
 
@@ -2049,9 +2050,9 @@ class AuthRecordChangeTest(StoreCase):
         """covers: USAGE-6. 이미 실패인 계정의 횟수만 늘면 보이는 값이 같아 다시 묻지 않는다"""
         self.store(time.time() - 60, authDeadStrikes=1)
         run = self.hswap(hswap_row())
-        claude_accounts.read()
+        claude.read()
         self.store(time.time() - 60, authDeadStrikes=2)
-        self.assertEqual(claude_accounts.read()["login"]["state"], "relogin")
+        self.assertEqual(claude.read()["login"]["state"], "relogin")
         run.assert_called_once()
 
     def test_record_changes_without_a_readable_store(self):
@@ -2060,10 +2061,10 @@ class AuthRecordChangeTest(StoreCase):
         os.chmod(os.path.join(self.root, "sequence.json"), 0o644)
         self.keepalive(ok=False, activeSlot=None, error={"type": "relogin_required"}, loginExpiresAt=self.FAR)
         run = self.hswap(self.relogin_row())
-        claude_accounts.read(force=True)
+        claude.read(force=True)
         self.keepalive(activeSlot=None, loginExpiresAt=self.FAR)
         self.healed(run)
-        self.assert_healthy(claude_accounts.read())
+        self.assert_healthy(claude.read())
         self.assertEqual(run.call_count, 2)
 
     def test_record_values_stay_internal(self):
@@ -2071,14 +2072,14 @@ class AuthRecordChangeTest(StoreCase):
         self.store(time.time() - 60)
         self.keepalive(activeSlot=1, ok=False, error={"type": "secret-kind", "message": "m"}, loginExpiresAt=self.FAR)
         self.hswap(hswap_row())
-        text = json.dumps(claude_accounts.read(force=True), ensure_ascii=False)
+        text = json.dumps(claude.read(force=True), ensure_ascii=False)
         self.assertNotIn("secret-kind", text)
         self.assertIn("알 수 없는 오류", text)
 
 
 NOW, MONO = 1_800_000_000.0, 5000.0
-STALE, KEEPALIVE_STALE = claude_accounts.config.CLAUDE_STALE_S, claude_accounts.config.CLAUDE_KEEPALIVE_STALE_S
-RELOGIN = claude_accounts.STATUS["relogin_required"][0]
+STALE, KEEPALIVE_STALE = claude.config.CLAUDE_STALE_S, claude.config.CLAUDE_KEEPALIVE_STALE_S
+RELOGIN = claude.STATUS["relogin_required"][0]
 
 
 def shown_row(slot="1", **kw):
@@ -2104,7 +2105,7 @@ class JudgeRowsTest(unittest.TestCase):
     """행 판정을 값만으로 본다: 패치도 파일도 없다."""
 
     def judge(self, out, store, hswap=True):
-        return claude_accounts._judge_rows(out, store, hswap, NOW)
+        return claude._judge_rows(out, store, hswap, NOW)
 
     def test_nothing_to_show(self):
         """covers: USAGE-6"""
@@ -2192,7 +2193,7 @@ class JudgeAskTest(unittest.TestCase):
     SHAPE = "지금 모습"
 
     def judge(self, force=False, store=None, held=None, discovered=False, fatal=None, device=None):
-        return claude_accounts._judge_ask(force, store, self.SHAPE, held, discovered, fatal, device, MONO, NOW)
+        return claude._judge_ask(force, store, self.SHAPE, held, discovered, fatal, device, MONO, NOW)
 
     def test_table(self):
         """covers: USAGE-6. 표의 칸: 이름, 입력, 물을까, 묶음을 돌려주는가"""
@@ -2224,9 +2225,9 @@ class JudgeAskTest(unittest.TestCase):
 
     def test_recent_fact_expires_at_the_threshold(self):
         """covers: USAGE-7"""
-        self.assertEqual(claude_accounts._recent((MONO - STALE + 1, "config_conflict"), MONO), "config_conflict")
-        self.assertIsNone(claude_accounts._recent((MONO - STALE, "config_conflict"), MONO))
-        self.assertIsNone(claude_accounts._recent(None, MONO))
+        self.assertEqual(claude._recent((MONO - STALE + 1, "config_conflict"), MONO), "config_conflict")
+        self.assertIsNone(claude._recent((MONO - STALE, "config_conflict"), MONO))
+        self.assertIsNone(claude._recent(None, MONO))
 
 
 class JudgeShapeTest(unittest.TestCase):
@@ -2235,7 +2236,7 @@ class JudgeShapeTest(unittest.TestCase):
     def test_only_meaningful_changes_change_the_shape(self):
         """covers: USAGE-6. 표의 칸: 이름, 저장소, keepalive, 모습이 달라지는가"""
         store, k = store_value(), keepalive_value()
-        base = claude_accounts._judge_shape(store, k)
+        base = claude._judge_shape(store, k)
         cases = (("checkedAt 만 바뀜", store, {**k, "checkedAt": NOW}, False),
                  ("접근 토큰 만료만 바뀜", store, {**k, "accessExpiresAt": NOW + 9}, False),
                  ("슬롯이 는다", {**store, "ids": {**store["ids"], "3": "f3"}}, k, True),
@@ -2248,7 +2249,7 @@ class JudgeShapeTest(unittest.TestCase):
                  ("저장소가 사라진다", None, k, True))
         for name, s, keep, differs in cases:
             with self.subTest(name):
-                self.assertEqual(claude_accounts._judge_shape(s, keep) != base, differs)
+                self.assertEqual(claude._judge_shape(s, keep) != base, differs)
 
 
 class JudgeLoginTest(unittest.TestCase):
@@ -2257,7 +2258,7 @@ class JudgeLoginTest(unittest.TestCase):
     ACTIVE = [{"active": True, "slot": "1"}]
 
     def judge(self, k, rows=(), keychain=False, signed_in=False, fatal=None, first_seen=None, switched=None):
-        return claude_accounts._judge_login(k, rows, keychain, signed_in, fatal, first_seen, NOW, switched=switched)
+        return claude._judge_login(k, rows, keychain, signed_in, fatal, first_seen, NOW, switched=switched)
 
     def test_states(self):
         """covers: USAGE-7. 표의 칸: 이름, keepalive, 나머지 입력, 기대하는 (state, attention, slot, other)"""
@@ -2304,7 +2305,7 @@ class JudgeLoginTest(unittest.TestCase):
         """covers: USAGE-11. 기록이 오래됐거나 없을 때 hswap 서비스 상태로 까닭을 가른다. 사람이 만든 서비스·모르는 상태는 '멈춤' 그대로다"""
         old = keepalive_value(checkedAt=NOW - 2 * 3600)
         svc = lambda **kw: {"platform": "launchd", "installed": True, "managed": True, "loaded": True, **kw}
-        judge = lambda k, s: claude_accounts._judge_login(k, self.ACTIVE, False, True, None, None, NOW, s)[0]
+        judge = lambda k, s: claude._judge_login(k, self.ACTIVE, False, True, None, None, NOW, s)[0]
         cases = ((old, svc(installed=False, managed=None, loaded=False), ("unscheduled", True, "자동 갱신 미설정(예약 실행 없음)")),
                  ({}, svc(installed=False, managed=None, loaded=False), ("unscheduled", True, "자동 갱신 미설정(예약 실행 없음)")),
                  (old, svc(loaded=False, domainAvailable=False), ("stopped", True, "자동 갱신 중지됨(GUI 로그인 뒤 시작)")),
@@ -2365,9 +2366,9 @@ class HeadlessTest(unittest.TestCase):
     """covers: USAGE-15. macOS 에서 로그인 세션 밖(LaunchDaemon·SSH)이고 hswap 저장 방식이 파일이 아니면 키체인을 읽지 못한다는 한 문구로 보인다."""
 
     def setUp(self):
-        for p in (mock.patch.object(claude_accounts, "doctor", None), mock.patch.object(claude_accounts, "_aqua", None),
-                  mock.patch.object(claude_accounts, "_aqua_failed", None),
-                  mock.patch.object(claude_accounts.sys, "platform", "darwin")):
+        for p in (mock.patch.object(claude, "doctor", None), mock.patch.object(claude, "_aqua", None),
+                  mock.patch.object(claude, "_aqua_failed", None),
+                  mock.patch.object(claude.sys, "platform", "darwin")):
             p.start()
             self.addCleanup(p.stop)
 
@@ -2375,76 +2376,76 @@ class HeadlessTest(unittest.TestCase):
         """hswap 0.3.0 의 오류 type 과 예외 클래스 이름. 표에 있으면 로그에 남기지 않는다"""
         for kind, want in (("CredentialReadError", "자격 증명을 읽지 못했습니다"), ("keychain_item_present", "자동 갱신을 멈췄습니다"),
                            ("keychain_item_present_locked", "키체인이 잠겨"), ("reconcile_ambiguous", "어느 쪽이 새 로그인인지")):
-            with mock.patch.object(claude_accounts, "print", create=True) as log:
-                self.assertIn(want, str(claude_accounts._HswapError(kind)), kind)
+            with mock.patch.object(claude, "print", create=True) as log:
+                self.assertIn(want, str(claude._HswapError(kind)), kind)
             log.assert_not_called()
 
     def test_session_is_read_once_and_a_failed_answer_is_not_kept(self):
-        with mock.patch.object(claude_accounts, "run", return_value=(-1, "", "x")) as run, \
-                mock.patch.object(claude_accounts.time, "monotonic", side_effect=[0.0, 100.0]):
-            self.assertTrue(claude_accounts.in_session())  # 묻지 못하면 지금까지처럼 세션 안으로 본다
-            self.assertTrue(claude_accounts.in_session())
+        with mock.patch.object(claude, "run", return_value=(-1, "", "x")) as run, \
+                mock.patch.object(claude.time, "monotonic", side_effect=[0.0, 100.0]):
+            self.assertTrue(claude.in_session())  # 묻지 못하면 지금까지처럼 세션 안으로 본다
+            self.assertTrue(claude.in_session())
         self.assertEqual(run.call_count, 2)
         for out, want in (("Aqua\n", True), ("System\n", False), ("Background\n", False)):
-            claude_accounts._aqua = None
-            with mock.patch.object(claude_accounts, "run", return_value=(0, out, "")) as run:
-                self.assertEqual((claude_accounts.in_session(), claude_accounts.in_session()), (want, want), out)
+            claude._aqua = None
+            with mock.patch.object(claude, "run", return_value=(0, out, "")) as run:
+                self.assertEqual((claude.in_session(), claude.in_session()), (want, want), out)
             run.assert_called_once_with(["launchctl", "managername"], timeout=8)
 
     def test_headless_needs_macos_outside_a_session_and_a_store_that_is_not_file(self):
         for platform, aqua, store, want in (("darwin", False, "auto", True), ("darwin", False, "file", False), ("darwin", True, "auto", False),
                                             ("darwin", False, None, False), ("linux", False, "auto", False)):
-            with mock.patch.object(claude_accounts.sys, "platform", platform), mock.patch.object(claude_accounts, "_aqua", aqua), \
-                    mock.patch.object(claude_accounts, "doctor", {"store": store, "problems": []} if store else None):
-                self.assertEqual(claude_accounts.headless(), want, (platform, aqua, store))
+            with mock.patch.object(claude.sys, "platform", platform), mock.patch.object(claude, "_aqua", aqua), \
+                    mock.patch.object(claude, "doctor", {"store": store, "problems": []} if store else None):
+                self.assertEqual(claude.headless(), want, (platform, aqua, store))
 
     def test_slots_without_credentials_say_why_outside_a_session(self):
         for status in ("no_credentials", "keychain_unavailable"):
             row = {"number": 1, "email": "a@example.com", "usageStatus": status}
-            self.assertEqual(claude_accounts.account(row)["error"], claude_accounts.STATUS[status][0])
-            a = claude_accounts.account(row, headless=True)
-            self.assertEqual((a["error"], a["attention"]), (claude_accounts.HEADLESS, True), status)
+            self.assertEqual(claude.account(row)["error"], claude.STATUS[status][0])
+            a = claude.account(row, headless=True)
+            self.assertEqual((a["error"], a["attention"]), (claude.HEADLESS, True), status)
             self.assertIn("hswap claude migrate-store --to file", a["error"])
-        ok = claude_accounts.account({"number": 1, "usageStatus": "relogin_required"}, headless=True)
-        self.assertEqual(ok["error"], claude_accounts.STATUS["relogin_required"][0])  # 다른 상태는 그대로다
+        ok = claude.account({"number": 1, "usageStatus": "relogin_required"}, headless=True)
+        self.assertEqual(ok["error"], claude.STATUS["relogin_required"][0])  # 다른 상태는 그대로다
 
     def test_only_credential_errors_become_the_session_message(self):
-        claude_accounts.doctor = {"store": "auto", "problems": []}
-        claude_accounts._aqua = False
+        claude.doctor = {"store": "auto", "problems": []}
+        claude._aqua = False
         for kind, headless in (("CredentialReadError", True), ("keychain_unavailable", True), ("LockError", False)):
             body = {"schemaVersion": 1, "error": {"type": kind, "message": "m"}}
-            with mock.patch.object(claude_accounts, "binary", return_value="/fake/hswap"), mock.patch.object(claude_accounts._state, "cache", None), \
-                    mock.patch.object(claude_accounts.subprocess, "run", return_value=types.SimpleNamespace(stdout=json.dumps(body), returncode=1)):
-                out = claude_accounts.live(force=True)
-            self.assertEqual(out["error"] == claude_accounts.HEADLESS, headless, kind)
+            with mock.patch.object(claude, "binary", return_value="/fake/hswap"), mock.patch.object(claude._state, "cache", None), \
+                    mock.patch.object(claude.subprocess, "run", return_value=types.SimpleNamespace(stdout=json.dumps(body), returncode=1)):
+                out = claude.live(force=True)
+            self.assertEqual(out["error"] == claude.HEADLESS, headless, kind)
 
     def test_login_state_outside_a_session_comes_first_even_without_a_record(self):
         for k in ({}, keepalive_value(ok=False, error={"type": "keychain_unavailable"}), keepalive_value(ok=False, error={"type": "no_credentials"})):
-            s, _ = claude_accounts._judge_login(k, [], True, False, None, None, NOW, None, headless=True)
-            self.assertEqual((s["state"], s["text"], s["attention"], s["note"]), ("headless", claude_accounts.HEADLESS, True, None), k)
-        s, _ = claude_accounts._judge_login({}, [], True, False, None, None, NOW, None)
+            s, _ = claude._judge_login(k, [], True, False, None, None, NOW, None, headless=True)
+            self.assertEqual((s["state"], s["text"], s["attention"], s["note"]), ("headless", claude.HEADLESS, True, None), k)
+        s, _ = claude._judge_login({}, [], True, False, None, None, NOW, None)
         self.assertEqual(s["state"], "keychain")  # 세션 안이거나 모르면 지금까지와 같다
 
     def test_device_row_carries_store_and_problems(self):
-        claude_accounts._aqua = False
-        with mock.patch.object(claude_accounts, "_version", claude_accounts.VERSION):
-            self.assertNotIn("store", claude_accounts.status())
-            claude_accounts.doctor = {"store": "auto", "problems": ["not_file_store", "brand_new"], "keychain_backups": 3}
-            st = claude_accounts.status()
+        claude._aqua = False
+        with mock.patch.object(claude, "_version", claude.VERSION):
+            self.assertNotIn("store", claude.status())
+            claude.doctor = {"store": "auto", "problems": ["not_file_store", "brand_new"], "keychain_backups": 3}
+            st = claude.status()
             self.assertEqual((st["store"], st["keychain_backups"]), ("auto", 3))
             self.assertEqual(st["problems"], ["저장 방식이 파일이 아닙니다(not_file_store)", "brand_new"])
-            claude_accounts._aqua = True  # 세션 안의 키체인 저장 방식은 흔한 정상이다
-            self.assertEqual(claude_accounts.status()["problems"], ["brand_new"])
+            claude._aqua = True  # 세션 안의 키체인 저장 방식은 흔한 정상이다
+            self.assertEqual(claude.status()["problems"], ["brand_new"])
 
     def test_a_missing_keepalive_service_is_no_problem_where_the_gateway_ticks(self):
         """hswap 은 jarvis tick 을 보지 못해 keepalive_service_missing 을 낸다. tick 이 대신 도는 기기에서는 문제가 아니다"""
-        claude_accounts.doctor = {"store": "file", "problems": ["keepalive_service_missing"], "keepalive_loaded": False}
-        claude_accounts._aqua = False
-        with mock.patch.object(claude_accounts, "_version", claude_accounts.VERSION):
-            st = claude_accounts.status()
+        claude.doctor = {"store": "file", "problems": ["keepalive_service_missing"], "keepalive_loaded": False}
+        claude._aqua = False
+        with mock.patch.object(claude, "_version", claude.VERSION):
+            st = claude.status()
             self.assertEqual((st["problems"], st["keepalive"]), ([], "jarvis 가 5분마다 keepalive 를 돌립니다"))
-            claude_accounts._aqua = True  # 세션 안: tick 이 돌지 않는다
-            st = claude_accounts.status()
+            claude._aqua = True  # 세션 안: tick 이 돌지 않는다
+            st = claude.status()
         self.assertNotIn("keepalive", st)
         self.assertEqual(len(st["problems"]), 1)
         self.assertIn("keepalive 예약이 없습니다. Claude Code 가 스스로 토큰을 갱신하면 키체인과 갈라질 수 있습니다", st["problems"][0])
@@ -2453,45 +2454,45 @@ class HeadlessTest(unittest.TestCase):
     def test_the_last_reconcile_hint_comes_with_the_ambiguous_problem(self):
         hint = ("Nothing records which login is newer. Check which store was written last and keep it with hswap claude migrate-store --to file "
                 "--keep file|keychain. For reference only, nothing decides by it: the Keychain item's access token expires at 2026-11-14T20:10:00Z, <b>")
-        claude_accounts.doctor = {"store": "file", "problems": ["keychain_item_present", "reconcile_ambiguous"], "last_reconcile_hint": hint}
-        claude_accounts._aqua = True
-        with mock.patch.object(claude_accounts, "_version", claude_accounts.VERSION):
-            problems = claude_accounts.status()["problems"]
+        claude.doctor = {"store": "file", "problems": ["keychain_item_present", "reconcile_ambiguous"], "last_reconcile_hint": hint}
+        claude._aqua = True
+        with mock.patch.object(claude, "_version", claude.VERSION):
+            problems = claude.status()["problems"]
         self.assertTrue(problems[1].endswith(f"(reconcile_ambiguous): {hint}"), problems)  # 그대로 둔다. 이스케이프는 화면이 한다
-        self.assertTrue(claude_accounts.item_text().endswith(hint))
-        claude_accounts.doctor = {**claude_accounts.doctor, "problems": ["keychain_item_present"]}
-        self.assertNotIn(hint, claude_accounts.item_text())  # 판정 불가가 아니면 붙이지 않는다
+        self.assertTrue(claude.item_text().endswith(hint))
+        claude.doctor = {**claude.doctor, "problems": ["keychain_item_present"]}
+        self.assertNotIn(hint, claude.item_text())  # 판정 불가가 아니면 붙이지 않는다
 
     def test_the_session_message_names_the_command_hswap_accepts(self):
         """hswap 은 --keep 없는 migrate-store --to file 을 거절한다. 화면(usage.js)·설치기(macos_daemon)와 같은 명령 하나를 쓴다"""
-        self.assertEqual(claude_accounts.macos_daemon.MIGRATE, "hswap claude migrate-store --to file --keep keychain")
-        self.assertIn(f"({claude_accounts.macos_daemon.MIGRATE})", claude_accounts.HEADLESS)
+        self.assertEqual(claude.macos_daemon.MIGRATE, "hswap claude migrate-store --to file --keep keychain")
+        self.assertIn(f"({claude.macos_daemon.MIGRATE})", claude.HEADLESS)
         with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "app", "usage.js"), encoding="utf-8") as f:
             js = f.read()
-        self.assertIn(f'const MIGRATE="{claude_accounts.macos_daemon.MIGRATE}";', js)
+        self.assertIn(f'const MIGRATE="{claude.macos_daemon.MIGRATE}";', js)
         self.assertEqual(js.count("migrate-store --to file"), 1)  # 화면의 나머지는 MIGRATE 를 쓴다
 
     def test_a_failed_session_answer_is_kept_for_a_minute(self):
-        with mock.patch.object(claude_accounts, "run", return_value=(-1, "", "x")) as run, \
-                mock.patch.object(claude_accounts.time, "monotonic", side_effect=[100.0, 130.0, 161.0]):
-            self.assertEqual([claude_accounts.in_session() for _ in range(3)], [True, True, True])
+        with mock.patch.object(claude, "run", return_value=(-1, "", "x")) as run, \
+                mock.patch.object(claude.time, "monotonic", side_effect=[100.0, 130.0, 161.0]):
+            self.assertEqual([claude.in_session() for _ in range(3)], [True, True, True])
         self.assertEqual(run.call_count, 2)  # 60초 안에는 다시 묻지 않는다
 
     def test_the_item_text_follows_the_reconcile_service(self):
-        base = claude_accounts.KEEPALIVE_ERRORS["keychain_item_present"]
-        self.assertEqual(claude_accounts.item_text(), base)  # doctor 를 모르면(옛 hswap) 붙이지 않는다
+        base = claude.KEEPALIVE_ERRORS["keychain_item_present"]
+        self.assertEqual(claude.item_text(), base)  # doctor 를 모르면(옛 hswap) 붙이지 않는다
         for installed, loaded, want in ((True, True, "로그인 세션에서 reconcile 이 정리합니다"), (True, False, "hswap claude reconcile --install-service 로 정리 예약을 설치하세요"),
                                         (False, None, "hswap claude reconcile --install-service 로 정리 예약을 설치하세요")):
-            claude_accounts.doctor = {"store": "file", "problems": ["keychain_item_present"], "reconcile_installed": installed, "reconcile_loaded": loaded}
-            self.assertEqual(claude_accounts.item_text(), f"{base}. {want}", (installed, loaded))
-        claude_accounts.doctor = {"store": "file", "problems": ["keychain_item_present", "reconcile_ambiguous"], "reconcile_installed": True, "reconcile_loaded": True}
-        text = claude_accounts.item_text()
+            claude.doctor = {"store": "file", "problems": ["keychain_item_present"], "reconcile_installed": installed, "reconcile_loaded": loaded}
+            self.assertEqual(claude.item_text(), f"{base}. {want}", (installed, loaded))
+        claude.doctor = {"store": "file", "problems": ["keychain_item_present", "reconcile_ambiguous"], "reconcile_installed": True, "reconcile_loaded": True}
+        text = claude.item_text()
         self.assertIn("어느 쪽이 새 로그인인지", text)  # 사람이 골라야 한다
         self.assertIn("어느 쪽이 최근에 쓰였는지 확인하고 hswap claude migrate-store --to file --keep file|keychain", text)
         self.assertNotIn("--keep keychain", text)  # 처음 옮길 때와 달리 어느 쪽이 맞는지 정해져 있지 않다
         k = keepalive_value(store="file", ok=False, error={"type": "keychain_item_present"})
-        with mock.patch.object(claude_accounts, "_keepalive", return_value=k), mock.patch.object(claude_accounts.sys, "platform", "linux"):
-            s = claude_accounts.login()
+        with mock.patch.object(claude, "_keepalive", return_value=k), mock.patch.object(claude.sys, "platform", "linux"):
+            s = claude.login()
         self.assertEqual((s["state"], s["text"], s["attention"]), ("keychain_item_present", text, True))
 
 
@@ -2504,23 +2505,23 @@ class CallerTest(unittest.TestCase):
         def fake(cmd, **kw):
             seen.append((cmd[1:3], (kw.get("env") or {}).get("HSWAP_CALLER")))
             return types.SimpleNamespace(stdout=json.dumps(body or {"schemaVersion": 1, "switched": True, "accounts": []}), returncode=0, stderr="")
-        with mock.patch.object(claude_accounts, "binary", return_value="/fake/hswap"), mock.patch.object(claude_accounts.subprocess, "run", side_effect=fake), \
-                mock.patch.object(claude_accounts._state, "cache", None), mock.patch.object(claude_accounts, "_logged", {}), \
-                mock.patch.object(claude_accounts, "print", create=True):
+        with mock.patch.object(claude, "binary", return_value="/fake/hswap"), mock.patch.object(claude.subprocess, "run", side_effect=fake), \
+                mock.patch.object(claude._state, "cache", None), mock.patch.object(claude, "_logged", {}), \
+                mock.patch.object(claude, "print", create=True):
             fn()
         return seen
 
     def test_callers(self):
-        self.assertEqual(self.run_with(lambda: claude_accounts.switch("2")), [(["claude", "switch"], "jarvis-ui")])
-        self.assertEqual(self.run_with(lambda: claude_accounts.remove("2")), [(["claude", "remove"], "jarvis-ui")])
-        self.assertEqual(self.run_with(lambda: claude_accounts.live(force=True)), [(["claude", "list"], "jarvis-gateway")])
-        self.assertEqual(self.run_with(claude_accounts.installed_version), [(["--version"], "jarvis-gateway")])
+        self.assertEqual(self.run_with(lambda: claude.switch("2")), [(["claude", "switch"], "jarvis-ui")])
+        self.assertEqual(self.run_with(lambda: claude.remove("2")), [(["claude", "remove"], "jarvis-ui")])
+        self.assertEqual(self.run_with(lambda: claude.live(force=True)), [(["claude", "list"], "jarvis-gateway")])
+        self.assertEqual(self.run_with(claude.installed_version), [(["--version"], "jarvis-gateway")])
 
     def test_the_caller_keeps_the_rest_of_the_environment(self):
         seen = []
-        with mock.patch.object(claude_accounts.subprocess, "run", side_effect=lambda cmd, **kw: seen.append(kw["env"]) or types.SimpleNamespace(stdout="{}", returncode=0, stderr="")), \
-                mock.patch.dict(os.environ, {"KEEP_ME": "1"}), mock.patch.object(claude_accounts, "_logged", {}), mock.patch.object(claude_accounts, "print", create=True):
-            claude_accounts._json("/fake/hswap", "list")
+        with mock.patch.object(claude.subprocess, "run", side_effect=lambda cmd, **kw: seen.append(kw["env"]) or types.SimpleNamespace(stdout="{}", returncode=0, stderr="")), \
+                mock.patch.dict(os.environ, {"KEEP_ME": "1"}), mock.patch.object(claude, "_logged", {}), mock.patch.object(claude, "print", create=True):
+            claude._json("/fake/hswap", "list")
         self.assertEqual((seen[0]["KEEP_ME"], seen[0]["HSWAP_CALLER"]), ("1", "jarvis-gateway"))
 
 
@@ -2529,33 +2530,33 @@ class LastEventsTest(unittest.TestCase):
 
     def test_device_row_carries_the_last_three_events(self):
         events = [{"ts": f"2026-11-14T14:5{i}:00Z", "cmd": "keepalive", "caller": "gui", "outcome": "none", "exit": 0} for i in range(5)]
-        with mock.patch.object(claude_accounts, "_version", claude_accounts.VERSION), mock.patch.object(claude_accounts.sys, "platform", "darwin"), \
-                mock.patch.object(claude_accounts, "_aqua", True), \
-                mock.patch.object(claude_accounts, "doctor", {"store": "file", "problems": [], "last_events": events}):
-            self.assertEqual(claude_accounts.status()["events"], events[-3:])
-        with mock.patch.object(claude_accounts, "_version", claude_accounts.VERSION), mock.patch.object(claude_accounts, "doctor", {"store": "file", "problems": []}):
-            self.assertNotIn("events", claude_accounts.status())
+        with mock.patch.object(claude, "_version", claude.VERSION), mock.patch.object(claude.sys, "platform", "darwin"), \
+                mock.patch.object(claude, "_aqua", True), \
+                mock.patch.object(claude, "doctor", {"store": "file", "problems": [], "last_events": events}):
+            self.assertEqual(claude.status()["events"], events[-3:])
+        with mock.patch.object(claude, "_version", claude.VERSION), mock.patch.object(claude, "doctor", {"store": "file", "problems": []}):
+            self.assertNotIn("events", claude.status())
 
 
 class VersionKeptTest(unittest.TestCase):
     """covers: USAGE-16. --version 을 읽지 못한 것(시간 초과·OSError)은 hswap 이 낮다는 뜻이 아니다: 마지막으로 알던 버전을 지킨다."""
 
     def test_an_unreadable_version_keeps_the_last_known_one(self):
-        with mock.patch.object(claude_accounts, "_version", "0.3.1"), mock.patch.object(claude_accounts, "ensure"), \
-                mock.patch.object(claude_accounts, "binary", return_value="/fake/hswap"), \
-                mock.patch.object(claude_accounts, "installed_version", return_value=None):
-            claude_accounts.check()
-            self.assertEqual(claude_accounts._version, "0.3.1")
-        with mock.patch.object(claude_accounts, "_version", "0.3.1"), mock.patch.object(claude_accounts, "ensure"), \
-                mock.patch.object(claude_accounts, "binary", return_value=None), \
-                mock.patch.object(claude_accounts, "installed_version", return_value=None):
-            claude_accounts.check()
-            self.assertIsNone(claude_accounts._version)  # hswap 이 없어졌으면 잊는다
-        with mock.patch.object(claude_accounts, "_version", "0.3.0"), mock.patch.object(claude_accounts, "ensure"), \
-                mock.patch.object(claude_accounts, "binary", return_value="/fake/hswap"), \
-                mock.patch.object(claude_accounts, "installed_version", return_value="0.3.1"):
-            claude_accounts.check()
-            self.assertEqual(claude_accounts._version, "0.3.1")
+        with mock.patch.object(claude, "_version", "0.3.1"), mock.patch.object(claude, "ensure"), \
+                mock.patch.object(claude, "binary", return_value="/fake/hswap"), \
+                mock.patch.object(claude, "installed_version", return_value=None):
+            claude.check()
+            self.assertEqual(claude._version, "0.3.1")
+        with mock.patch.object(claude, "_version", "0.3.1"), mock.patch.object(claude, "ensure"), \
+                mock.patch.object(claude, "binary", return_value=None), \
+                mock.patch.object(claude, "installed_version", return_value=None):
+            claude.check()
+            self.assertIsNone(claude._version)  # hswap 이 없어졌으면 잊는다
+        with mock.patch.object(claude, "_version", "0.3.0"), mock.patch.object(claude, "ensure"), \
+                mock.patch.object(claude, "binary", return_value="/fake/hswap"), \
+                mock.patch.object(claude, "installed_version", return_value="0.3.1"):
+            claude.check()
+            self.assertEqual(claude._version, "0.3.1")
 
 
 if __name__ == "__main__":

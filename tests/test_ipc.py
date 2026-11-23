@@ -40,7 +40,7 @@ class BridgeTest(unittest.TestCase):
 
     def test_usage_paths_count_as_core(self):
         """covers: SSH-4"""
-        with mock.patch.object(server.cli_login, "status", return_value={"state": "idle"}) as st:
+        with mock.patch.object(server.login, "status", return_value={"state": "idle"}) as st:
             code, out, _ = self.get(b"/api/usage/login?provider=claude")
         self.assertEqual(code, 0)
         self.assertTrue(out.startswith(b"HTTP/1.1 200"), out[:40])
@@ -71,7 +71,7 @@ class BridgeTest(unittest.TestCase):
     def test_jarvis_bridge_goes_through_the_entry_point(self):
         """covers: SSH-4 (core 가 원격에서 부르는 `python -m jarvis bridge`)"""
         req = b"GET /api/usage/login?provider=claude HTTP/1.0\r\nHost: 127.0.0.1:9300\r\nConnection: close\r\n\r\n"
-        with mock.patch.object(server.cli_login, "status", return_value={"state": "idle"}):
+        with mock.patch.object(server.login, "status", return_value={"state": "idle"}):
             r = subprocess.run([sys.executable, "-m", "jarvis", "bridge"], input=req, capture_output=True, cwd=ROOT,
                                timeout=20, env={**os.environ, "JARVIS_RELEASES": self.root, "JARVIS_CONFIG": os.devnull})
         self.assertEqual(r.returncode, 0, r.stderr)

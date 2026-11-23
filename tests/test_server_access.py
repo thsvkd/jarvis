@@ -73,8 +73,8 @@ class AccessTest(unittest.TestCase):
 
     def test_action_posts_need_the_header_and_the_configured_core(self):
         """covers: SSH-5. 맞춤 헤더가 없으면 403, 헤더가 있어도 루프백은 core 가 아니다. 쓰기는 일어나지 않는다"""
-        with mock.patch.object(server.cli_login, "start", side_effect=AssertionError("로그인 시작 금지")), \
-                mock.patch.object(server.claude_accounts, "switch", side_effect=AssertionError("전환 금지")), \
+        with mock.patch.object(server.login, "start", side_effect=AssertionError("로그인 시작 금지")), \
+                mock.patch.object(server.claude, "switch", side_effect=AssertionError("전환 금지")), \
                 mock.patch.object(server.self_update, "start", side_effect=AssertionError("갱신 금지")):
             for path, action in (("/api/usage/login?provider=codex", "usage-login"), ("/api/usage/account?slot=2", "usage-account"),
                                  ("/api/jarvis/update", "jarvis-update")):

@@ -13,8 +13,8 @@ import sys
 import threading
 import time
 
-from . import caam_usage, claude_accounts
-from .util import _ENV, _NO_WINDOW, run, tool_path, which_local
+from . import caam, claude
+from ..util import _ENV, _NO_WINDOW, run, tool_path, which_local
 
 WAIT_S = 30  # URL·코드가 나올 때까지
 STATUS_S = 6  # codex login status 는 보통 0.1초 안에 답한다(늦으면 알 수 없음으로 본다)
@@ -42,7 +42,7 @@ def _grok():
     return which_local("grok") or (p if os.path.isfile(p) else None)
 
 
-CLIS = {"codex": caam_usage._codex_cli, "grok": _grok, "claude": lambda: which_local("claude")}
+CLIS = {"codex": caam._codex_cli, "grok": _grok, "claude": lambda: which_local("claude")}
 ARGS = {"claude": ["auth", "login", "--claudeai"]}  # 그 밖은 login --device-auth
 PASTE = {"claude"}  # 코드를 화면에서 CLI 로 붙여 넣는 프로바이더(출력에 코드가 없다)
 UI_CALLER = {"HSWAP_CALLER": "jarvis-ui"}  # 화면의 로그인·계정 추가 버튼이 부른 hswap(hswap 0.3.1 logs/events.jsonl 의 caller)
@@ -54,15 +54,15 @@ ADD_ERRORS = {"login_failed": "로그인이 끝나지 않았습니다", "wrong_a
 
 
 def _claude_ready():
-    """macOS 는 hswap 파일 저장소이거나, 키체인 모드에서 이 게이트웨이가 키체인에 닿는다고 확인된 기기만 쓴다(claude_accounts.login_ready)."""
-    return sys.platform != "darwin" or claude_accounts.login_ready()
+    """macOS 는 hswap 파일 저장소이거나, 키체인 모드에서 이 게이트웨이가 키체인에 닿는다고 확인된 기기만 쓴다(claude.login_ready)."""
+    return sys.platform != "darwin" or claude.login_ready()
 
 
 def _hswap_add():
     """계정 추가를 맡길 hswap(고정 버전 이상). 버전을 아직 모르거나 낮으면 None."""
-    exe, v = claude_accounts.binary(), claude_accounts._version
+    exe, v = claude.binary(), claude._version
     try:
-        return exe if exe and v and claude_accounts._key(v) >= claude_accounts._key(HSWAP_ADD) else None
+        return exe if exe and v and claude._key(v) >= claude._key(HSWAP_ADD) else None
     except ValueError:
         return None
 
@@ -284,7 +284,7 @@ def _read(job):
         job["code"] = job["code"] or next(iter(CODE_RE.findall(job["out"])), None)
     rc = job["proc"].wait()
     if job["paste"]:  # 로그인이 끝나야 저장한다. 저장까지 마친 뒤에 done 으로 본다
-        hswap = claude_accounts.binary()
+        hswap = claude.binary()
         saved = run([hswap, "claude", "add"], 60, env=UI_CALLER)[0] if rc == 0 and hswap else rc
         job["unsaved"] = rc == 0 and saved != 0  # 로그인은 바뀌었고 슬롯 저장만 실패했다
         if saved == 0 and hswap and sys.platform == "darwin":

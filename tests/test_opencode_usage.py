@@ -12,7 +12,7 @@ import time
 import unittest
 from unittest import mock
 
-from jarvis import opencode_usage
+from jarvis.usage import opencode
 
 
 class OpenCodeUsageTest(unittest.TestCase):
@@ -25,16 +25,16 @@ class OpenCodeUsageTest(unittest.TestCase):
                 db.execute("CREATE TABLE credential (id TEXT, integration_id TEXT, value TEXT, active INTEGER, time_created INTEGER)")
                 db.execute("INSERT INTO credential VALUES ('a', 'opencode-go', ?, 1, 1)", (json.dumps({"type": "key", "key": "synthetic-go-key"}),))
             os.chmod(path, 0o600)
-            self.assertEqual(opencode_usage._v2_credential(), ("synthetic-go-key", None))
+            self.assertEqual(opencode._v2_credential(), ("synthetic-go-key", None))
 
     def test_running_service_is_not_asked_to_refresh_credentials(self):
         """covers: USAGE-3"""
         body = {"usage": {"weekly": {"percent": 33, "resetsAt": "2099-01-01T00:00:00Z"}}}
-        with mock.patch.object(opencode_usage, "_run", return_value=mock.Mock(returncode=0, stdout="2.2.0")) as run, \
-                mock.patch.object(opencode_usage, "_request") as service, \
-                mock.patch.object(opencode_usage, "_v2_credential", return_value=("synthetic", "private-org")), \
-                mock.patch.object(opencode_usage, "_go_api", return_value=body):
-            result = opencode_usage.read("/fake/opencode")
+        with mock.patch.object(opencode, "_run", return_value=mock.Mock(returncode=0, stdout="2.2.0")) as run, \
+                mock.patch.object(opencode, "_request") as service, \
+                mock.patch.object(opencode, "_v2_credential", return_value=("synthetic", "private-org")), \
+                mock.patch.object(opencode, "_go_api", return_value=body):
+            result = opencode.read("/fake/opencode")
         service.assert_not_called()
         run.assert_called_once_with(["/fake/opencode", "--version"], 6)
         self.assertEqual(result["accounts"][0]["windows"][0]["used"], 33)
@@ -48,7 +48,7 @@ class OpenCodeUsageTest(unittest.TestCase):
                 db.execute("CREATE TABLE credential (id TEXT, integration_id TEXT, value TEXT, active INTEGER, time_created INTEGER)")
                 db.execute("INSERT INTO credential VALUES ('a', 'opencode', ?, 1, 1)", (json.dumps({"type": "key", "key": "synthetic-secret", "metadata": {"orgID": "private-org"}}),))
             os.chmod(path, 0o600)
-            self.assertEqual(opencode_usage._v2_credential(), ("synthetic-secret", "private-org"))
+            self.assertEqual(opencode._v2_credential(), ("synthetic-secret", "private-org"))
 
     def test_stopped_v2_reads_active_console_credential_without_refresh(self):
         """covers: USAGE-3"""
@@ -62,9 +62,9 @@ class OpenCodeUsageTest(unittest.TestCase):
                     db.execute("INSERT INTO credential VALUES (?, 'opencode', ?, ?, 1)", (ident, json.dumps(value), active))
             os.chmod(path, 0o600)
             body = {"usage": {"weekly": {"percent": 46, "resetsAt": "2027-01-01T00:00:00Z", "status": "ok"}}}
-            with mock.patch.object(opencode_usage, "_run", return_value=mock.Mock(returncode=0, stdout="2.2.0")), \
-                    mock.patch.object(opencode_usage, "_go_api", return_value=body) as api:
-                result = opencode_usage.read("/fake/opencode")
+            with mock.patch.object(opencode, "_run", return_value=mock.Mock(returncode=0, stdout="2.2.0")), \
+                    mock.patch.object(opencode, "_go_api", return_value=body) as api:
+                result = opencode.read("/fake/opencode")
             api.assert_called_once_with("current-secret", "org-private")
             self.assertEqual(result["accounts"][0]["windows"][0]["used"], 46)
             self.assertNotIn("secret", json.dumps(result))
@@ -79,9 +79,9 @@ class OpenCodeUsageTest(unittest.TestCase):
                 db.execute("CREATE TABLE credential (id TEXT, integration_id TEXT, value TEXT, active INTEGER, time_created INTEGER)")
                 db.execute("INSERT INTO credential VALUES ('x', 'opencode', ?, 1, 1)", (json.dumps({"type": "oauth", "access": "expired", "expires": 1, "metadata": {"orgID": "org"}}),))
             os.chmod(path, 0o600)
-            with mock.patch.object(opencode_usage, "_run", return_value=mock.Mock(returncode=0, stdout="2.2.0")), \
-                    mock.patch.object(opencode_usage, "_go_api") as api:
-                self.assertEqual(opencode_usage.read("/fake/opencode")["status"], "unavailable")
+            with mock.patch.object(opencode, "_run", return_value=mock.Mock(returncode=0, stdout="2.2.0")), \
+                    mock.patch.object(opencode, "_go_api") as api:
+                self.assertEqual(opencode.read("/fake/opencode")["status"], "unavailable")
             api.assert_not_called()
 
     def test_go_key_from_independent_legacy_store(self):
@@ -93,20 +93,20 @@ class OpenCodeUsageTest(unittest.TestCase):
                 json.dump({"opencode-go": {"type": "api", "key": "synthetic-secret"}}, f)
             os.chmod(path, 0o600)
             data = {"usage": {"weekly": {"status": "ok", "percent": 37, "resetsAt": "2027-01-01T00:00:00Z"}}}
-            with mock.patch.object(opencode_usage, "_run", return_value=mock.Mock(returncode=0, stdout="1.2.27")), \
-                    mock.patch.object(opencode_usage, "_go_api", return_value=data) as get:
-                result = opencode_usage.read("/fake/opencode")
+            with mock.patch.object(opencode, "_run", return_value=mock.Mock(returncode=0, stdout="1.2.27")), \
+                    mock.patch.object(opencode, "_go_api", return_value=data) as get:
+                result = opencode.read("/fake/opencode")
             self.assertEqual(result["accounts"][0]["windows"][0]["used"], 37)
             self.assertEqual(get.call_args.args[0], "synthetic-secret")
             self.assertNotIn("synthetic-secret", json.dumps(result))
 
     def test_v2_stopped_service_does_not_use_stale_v1_key(self):
         """covers: USAGE-3"""
-        with mock.patch.object(opencode_usage, "_run", return_value=mock.Mock(returncode=0, stdout="opencode v2.2.0")), \
-                mock.patch.object(opencode_usage, "_legacy_key") as key, \
-                mock.patch.object(opencode_usage, "_v2_credential", side_effect=ValueError("absent")), \
-                mock.patch.object(opencode_usage, "_go_api") as get:
-            self.assertEqual(opencode_usage.read("/fake/opencode")["status"], "unavailable")
+        with mock.patch.object(opencode, "_run", return_value=mock.Mock(returncode=0, stdout="opencode v2.2.0")), \
+                mock.patch.object(opencode, "_legacy_key") as key, \
+                mock.patch.object(opencode, "_v2_credential", side_effect=ValueError("absent")), \
+                mock.patch.object(opencode, "_go_api") as get:
+            self.assertEqual(opencode.read("/fake/opencode")["status"], "unavailable")
         key.assert_not_called()
         get.assert_not_called()
 
@@ -137,8 +137,8 @@ class OpenCodeUsageTest(unittest.TestCase):
                 with open(path, "w", encoding="utf-8") as f:
                     json.dump({"url": endpoint, "pid": 123, "password": "synthetic-secret"}, f)
                 os.chmod(path, 0o600)
-                with mock.patch.object(opencode_usage, "_run", return_value=mock.Mock(returncode=0, stdout=endpoint)):
-                    result = opencode_usage.read("/fake/opencode", use_service=True)
+                with mock.patch.object(opencode, "_run", return_value=mock.Mock(returncode=0, stdout=endpoint)):
+                    result = opencode.read("/fake/opencode", use_service=True)
                 self.assertEqual(result["accounts"][0]["windows"][0]["used"], 42)
                 self.assertNotIn("synthetic-secret", json.dumps(result))
         finally:
@@ -162,7 +162,7 @@ class OpenCodeUsageTest(unittest.TestCase):
         thread.start()
         try:
             with self.assertRaises(OSError):
-                opencode_usage._request(f"http://127.0.0.1:{server.server_port}", "synthetic-secret")
+                opencode._request(f"http://127.0.0.1:{server.server_port}", "synthetic-secret")
         finally:
             server.shutdown()
             server.server_close()
@@ -180,9 +180,9 @@ class OpenCodeUsageTest(unittest.TestCase):
                 json.dump({"url": "http://127.0.0.1:4321", "pid": 123, "password": "synthetic-secret"}, f)
             os.chmod(path, 0o600)
             info = {"data": {"go": {"weekly": {"percent": 20, "resetsAt": 1800000000000}}}}
-            with mock.patch.object(opencode_usage, "_run", return_value=mock.Mock(returncode=0, stdout="http://127.0.0.1:4321")), \
-                    mock.patch.object(opencode_usage, "_request", return_value=info) as request:
-                result = opencode_usage.read("/fake/opencode", use_service=True)
+            with mock.patch.object(opencode, "_run", return_value=mock.Mock(returncode=0, stdout="http://127.0.0.1:4321")), \
+                    mock.patch.object(opencode, "_request", return_value=info) as request:
+                result = opencode.read("/fake/opencode", use_service=True)
             self.assertEqual(result["accounts"][0]["windows"][0]["used"], 20)
             self.assertEqual(request.call_args.args[1], "synthetic-secret")
             self.assertNotIn("synthetic-secret", json.dumps(result))
@@ -195,8 +195,8 @@ class OpenCodeUsageTest(unittest.TestCase):
             with open(path, "w", encoding="utf-8") as f:
                 json.dump({"url": 123, "pid": 12}, f)
             os.chmod(path, 0o600)
-            with mock.patch.object(opencode_usage, "_run", return_value=mock.Mock(returncode=0, stdout="http://127.0.0.1:4321")):
-                self.assertEqual(opencode_usage.read("/fake/opencode", use_service=True)["status"], "unavailable")
+            with mock.patch.object(opencode, "_run", return_value=mock.Mock(returncode=0, stdout="http://127.0.0.1:4321")):
+                self.assertEqual(opencode.read("/fake/opencode", use_service=True)["status"], "unavailable")
 
     def test_registration_symlink_is_rejected(self):
         """covers: USAGE-3"""
@@ -212,10 +212,10 @@ class OpenCodeUsageTest(unittest.TestCase):
                 rejected_link = contextlib.nullcontext()
             except (OSError, NotImplementedError):
                 # Windows 의 링크 생성 권한이 없으면 lstat 결과만 대체한다.
-                rejected_link = mock.patch.object(opencode_usage.os, "lstat", return_value=mock.Mock(st_mode=0o120777))
-            with mock.patch.object(opencode_usage, "_run", return_value=mock.Mock(returncode=0, stdout="http://127.0.0.1:4321")), \
-                    mock.patch.object(opencode_usage, "_request") as request, rejected_link:
-                self.assertEqual(opencode_usage.read("/fake/opencode", use_service=True)["status"], "unavailable")
+                rejected_link = mock.patch.object(opencode.os, "lstat", return_value=mock.Mock(st_mode=0o120777))
+            with mock.patch.object(opencode, "_run", return_value=mock.Mock(returncode=0, stdout="http://127.0.0.1:4321")), \
+                    mock.patch.object(opencode, "_request") as request, rejected_link:
+                self.assertEqual(opencode.read("/fake/opencode", use_service=True)["status"], "unavailable")
                 request.assert_not_called()
 
     def test_local_service_response_is_sanitized(self):
@@ -225,10 +225,10 @@ class OpenCodeUsageTest(unittest.TestCase):
             "weekly": {"percent": 34, "limited": False, "resetsAt": 1800000000000},
             "monthly": {"percent": 56, "limited": False, "resetsAt": 1800000000000}}, "budgets": []}}
         status = mock.Mock(returncode=0, stdout="http://127.0.0.1:4321\n")
-        with mock.patch.object(opencode_usage.subprocess, "run", return_value=status) as run, \
-                mock.patch.object(opencode_usage, "_registration", return_value=None), \
-                mock.patch.object(opencode_usage, "_request", return_value=data) as request:
-            result = opencode_usage.read("/fake/opencode", use_service=True)
+        with mock.patch.object(opencode.subprocess, "run", return_value=status) as run, \
+                mock.patch.object(opencode, "_registration", return_value=None), \
+                mock.patch.object(opencode, "_request", return_value=data) as request:
+            result = opencode.read("/fake/opencode", use_service=True)
         self.assertEqual([c.args[0][1:] for c in run.call_args_list], [["service", "status"]])
         request.assert_called_once_with("http://127.0.0.1:4321", None)
         account = result["accounts"][0]
@@ -243,17 +243,17 @@ class OpenCodeUsageTest(unittest.TestCase):
         status = mock.Mock(returncode=0, stdout="http://127.0.0.1:4321\n")
         for body, want in ((data, ("limit", False, "사용 한도에 도달했습니다(리셋 시각에 풀립니다).")),
                            ({"data": {"go": {"weekly": {"percent": 40, "limited": False}}}}, (None, False, None))):
-            with mock.patch.object(opencode_usage.subprocess, "run", return_value=status), \
-                    mock.patch.object(opencode_usage, "_registration", return_value=None), \
-                    mock.patch.object(opencode_usage, "_request", return_value=body):
-                account = opencode_usage.read("/fake/opencode", use_service=True)["accounts"][0]
+            with mock.patch.object(opencode.subprocess, "run", return_value=status), \
+                    mock.patch.object(opencode, "_registration", return_value=None), \
+                    mock.patch.object(opencode, "_request", return_value=body):
+                account = opencode.read("/fake/opencode", use_service=True)["accounts"][0]
             self.assertEqual((account["failure"], account["attention"], account["note"]), want)
 
     def test_stopped_or_remote_service_is_not_started_or_contacted(self):
         """covers: USAGE-3"""
         for text in ("stopped", "http://example.com:1234", "http://127.0.0.1:1234@evil.example", "http://127.0.0.1:1234/path"):
-            with self.subTest(text=text), mock.patch.object(opencode_usage.subprocess, "run", return_value=mock.Mock(returncode=0, stdout=text)) as run:
-                result = opencode_usage.read("/fake/opencode", use_service=True)
+            with self.subTest(text=text), mock.patch.object(opencode.subprocess, "run", return_value=mock.Mock(returncode=0, stdout=text)) as run:
+                result = opencode.read("/fake/opencode", use_service=True)
                 self.assertEqual(run.call_count, 2 if text == "stopped" else 1)
                 self.assertEqual(result["status"], "unavailable")
 
@@ -261,12 +261,12 @@ class OpenCodeUsageTest(unittest.TestCase):
         """covers: USAGE-3"""
         status = mock.Mock(returncode=0, stdout="http://127.0.0.1:4321")
         usage = {"data": {"go": {"rolling": {"percent": None}}}}
-        with mock.patch.object(opencode_usage.subprocess, "run", return_value=status), \
-                mock.patch.object(opencode_usage, "_registration", return_value=None), \
-                mock.patch.object(opencode_usage, "_request", return_value=usage):
-            self.assertEqual(opencode_usage.read("/fake/opencode", use_service=True)["status"], "unavailable")
-        with mock.patch.object(opencode_usage.subprocess, "run", side_effect=subprocess.TimeoutExpired("opencode", 5)):
-            self.assertEqual(opencode_usage.read("/fake/opencode", use_service=True)["status"], "unavailable")
+        with mock.patch.object(opencode.subprocess, "run", return_value=status), \
+                mock.patch.object(opencode, "_registration", return_value=None), \
+                mock.patch.object(opencode, "_request", return_value=usage):
+            self.assertEqual(opencode.read("/fake/opencode", use_service=True)["status"], "unavailable")
+        with mock.patch.object(opencode.subprocess, "run", side_effect=subprocess.TimeoutExpired("opencode", 5)):
+            self.assertEqual(opencode.read("/fake/opencode", use_service=True)["status"], "unavailable")
 
 
 if __name__ == "__main__":

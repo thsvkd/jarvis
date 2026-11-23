@@ -15,9 +15,9 @@ import subprocess
 import time
 import urllib.request
 import urllib.parse
-from . import provider_usage
-from .usage_common import fetch_json, private_json as _private_json, valid_token
-from .util import parse_iso
+from . import caam
+from .common import fetch_json, private_json, valid_token
+from ..util import parse_iso
 
 
 def _local(value):
@@ -36,7 +36,7 @@ def _run(args, timeout):
 
 def _registration(endpoint):
     state = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
-    body = _private_json(os.path.join(state, "opencode", "service.json"))
+    body = private_json(os.path.join(state, "opencode", "service.json"))
     if not isinstance(body, dict) or not isinstance(body.get("url"), str) or body["url"].rstrip("/") != endpoint.rstrip("/"):
         raise ValueError("registration changed")
     if not isinstance(body.get("pid"), int) or isinstance(body["pid"], bool) or body["pid"] <= 0:
@@ -49,7 +49,7 @@ def _registration(endpoint):
 
 def _legacy_key():
     data = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
-    body = _private_json(os.path.join(data, "opencode", "auth.json"))
+    body = private_json(os.path.join(data, "opencode", "auth.json"))
     entry = body.get("opencode-go") if isinstance(body, dict) else None
     key = entry.get("key") if isinstance(entry, dict) and entry.get("type") == "api" else None
     if not valid_token(key):
@@ -167,7 +167,7 @@ def read(exe, use_service=False):
         if not windows:
             return unavailable
         account = {"label": "기본 계정", "org": None, "active": True, "status": "ok", "error": None,
-                   "note": provider_usage.LIMIT_NOTE if limited else None, "attention": False,
+                   "note": caam.LIMIT_NOTE if limited else None, "attention": False,
                    "failure": "limit" if limited else None, "plan": None, "updated_at": time.time(), "windows": windows, "buckets": [],
                    "extra": None, "credits": None, "source": "opencode"}
         return {"status": "ok", "accounts": [account]}

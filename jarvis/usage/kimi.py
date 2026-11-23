@@ -11,8 +11,8 @@ import time
 import tomllib
 import urllib.request
 
-from .usage_common import account, fetch_json, private_json, valid_token
-from .util import parse_iso
+from .common import account, fetch_json, private_json, valid_token
+from ..util import parse_iso
 
 
 def _token():

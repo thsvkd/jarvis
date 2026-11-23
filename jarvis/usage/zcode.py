@@ -7,7 +7,7 @@ import os
 import urllib.parse
 import urllib.request
 
-from .usage_common import account, fetch_json, valid_token
+from .common import account, fetch_json, valid_token
 
 
 def _credentials():

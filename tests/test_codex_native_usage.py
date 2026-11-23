@@ -7,7 +7,7 @@ import time
 import unittest
 from unittest import mock
 
-from jarvis import codex_native_usage
+from jarvis.usage import codex
 
 
 class NativeCodexTest(unittest.TestCase):
@@ -20,8 +20,8 @@ class NativeCodexTest(unittest.TestCase):
             os.chmod(path, 0o600)
             body = {"rate_limit": {"primary_window": {"used_percent": 27, "limit_window_seconds": 18000, "reset_at": 1900000000},
                                    "secondary_window": {"used_percent": 61, "limit_window_seconds": 604800, "reset_at": 1900000001}}}
-            with mock.patch.object(codex_native_usage, "_http", return_value=body) as http:
-                rows = codex_native_usage.read()
+            with mock.patch.object(codex, "_http", return_value=body) as http:
+                rows = codex.read()
             http.assert_called_once_with("synthetic-access", "private-id")
             self.assertEqual([(w["key"], w["used"]) for w in rows[0]["windows"]], [("session", 27), ("weekly", 61)])
             self.assertNotIn("synthetic", json.dumps(rows))
@@ -40,20 +40,20 @@ class NativeCodexTest(unittest.TestCase):
         body = {"rate_limit": {"primary_window": {"used_percent": 1, "limit_window_seconds": 18000, "reset_at": 1900000000}}}
         for claims, label in cases:
             with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"CODEX_HOME": tmp}), \
-                    mock.patch.object(codex_native_usage, "_http", return_value=body):
+                    mock.patch.object(codex, "_http", return_value=body):
                 path = os.path.join(tmp, "auth.json")
                 with open(path, "w", encoding="utf-8") as f:
                     json.dump({"tokens": {"access_token": "a", "account_id": "acct", "id_token": idt(claims)}}, f)
                 os.chmod(path, 0o600)
-                rows = codex_native_usage.read()
+                rows = codex.read()
                 self.assertEqual(rows[0]["label"], label)
                 self.assertNotIn("acct", json.dumps(rows))
 
     def test_missing_or_invalid_credentials_do_not_trigger_refresh(self):
         """covers: USAGE-3"""
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"CODEX_HOME": tmp}), \
-                mock.patch.object(codex_native_usage, "_http") as http:
-            self.assertEqual(codex_native_usage.read(), [])
+                mock.patch.object(codex, "_http") as http:
+            self.assertEqual(codex.read(), [])
         http.assert_not_called()
 
 
@@ -79,7 +79,7 @@ class LoginTest(unittest.TestCase):
     def test_stalled_login_is_reported_with_elapsed_time_only(self):
         """covers: USAGE-19"""
         self.write({"exp": time.time() - 3 * 3600, "pwd_auth_time": 1762000000})
-        login = codex_native_usage.login(True)
+        login = codex.login(True)
         self.assertEqual({k: login[k] for k in ("state", "text", "attention", "slot", "other", "store")},
                          {"state": "stalled", "text": "Codex 다시 로그인 필요", "attention": True, "slot": None, "other": False, "store": None})
         self.assertTrue(login["note"].startswith("접근 토큰이 3시간 전에 만료됐습니다. 다시 로그인하세요."), login["note"])
@@ -87,41 +87,41 @@ class LoginTest(unittest.TestCase):
         text = json.dumps(login, ensure_ascii=False)
         for secret in ("synthetic-signature", "private-account", "1762000000", "eyJ"):
             self.assertNotIn(secret, text)
-        self.assertNotIn("건너뜁니다", codex_native_usage.login(False)["note"])
+        self.assertNotIn("건너뜁니다", codex.login(False)["note"])
 
     def test_nothing_to_report(self):
         """covers: USAGE-19. 유지가 돈 적 없음, 만료 2시간 안, 안전하지 않은 파일, exp 없음·깨진 JWT, 파일 없음"""
-        self.assertIsNone(codex_native_usage.login(True))  # 파일 없음(키링 저장 방식 포함)
+        self.assertIsNone(codex.login(True))  # 파일 없음(키링 저장 방식 포함)
         self.write({"exp": time.time() - 3 * 3600})
-        self.assertIsNone(codex_native_usage.login(None))
+        self.assertIsNone(codex.login(None))
         self.write({"exp": time.time() - 3600})
-        self.assertIsNone(codex_native_usage.login(True))
+        self.assertIsNone(codex.login(True))
         self.write({"exp": time.time() - 3 * 3600}, mode=0o644)
-        self.assertIsNone(codex_native_usage.login(True))
+        self.assertIsNone(codex.login(True))
         for claims in ({}, {"exp": "x"}, {"exp": True}, {"exp": float("nan")}, {"exp": 10 ** 400}):
             self.write(claims)
-            self.assertIsNone(codex_native_usage.login(True), claims)
+            self.assertIsNone(codex.login(True), claims)
         self.write({}, access="not-a-jwt")
-        self.assertIsNone(codex_native_usage.login(True))
+        self.assertIsNone(codex.login(True))
 
     def test_login_deadline_warns_three_days_ahead(self):
         """covers: USAGE-19. auth_time + 30일이 3일 안이면 expiring, 지났으면 기한 지남, 멀면 없음. 유지가 돌지 않아도 붙는다"""
         now = time.time()
         auth = now - 28 * 86400
         self.write({"exp": now + 3600, "auth_time": auth})
-        login = codex_native_usage.login(None)
+        login = codex.login(None)
         self.assertEqual({k: login[k] for k in ("state", "text", "attention", "slot", "other", "store")},
                          {"state": "expiring", "text": "Codex 로그인 만료 임박(약 2일)", "attention": True, "slot": None, "other": False, "store": None})
         self.assertNotIn(str(int(auth)), json.dumps(login, ensure_ascii=False))
         self.write({"exp": now + 3600, "auth_time": now - 31 * 86400})
-        self.assertEqual(codex_native_usage.login(True)["text"], "Codex 로그인 기한이 지났습니다")
+        self.assertEqual(codex.login(True)["text"], "Codex 로그인 기한이 지났습니다")
         self.write({"exp": now + 3600, "auth_time": now - 20 * 86400})
-        self.assertIsNone(codex_native_usage.login(True))
+        self.assertIsNone(codex.login(True))
         self.write({"exp": now - 3 * 3600, "auth_time": now - 31 * 86400})  # 이미 끊겼으면 멈춤이 앞선다
-        self.assertEqual(codex_native_usage.login(True)["state"], "stalled")
+        self.assertEqual(codex.login(True)["state"], "stalled")
         for bad in ("x", True, float("nan"), -1):
             self.write({"exp": now + 3600, "auth_time": bad})
-            self.assertIsNone(codex_native_usage.login(True), bad)
+            self.assertIsNone(codex.login(True), bad)
 
     def test_login_deadline_survives_an_unreadable_access_token(self):
         """covers: USAGE-19. 접근 토큰이 없거나 JWT 가 아니어도 id_token 의 기한 경고는 붙는다"""
@@ -131,7 +131,7 @@ class LoginTest(unittest.TestCase):
             with open(self.path, "w", encoding="utf-8") as f:
                 json.dump({"tokens": tokens}, f)
             os.chmod(self.path, 0o600)
-            self.assertEqual(codex_native_usage.login(True)["state"], "expiring", tokens.keys())
+            self.assertEqual(codex.login(True)["state"], "expiring", tokens.keys())
 
 
 if __name__ == "__main__":

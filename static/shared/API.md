@@ -300,7 +300,7 @@ Codex 프로바이더에는 USAGE-19 의 두 가지 상태가 붙는다. 멈춤�
 
 ## 사용량 계정 행의 failure
 
-계정 행(`providers[].accounts[]`)의 `failure` 는 행에 문제가 있으면(값이 있어도) 아래 코드 중 하나이고, 문제가 없으면 null 이다(USAGE-17). 상태는 정상인데 값의 나이만 기준보다 오래된 행(USAGE-6)도 null 이며 나이는 `note` 와 `attention` 이 맡는다. hswap 상태 이름, Claude `usageStatus`·`usageError` 원문, `detail` 원문은 담지 않는다. 화면은 이 코드로 배지 문구와 다시 로그인 버튼을 정한다(`static/app/usage.js` 의 `CODES`, 키 집합이 `provider_usage.FAILURES` 와 같다는 것을 `tests/test_hswap_fixtures.py` 가 확인한다). 코드가 없는 옛 게이트웨이의 행은 화면이 옛 hswap 상태 이름(`authentication_required`·`stale`·`rate_limited`)이나 문구로 읽는다.
+계정 행(`providers[].accounts[]`)의 `failure` 는 행에 문제가 있으면(값이 있어도) 아래 코드 중 하나이고, 문제가 없으면 null 이다(USAGE-17). 상태는 정상인데 값의 나이만 기준보다 오래된 행(USAGE-6)도 null 이며 나이는 `note` 와 `attention` 이 맡는다. hswap 상태 이름, Claude `usageStatus`·`usageError` 원문, `detail` 원문은 담지 않는다. 화면은 이 코드로 배지 문구와 다시 로그인 버튼을 정한다(`static/app/usage.js` 의 `CODES`, 키 집합이 `usage.caam.FAILURES` 와 같다는 것을 `tests/test_hswap_fixtures.py` 가 확인한다). 코드가 없는 옛 게이트웨이의 행은 화면이 옛 hswap 상태 이름(`authentication_required`·`stale`·`rate_limited`)이나 문구로 읽는다.
 
 | 코드 | 뜻 | attention 기본값 | 다시 로그인 버튼 |
 | --- | --- | --- | --- |

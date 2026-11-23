@@ -1,6 +1,6 @@
 """hswap 이 재는 Claude 밖 하네스(Codex·Grok·OpenCode)의 계정별 사용량을 읽고(USAGE-8), 게이트웨이가 도는 동안 로그인을 유지한다(USAGE-9).
 
-하네스마다 `hswap list <하네스> --json` 을 한 번 부른다(Claude 는 claude_accounts 가 `hswap claude list` 로 따로 읽어 같은 하네스를 두 번 재지 않는다).
+하네스마다 `hswap list <하네스> --json` 을 한 번 부른다(Claude 는 claude 가 `hswap claude list` 로 따로 읽어 같은 하네스를 두 번 재지 않는다).
 읽기는 설정·등록·전환을 하지 않는다. 측정 간격과 실패 백오프는 hswap 이 정한다. 등록·usage.remote·refresh 는 maintain() 만 한다(자동 전환은 사람이 켠 Claude 만, USAGE-14).
 원격 측정은 하네스 CLI 를 띄워 수십 초가 걸릴 수 있어 뒤에서 읽고, 기존 수집기와 동시에 돌려 기다리는 시간 안에 끝나지 않으면 마지막 답을 준다.
 계정은 이메일만 내보낸다. identity·details(계정 ID)·hswap 의 detail 원문은 내보내지 않는다.
@@ -18,8 +18,9 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout, wait
 
-from . import caam_usage, claude_accounts, config, macos_daemon, provider_usage, usage_common
-from .util import _NO_WINDOW, scrub_home, tool_path, which_tool
+from .. import config, macos_daemon
+from . import caam, claude, common
+from ..util import _NO_WINDOW, scrub_home, tool_path, which_tool
 
 WAIT_S = 8  # 읽기를 시작한 뒤 hswap 을 기다리는 시간. 기존 수집기가 그보다 오래 걸리면 그동안 함께 기다린다(수집 대기 55초 안)
 FORCE_WAIT_S = 40  # 새로고침(refresh + 측정)을 기다리는 시간. 수집 대기(55초)와 core 의 사용량 시한(70초) 안이어야 한다
@@ -56,10 +57,10 @@ STATES = {
     "unknown": ("사용률을 확인하지 못했습니다.", False),
     "unsupported": ("hswap 이 이 계정의 사용량을 재지 않습니다(usage.remote 설정을 확인하세요).", False),
     "authentication_required": ("다시 로그인해야 합니다.", True),
-    "rate_limited": (provider_usage.LIMIT_NOTE, False),  # 한도 창 소진. 리셋 시각에 풀린다(USAGE-17)
+    "rate_limited": (caam.LIMIT_NOTE, False),  # 한도 창 소진. 리셋 시각에 풀린다(USAGE-17)
     "error": ("사용량을 읽지 못했습니다.", False),
 }
-# UsageState → failure 코드(USAGE-17, provider_usage.FAILURES). 키 집합은 STATES 와 같다. available 은 null 이다
+# UsageState → failure 코드(USAGE-17, caam.FAILURES). 키 집합은 STATES 와 같다. available 은 null 이다
 CODES = {"stale": "wait", "unknown": "unknown", "unsupported": "unsupported", "authentication_required": "auth", "rate_limited": "limit", "error": "unknown"}
 # Grok 은 포함 크레딧 사용률이 0 이면 creditUsagePercent 를 생략한다(protobuf 기본값). 요금제·측정 시각이 있는 이 답은 0% 다.
 # 2026-11-09 s2 실측: 같은 답에서 Grok 의 /usage 가 "Weekly limit (SuperGrok) 0%" 를 보였다
@@ -103,13 +104,13 @@ def account(row):
     u = row.get("usage") if isinstance(row.get("usage"), dict) else {}
     windows = []
     for w in u.get("windows") if isinstance(u.get("windows"), list) else []:
-        used = claude_accounts._pct(w.get("usedPercent")) if isinstance(w, dict) else None
+        used = claude._pct(w.get("usedPercent")) if isinstance(w, dict) else None
         if used is None:
             continue
         seconds = _num(w.get("windowSeconds"))
-        key = caam_usage._key(seconds) if seconds and seconds > 0 else WINDOW_NAMES.get(_str(w.get("name")), "기간 미확인")
-        windows.append({"key": key, "used": used, "resets_at": claude_accounts._sec(w.get("resetsAt"))})
-    extra, at = _extra(u.get("balance")), claude_accounts._sec(u.get("measuredAt"))
+        key = caam._key(seconds) if seconds and seconds > 0 else WINDOW_NAMES.get(_str(w.get("name")), "기간 미확인")
+        windows.append({"key": key, "used": used, "resets_at": claude._sec(w.get("resetsAt"))})
+    extra, at = _extra(u.get("balance")), claude._sec(u.get("measuredAt"))
     state = _str(u.get("state"))
     note, attention = STATES.get(state, (None, False))
     failure = CODES.get(state)
@@ -125,12 +126,12 @@ def account(row):
         # 사용 중 계정을 한 번도 재지 못했으면 hswap 이 스스로 풀지 못할 수 있다(Codex 가 실행 중이면 갱신을 건너뛴다): 다시 로그인하거나 하네스를 써야 한다.
         # 쉬는 계정에 다시 로그인을 내면 지금 로그인을 바꾸게 되므로 사용 중 계정만 주의로 둔다
         attention = row.get("active") is True
-    elif state == "stale" and row.get("active") is True and at and time.time() - at > claude_accounts.DEAD_S:
+    elif state == "stale" and row.get("active") is True and at and time.time() - at > claude.DEAD_S:
         # USAGE-18: 정상 stale(최장 백오프·유지 주기 1시간, Grok 의 만료 직전 거부)은 6시간을 넘지 않는다
-        note, attention = (f"{claude_accounts._span(time.time() - at)}째 새로 재지 못했습니다. 다시 로그인해야 할 수 있습니다. "
+        note, attention = (f"{claude._span(time.time() - at)}째 새로 재지 못했습니다. 다시 로그인해야 할 수 있습니다. "
                            "그 하네스가 데몬·앱으로 상주하면 먼저 끝내야 새 로그인을 씁니다."), True
     label = row.get("label")
-    return {"label": label if isinstance(label, str) and len(label) <= 200 and usage_common.EMAIL.fullmatch(label)
+    return {"label": label if isinstance(label, str) and len(label) <= 200 and common.EMAIL.fullmatch(label)
             else "API 키 계정" if row.get("authMode") in ("api_key", "key") else "이름 없는 계정",
             "org": None, "active": row.get("active") is True,
             "status": "ok" if has else "error", "error": None if has else note or "사용량을 확인할 수 없습니다.",
@@ -142,29 +143,29 @@ def account(row):
 
 def _run(exe, *args, caller="jarvis-gateway", timeout=None):
     """hswap 을 한 번 실행해 (종료 코드, stdout). 실행하지 못했거나 TIMEOUT_S 를 넘기면 (None, "").
-    caller: hswap 에 알리는 호출 주체(HSWAP_CALLER). 사람의 버튼이 부른 것은 jarvis-ui. 결과는 claude_accounts.call_log 가 게이트웨이 로그에 남긴다."""
+    caller: hswap 에 알리는 호출 주체(HSWAP_CALLER). 사람의 버튼이 부른 것은 jarvis-ui. 결과는 claude.call_log 가 게이트웨이 로그에 남긴다."""
     start = time.monotonic()
     try:
         # hswap 은 하네스 CLI(codex·grok·opencode)를 PATH 로 찾는다. 서비스의 PATH 에는 사용자 설치 위치가 없어 "not installed" 로 답한다
-        env = {**claude_accounts._env(caller), "PATH": tool_path()}
+        env = {**claude._env(caller), "PATH": tool_path()}
         # 새 세션으로 띄워 시간 초과 때 hswap 이 띄운 하네스 CLI 까지 함께 끝낸다
         proc = subprocess.Popen([exe, *args], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
                                 text=True, encoding="utf-8", errors="replace", env=env, creationflags=_NO_WINDOW, start_new_session=os.name != "nt")
     except OSError:
-        claude_accounts.call_log(args, None, (time.monotonic() - start) * 1000)
+        claude.call_log(args, None, (time.monotonic() - start) * 1000)
         return None, ""
     try:
         out, _ = proc.communicate(timeout=timeout or TIMEOUT_S)
     except subprocess.TimeoutExpired:
         _kill(proc)
-        claude_accounts.call_log(args, None, (time.monotonic() - start) * 1000)
+        claude.call_log(args, None, (time.monotonic() - start) * 1000)
         return None, ""
     err = (_json(out) or {}).get("error")
-    claude_accounts.call_log(args, proc.returncode, (time.monotonic() - start) * 1000, err.get("type") if isinstance(err, dict) else None)
+    claude.call_log(args, proc.returncode, (time.monotonic() - start) * 1000, err.get("type") if isinstance(err, dict) else None)
     return proc.returncode, out
 
 
-def _say(kind, value, line, again_s=claude_accounts.LOG_AGAIN_S):
+def _say(kind, value, line, again_s=claude.LOG_AGAIN_S):
     """게이트웨이 로그에 `[jarvis] hswap: <line>` 한 줄. 같은 종류의 같은 값은 again_s 에 한 번만(None 이면 값이 바뀔 때만) 남긴다."""
     now, prev = time.monotonic(), _said.get(kind)
     if prev and prev[0] == value and (again_s is None or now - prev[1] < again_s):
@@ -174,7 +175,7 @@ def _say(kind, value, line, again_s=claude_accounts.LOG_AGAIN_S):
 
 
 def _note_tick(reason):
-    """tick 의 결정(USAGE-16): None 이면 keepalive 를 불렀고, 아니면 건너뛴 이유 코드(claude_accounts.tick_reason, not_ready)."""
+    """tick 의 결정(USAGE-16): None 이면 keepalive 를 불렀고, 아니면 건너뛴 이유 코드(claude.tick_reason, not_ready)."""
     _say("tick", reason, "tick keepalive 실행" if reason is None else f"tick 건너뜀({reason})")
 
 
@@ -208,7 +209,7 @@ def _fetch(exe, harness):
 
 
 def _kill(proc):
-    """시간 초과한 hswap 과 그 자식(하네스 CLI)을 끝낸다. 파이프를 쥔 손자가 남아도 기다리지 않는다(cli_login._codex_keyring_allowed 와 같은 정리)."""
+    """시간 초과한 hswap 과 그 자식(하네스 CLI)을 끝낸다. 파이프를 쥔 손자가 남아도 기다리지 않는다(login._codex_keyring_allowed 와 같은 정리)."""
     if os.name != "nt":
         try:
             os.killpg(proc.pid, signal.SIGKILL)
@@ -247,7 +248,7 @@ def _job(exe, harness, refresh=False, prev=None):
 def _start(harness, refresh=False):
     """hswap 읽기를 뒤에서 시작한다(진행 중이면 그것). hswap 이 없으면 None.
     refresh 인데 진행 중인 읽기에 새로고침이 없으면 그것이 끝난 뒤 refresh 를 앞세운 읽기를 새로 띄운다."""
-    exe = claude_accounts.binary()
+    exe = claude.binary()
     if not exe:
         return None
     with _lock:
@@ -290,16 +291,16 @@ def schedule():
     """Claude 로그인 자동 갱신의 예약 실행을 맞춘다(USAGE-11). macOS 는 키체인이 GUI 세션에서만 닿아 hswap 이 설치하는
     LaunchAgent 에 맡긴다: 예약이 없으면 설치하고, hswap 이 만든 예약이 적재되지 않았으면 그 설정(ahead·thenAuto) 그대로 다시 설치한다.
     적재된 예약과 hswap 이 만들지 않은 같은 이름의 서비스는 건드리지 않는다(사람이 바꾼 설정을 덮어쓰지 않는다).
-    답한 상태는 로그인 판정(claude_accounts.service)에 쓴다. 할 일이 아니면 None 이고 지난 답도 지운다."""
-    claude_accounts.service = claude_accounts.service_note = None
-    exe = claude_accounts.binary()
-    v = claude_accounts._version
-    if (sys.platform != "darwin" or not config.CSWAP_INSTALL or not exe or not which_tool("claude") or claude_accounts.installer.state == "running"
-            or not v or claude_accounts._key(v) < claude_accounts._key(SERVICE_FROM) or not claude_accounts._store_read()):
+    답한 상태는 로그인 판정(claude.service)에 쓴다. 할 일이 아니면 None 이고 지난 답도 지운다."""
+    claude.service = claude.service_note = None
+    exe = claude.binary()
+    v = claude._version
+    if (sys.platform != "darwin" or not config.CSWAP_INSTALL or not exe or not which_tool("claude") or claude.installer.state == "running"
+            or not v or claude._key(v) < claude._key(SERVICE_FROM) or not claude._store_read()):
         return None
     st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json")[1])
     want, note = _service_plan(st)
-    if (claude_accounts.doctor or {}).get("keepalive_domain") == "system":  # 데몬 keepalive(--system) 옆에 gui 예약을 두지 않는다(hswap 0.3.0)
+    if (claude.doctor or {}).get("keepalive_domain") == "system":  # 데몬 keepalive(--system) 옆에 gui 예약을 두지 않는다(hswap 0.3.0)
         want = False
     text = {"caller_env_only": "keepalive 예약: 다음 설치 때 갱신",
             "needs_sudo": f"keepalive 예약(LaunchDaemon)을 다시 설치해야 합니다: {_sudo_command(st or {})}"}.get(note)
@@ -316,7 +317,7 @@ def schedule():
         elif code not in (0, 3):
             print(f"[jarvis] hswap keepalive 예약 설치 실패(종료 코드 {code})", flush=True)
         st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json")[1]) or st
-    claude_accounts.service, claude_accounts.service_note = st, text
+    claude.service, claude.service_note = st, text
     return st
 
 
@@ -349,20 +350,20 @@ def _error_type(out):
 
 
 def inspect():
-    """macOS: `hswap claude doctor --json`(0.3.0, 키체인 없이 돈다)으로 저장 방식·문제·예약 상태를 읽어 claude_accounts.doctor 에 둔다(USAGE-15).
+    """macOS: `hswap claude doctor --json`(0.3.0, 키체인 없이 돈다)으로 저장 방식·문제·예약 상태를 읽어 claude.doctor 에 둔다(USAGE-15).
     doctor 를 모르는 옛 hswap(버전을 모르는 것 포함)은 doctor 를 부르지 않고 config 의 credentials.store 만 쓴다.
     할 일이 아니면(macOS 밖, hswap·Claude Code 없음, 설치 중) 지난 답도 지운다."""
-    exe = claude_accounts.binary()
+    exe = claude.binary()
     if (sys.platform != "darwin" or not config.CSWAP_INSTALL or not exe or not which_tool("claude")
-            or claude_accounts.installer.state == "running"):
-        claude_accounts.doctor = None
+            or claude.installer.state == "running"):
+        claude.doctor = None
         return None
-    v = claude_accounts._version
-    new = bool(v) and claude_accounts._key(v) >= claude_accounts._key(claude_accounts.DOCTOR_FROM)
+    v = claude._version
+    new = bool(v) and claude._key(v) >= claude._key(claude.DOCTOR_FROM)
     body = _json(_run(exe, "claude", "doctor", "--json")[1]) if new else None  # 문제가 있으면 0 이 아닌 코드로 끝나도 JSON 은 정상이다
-    d = claude_accounts.doctor = macos_daemon.summary(body, None if macos_daemon.answered(body) else _settings(exe))
+    d = claude.doctor = macos_daemon.summary(body, None if macos_daemon.answered(body) else _settings(exe))
     if d:  # 바뀔 때만 남긴다(USAGE-16). problems 는 코드뿐이다
-        session = "in" if claude_accounts.in_session() else "out"
+        session = "in" if claude.in_session() else "out"
         problems = ",".join(d.get("problems") or []) or "없음"
         _say("doctor", (d.get("store"), problems, session), f"doctor store={d.get('store') or '모름'} problems={problems} session={session}", again_s=None)
     return d
@@ -393,9 +394,9 @@ def rotation():
     {on, ordered, order: [슬롯, 우선 순서], threshold: 전환하는 사용률(%), service: macOS 예약 상태 요약(그 밖 None)}.
     on: 게이트웨이 tick 이 도는 곳(macOS 밖, macOS 의 세션 밖 파일 저장 방식)은 순서 전략(tick 이 그때만 auto 를 부른다), 그 밖의 macOS 는 hswap 예약의 then-auto.
     ordered: 순서 전략인지."""
-    exe = claude_accounts.binary()
-    v = claude_accounts._version
-    if not exe or not v or claude_accounts._key(v) < claude_accounts._key(ROTATION_FROM):
+    exe = claude.binary()
+    v = claude._version
+    if not exe or not v or claude._key(v) < claude._key(ROTATION_FROM):
         return 409, {"error": f"이 기기에 hswap {ROTATION_FROM} 이상이 필요합니다"}  # 404 는 core 가 'jarvis 갱신 필요'로 바꾼다
     with _rot_lock:
         s, pri = _settings(exe, UI), _priorities(exe, UI)
@@ -404,7 +405,7 @@ def rotation():
         return 502, {"error": "hswap 설정을 읽지 못했습니다"}
     ordered = s.get("autoswitch.strategy") == ROTATION
     svc = None if st is None else {"managed": st.get("managed") is True, "installed": st.get("installed") is not False}
-    return 200, {"on": ordered if claude_accounts.gateway_ticks() else (st or {}).get("thenAuto") is True, "ordered": ordered,
+    return 200, {"on": ordered if claude.gateway_ticks() else (st or {}).get("thenAuto") is True, "ordered": ordered,
                  "order": sorted((k for k, t in pri.items() if t > 0), key=lambda k: (-pri[k], int(k))),
                  "threshold": _num(s.get("autoswitch.threshold")), "service": svc}
 
@@ -433,19 +434,19 @@ def set_rotation(on, order, threshold):
     svc = now["service"]
     if sys.platform == "darwin" and svc and svc["installed"] and not svc["managed"] and (on == "1") != now["on"]:
         return 409, {"error": "이 기기의 keepalive 예약은 사람이 만든 것이라 jarvis 가 자동 전환을 켜거나 끄지 않습니다"}
-    if (sys.platform == "darwin" and (claude_accounts.doctor or {}).get("keepalive_domain") == "system" and not claude_accounts.gateway_ticks()
+    if (sys.platform == "darwin" and (claude.doctor or {}).get("keepalive_domain") == "system" and not claude.gateway_ticks()
             and (on == "1") != now["on"]):  # 데몬 예약이 적재되지 않아 tick 이 도는 동안은 순서 전략만으로 켜고 끈다
         # 데몬 keepalive 는 관리자 권한으로만 다시 설치된다. jarvis 는 sudo 를 쓰지 않는다
         flag = " --then-auto" if on == "1" else ""
         return 409, {"error": f"이 기기의 keepalive 예약은 LaunchDaemon 이라 jarvis 가 자동 전환을 켜거나 끄지 않습니다. 그 기기에서 실행하세요: sudo hswap claude keepalive --install-service --system{flag}"}
-    exe = claude_accounts.binary()
+    exe = claude.binary()
     pri = {s: str(len(slots) - i) for i, s in enumerate(slots)}
     steps = [(("claude", "priority", s, "--unset"), "우선순위 해제") for s in now["order"] if s not in pri]
     steps += [(("claude", "priority", s, p), "우선순위 지정") for s, p in pri.items()]
     steps.append((("claude", "config", "set", "autoswitch.threshold", f"{t:g}"), "전환 기준 저장"))
     steps.append((("claude", "config", "set", "autoswitch.strategy", ROTATION) if on == "1" else ("claude", "config", "unset", "autoswitch.strategy"), "전략 저장"))
     # 데몬 keepalive 는 gui 예약으로 바꿀 수 없다(hswap 이 ServiceConflict 로 거절한다). 적재되지 않아 tick 이 도는 동안은 전략만으로 켜고 끈다
-    if sys.platform == "darwin" and (on == "1") != now["on"] and (claude_accounts.doctor or {}).get("keepalive_domain") != "system":
+    if sys.platform == "darwin" and (on == "1") != now["on"] and (claude.doctor or {}).get("keepalive_domain") != "system":
         st = _json(_run(exe, "claude", "keepalive", "--service-status", "--json", caller=UI)[1]) or {}
         ahead = _ahead(st)
         steps.append((("claude", "keepalive", "--install-service", "--ahead", str(int(ahead)), *(["--then-auto"] if on == "1" else []), "--json"), "예약 다시 설치"))
@@ -454,7 +455,7 @@ def set_rotation(on, order, threshold):
             rc, out = _run(exe, *args, caller=UI)
             if rc not in ((0, 3) if "--install-service" in args else (0,)):  # 예약 설치의 3 은 GUI 세션이 없어 다음 로그인 때 적재된다는 뜻이다
                 if _error_type(out) == "service_busy":
-                    return 409, {"error": claude_accounts.HSWAP_ERRORS["service_busy"]}
+                    return 409, {"error": claude.HSWAP_ERRORS["service_busy"]}
                 return 409, {"error": f"hswap 이 {what}에 실패했습니다(종료 코드 {rc})"}
     return rotation()
 
@@ -465,8 +466,8 @@ def hswap_log(since):
     hswap 의 출력은 {events: [...]}·배열·JSON Lines 중 어느 것이든 받는다(계약에 모양이 정해지지 않았다)."""
     if not isinstance(since, str) or not SINCE.fullmatch(since):
         return 400, {"error": "since 는 30m·1h·2d 꼴이어야 합니다"}
-    exe, v = claude_accounts.binary(), claude_accounts._version
-    if not exe or not v or claude_accounts._key(v) < claude_accounts._key(LOG_FROM):
+    exe, v = claude.binary(), claude._version
+    if not exe or not v or claude._key(v) < claude._key(LOG_FROM):
         return 409, {"error": f"hswap {LOG_FROM} 이상 필요"}
     if not _log_lock.acquire(blocking=False):
         return 429, {"error": "hswap 로그를 이미 읽는 중입니다. 잠시 뒤 다시 시도하세요"}
@@ -528,17 +529,17 @@ def _clean(v, depth=0):
 
 def tick():
     """게이트웨이가 TICK_S 마다 keepalive 를 부른다(결과는 hswap 이 keepalive.json 에 남긴다). 키체인이 없는 Linux·Windows 는 늘,
-    macOS 는 doctor 를 다시 읽고 로그인 세션 밖의 파일 저장 방식이며 적재된 keepalive 예약이 없을 때만(claude_accounts.gateway_ticks, USAGE-15).
+    macOS 는 doctor 를 다시 읽고 로그인 세션 밖의 파일 저장 방식이며 적재된 keepalive 예약이 없을 때만(claude.gateway_ticks, USAGE-15).
     자동 전환을 켠 기기(순서 전략, USAGE-14)는 keepalive 뒤에 auto --once 로 한 번 판정한다(세션 안의 macOS 는 hswap 예약의 --then-auto 가 한다)."""
     while True:
         try:
             if sys.platform == "darwin":
                 inspect()
-            exe = claude_accounts.binary()
+            exe = claude.binary()
             # 저장한 계정이 없으면 유지할 로그인도 없다(로그인하지 않은 기기에 실패 기록을 만들지 않는다)
-            ready = (config.CSWAP_INSTALL and exe and which_tool("claude") and claude_accounts.installer.state != "running"
-                     and claude_accounts._store_read())
-            reason = claude_accounts.tick_reason() or (None if ready else "not_ready")
+            ready = (config.CSWAP_INSTALL and exe and which_tool("claude") and claude.installer.state != "running"
+                     and claude._store_read())
+            reason = claude.tick_reason() or (None if ready else "not_ready")
             _note_tick(reason)
             if reason is None:
                 code, _ = _run(exe, "claude", "keepalive", "--ahead", str(AHEAD_S), "--json")
@@ -554,13 +555,13 @@ def maintain():
     Claude 는 0.2.1 에 refresh 가 없어, 같은 주기로 hswap claude list 를 묻는 읽기로 hswap 이 토큰을 갱신하게 한다."""
     ticking = False
     while True:
-        for step in (_check, inspect, schedule, _keep_once, lambda: which_tool("claude") and claude_accounts.read()):
+        for step in (_check, inspect, schedule, _keep_once, lambda: which_tool("claude") and claude.read()):
             try:
                 step()
             except Exception as e:
                 print(f"[jarvis] hswap 유지 실패: {scrub_home(str(e))[:200]}", flush=True)
-        # 첫 버전 맞추기(설치) 뒤에 시작한다. 세션 안의 macOS 는 hswap 예약이 돌아 띄우지 않는다. 세션 밖은 tick 이 매번 할 일인지 가린다(claude_accounts.gateway_ticks)
-        if not ticking and (sys.platform != "darwin" or not claude_accounts.in_session()):
+        # 첫 버전 맞추기(설치) 뒤에 시작한다. 세션 안의 macOS 는 hswap 예약이 돌아 띄우지 않는다. 세션 밖은 tick 이 매번 할 일인지 가린다(claude.gateway_ticks)
+        if not ticking and (sys.platform != "darwin" or not claude.in_session()):
             ticking = True
             threading.Thread(target=tick, name="jarvis-keepalive", daemon=True).start()
         time.sleep(KEEP_S)
@@ -568,15 +569,15 @@ def maintain():
 
 def _check():
     """버전을 맞추고, 지금 설치를 시작했으면 끝날 때까지(최대 설치 한도) 기다려 새 기기에서도 첫 유지를 한 시간 미루지 않는다."""
-    claude_accounts.check()
-    end = time.monotonic() + claude_accounts.INSTALL_TIMEOUT_S
-    while claude_accounts.installer.state == "running" and time.monotonic() < end:
+    claude.check()
+    end = time.monotonic() + claude.INSTALL_TIMEOUT_S
+    while claude.installer.state == "running" and time.monotonic() < end:
         time.sleep(5)
 
 
 def _keep_once():
-    exe = claude_accounts.binary()
-    if not exe or claude_accounts.installer.state == "running":  # 설치하는 동안에는 hswap 을 띄우지 않는다
+    exe = claude.binary()
+    if not exe or claude.installer.state == "running":  # 설치하는 동안에는 hswap 을 띄우지 않는다
         return
     done = keep(exe)
     _say("keep", done, f"로그인 유지: {done}", again_s=None)  # 상주 하네스로 늘 건너뛰는 기기에 매시간 같은 줄이 쌓이지 않게 바뀔 때만
@@ -605,7 +606,7 @@ def read(harness, fallback, force=False):
 def _email(r):
     """같은 계정을 가르는 열쇠: 이메일(대소문자 무시). 이메일이 아닌 라벨(기본 계정 등)은 서로 다른 계정으로 본다."""
     label = r.get("label")
-    return label.lower() if isinstance(label, str) and usage_common.EMAIL.fullmatch(label) else id(r)
+    return label.lower() if isinstance(label, str) and common.EMAIL.fullmatch(label) else id(r)
 
 
 def merge(rows, old):

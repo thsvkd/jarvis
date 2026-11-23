@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from jarvis import gemini_usage
+from jarvis.usage import gemini
 
 
 class GeminiUsageTest(unittest.TestCase):
@@ -17,9 +17,9 @@ class GeminiUsageTest(unittest.TestCase):
                 json.dump({"access_token": "synthetic-access", "refresh_token": "synthetic-refresh", "expiry_date": 4070908800000}, f)
             os.chmod(path, 0o600)
             body = {"buckets": [{"modelId": "gemini-model", "remainingFraction": .7, "resetTime": "2099-01-01T00:00:00Z"}]}
-            with mock.patch.object(gemini_usage, "_http", return_value=body) as http, \
-                    mock.patch.object(gemini_usage.antigravity_usage, "_http", return_value={"email": "test@example.com", "email_verified": True, "sub": "private-id"}):
-                result = gemini_usage.read()
+            with mock.patch.object(gemini, "_http", return_value=body) as http, \
+                    mock.patch.object(gemini.antigravity, "_http", return_value={"email": "test@example.com", "email_verified": True, "sub": "private-id"}):
+                result = gemini.read()
             http.assert_called_once_with("synthetic-access", "test-project")
             self.assertEqual(result["accounts"][0]["label"], "test@example.com")
             self.assertEqual(result["accounts"][0]["buckets"][0]["used"], 30)
@@ -34,10 +34,10 @@ class GeminiUsageTest(unittest.TestCase):
             with open(path, "w", encoding="utf-8") as f:
                 json.dump({"access_token": "expired", "refresh_token": "must-not-use", "expiry_date": 1}, f)
             os.chmod(path, 0o600)
-            with mock.patch.object(gemini_usage, "_http") as http:
-                self.assertEqual(gemini_usage.read()["status"], "unavailable")
+            with mock.patch.object(gemini, "_http") as http:
+                self.assertEqual(gemini.read()["status"], "unavailable")
                 with mock.patch.dict(os.environ, {"GOOGLE_CLOUD_PROJECT": "test-project"}):
-                    self.assertEqual(gemini_usage.read()["status"], "unavailable")
+                    self.assertEqual(gemini.read()["status"], "unavailable")
             http.assert_not_called()
 
 

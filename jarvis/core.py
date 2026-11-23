@@ -29,7 +29,7 @@ import zlib
 from concurrent.futures import ThreadPoolExecutor
 
 from . import launch
-from .cli_login import PASTE_RE
+from .usage.login import PASTE_RE
 
 EVERY_S = 10
 TIMEOUT_S = 5  # 연결·읽기 한 번
@@ -37,7 +37,7 @@ PULL_TIMEOUT_S = 150  # jarvis 갱신은 게이트웨이가 manifest(30초)와 �
 USAGE_TIMEOUT_S = 70  # 사용량 새로고침은 게이트웨이가 프로바이더 API 를 부른다(수집기 대기 55초)
 LOGIN_TIMEOUT_S = 40  # 게이트웨이가 CLI 의 URL·코드를 30초까지 기다린다
 SWITCH_TIMEOUT_S = 40  # 게이트웨이가 hswap claude switch 를 30초까지 기다린다
-HSWAP_LOG_TIMEOUT_S = 40  # 게이트웨이의 hswap log 는 파일을 읽을 뿐이다. hswap 실행 한도(hswap_usage.TIMEOUT_S)보다 짧게 끊는다
+HSWAP_LOG_TIMEOUT_S = 40  # 게이트웨이의 hswap log 는 파일을 읽을 뿐이다. hswap 실행 한도(hswap.TIMEOUT_S)보다 짧게 끊는다
 ROTATION_TIMEOUT_S = 90  # 자동 전환 설정은 계정마다 hswap priority 를 한 번씩 부르고, macOS 는 예약을 다시 설치한다
 DEADLINE_S = 15  # 응답 하나 전체(조금씩 흘려 보내는 응답이 스레드를 붙잡지 못하게)
 STALE_S = 3 * EVERY_S  # 이보다 오래된 스냅샷은 주지 않는다(기기 화면이 '응답 없음'을 띄우게)
@@ -575,7 +575,7 @@ class Core:
         return self._ask(i, req, ROTATION_TIMEOUT_S, "자동 전환 설정을")
 
     def hswap_log(self, i, since):
-        """그 게이트웨이 GET /api/usage/hswap-log?since=(USAGE-16). since 는 server 가 hswap_usage.SINCE 로 확인했다."""
+        """그 게이트웨이 GET /api/usage/hswap-log?since=(USAGE-16). since 는 server 가 hswap.SINCE 로 확인했다."""
         req = urllib.request.Request(self.devices[i]["url"] + "/api/usage/hswap-log?since=" + urllib.parse.quote(since))
         return self._ask(i, req, HSWAP_LOG_TIMEOUT_S, "hswap 로그 조회를")
 

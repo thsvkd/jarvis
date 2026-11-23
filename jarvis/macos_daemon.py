@@ -46,7 +46,7 @@ PROBLEMS = {"not_file_store": "저장 방식이 파일이 아닙니다", "keycha
             "reconcile_ambiguous": "키체인과 파일 중 어느 쪽이 새 로그인인지 알 수 없습니다. 로그인 세션에서 어느 쪽이 최근에 쓰였는지 확인하고 "
                                    "hswap claude migrate-store --to file --keep file|keychain 로 직접 고르세요",
             "keepalive_ahead_too_short": "keepalive 예약의 갱신 여유가 너무 짧습니다. 다시 설치하세요(hswap claude keepalive --install-service)",
-            # hswap 은 jarvis tick 을 보지 못한다. tick 이 대신 도는 기기에서는 claude_accounts.status 가 이 문제를 빼고 그 사실을 보인다
+            # hswap 은 jarvis tick 을 보지 못한다. tick 이 대신 도는 기기에서는 claude.status 가 이 문제를 빼고 그 사실을 보인다
             "keepalive_service_missing": "keepalive 예약이 없습니다. Claude Code 가 스스로 토큰을 갱신하면 키체인과 갈라질 수 있습니다"
                                          "(설치: hswap claude keepalive --install-service --ahead 7200)"}
 LOGINWINDOW = "/Library/Preferences/com.apple.loginwindow.plist"  # 자동 로그인 사용자(autoLoginUser). 누구나 읽는다
@@ -185,7 +185,7 @@ def answered(body):
 
 def _hswap(exe, *args):
     """hswap claude <args> --json 의 JSON 객체. 실행하지 못했거나 HSWAP_TIMEOUT_S 를 넘기거나 JSON 이 아니면 None(문제가 있으면 doctor 는 0 이 아닌 코드로 끝난다).
-    새 세션으로 띄워 시간 초과 때 hswap 이 띄운 자식까지 함께 끝낸다(hswap_usage._run 과 같은 정리)."""
+    새 세션으로 띄워 시간 초과 때 hswap 이 띄운 자식까지 함께 끝낸다(hswap._run 과 같은 정리)."""
     try:
         proc = subprocess.Popen([exe, "claude", *args, "--json"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
                                 text=True, errors="replace", start_new_session=True, env=CALLER_ENV())

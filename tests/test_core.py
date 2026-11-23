@@ -213,7 +213,7 @@ class RouteTest(unittest.TestCase):
         """covers: USAGE-16. 게이트웨이 경로는 설정 core 만, core 경로는 tailnet·local 만. 옛 게이트웨이는 501, hswap 이 낮으면 409 그대로"""
         self.assertEqual(self.get("/api/usage/hswap-log?since=1h")[0], 403)  # 루프백은 설정 core 가 아니다
         kind, core_ips = server.client_kind, config.CORE
-        with mock.patch.object(server.hswap_usage, "hswap_log", return_value=(200, {"since": "1h", "events": [], "truncated": False})) as log:
+        with mock.patch.object(server.hswap, "hswap_log", return_value=(200, {"since": "1h", "events": [], "truncated": False})) as log:
             server.client_kind, config.CORE = (lambda ip: "tailnet"), ["127.0.0.1"]
             try:
                 self.assertEqual(self.get("/api/usage/hswap-log?since=2h"), (200, {"since": "1h", "events": [], "truncated": False}))
@@ -350,8 +350,8 @@ class RouteTest(unittest.TestCase):
         """covers: USAGE-10. 게이트웨이는 코드 헤더가 있으면 그 CLI 로 제출하고, 없으면 로그인을 시작한다"""
         post = lambda headers: urllib.request.Request(self.base + "/api/usage/login?provider=claude", data=b"", method="POST",
                                                       headers={"X-Jarvis-Action": "usage-login", **headers})
-        with mock.patch.object(server.cli_login, "start", return_value=(200, {"url": "u"})) as start, \
-                mock.patch.object(server.cli_login, "submit", return_value=(200, {"submitted": True})) as submit, \
+        with mock.patch.object(server.login, "start", return_value=(200, {"url": "u"})) as start, \
+                mock.patch.object(server.login, "submit", return_value=(200, {"submitted": True})) as submit, \
                 mock.patch.object(server, "client_kind", return_value="tailnet"), mock.patch.object(config, "CORE", ["127.0.0.1"]):
             with urllib.request.urlopen(post({})) as r:
                 self.assertEqual(json.loads(r.read()), {"url": "u"})
@@ -366,9 +366,9 @@ class RouteTest(unittest.TestCase):
     def test_gateway_usage_login_and_account_answer_only_the_configured_core(self):
         """게이트웨이의 /api/usage/login·account 는 설정 core 만 부르고, 맞춤 헤더 값은 그대로다"""
         post = lambda path, action: urllib.request.Request(self.base + path, data=b"", method="POST", headers={"X-Jarvis-Action": action})
-        with mock.patch.object(server.cli_login, "start", return_value=(200, {"code": "C"})) as start, \
-                mock.patch.object(server.cli_login, "status", return_value={"state": "done"}), \
-                mock.patch.object(server.claude_accounts, "switch", return_value=(200, {"switched": True})) as switch:
+        with mock.patch.object(server.login, "start", return_value=(200, {"code": "C"})) as start, \
+                mock.patch.object(server.login, "status", return_value={"state": "done"}), \
+                mock.patch.object(server.claude, "switch", return_value=(200, {"switched": True})) as switch:
             for path, action in (("/api/usage/login?provider=codex", "usage-login"), ("/api/usage/account?slot=2", "usage-account")):
                 with self.assertRaises(urllib.error.HTTPError) as e:  # 루프백은 core 가 아니다
                     urllib.request.urlopen(post(path, action))
@@ -396,7 +396,7 @@ class RouteTest(unittest.TestCase):
         self.assertTrue(self.get("/api/devices/usage?refresh=1", {"X-Jarvis-Action": "usage-refresh"})[1]["devices"][0]["refreshed"])
         with mock.patch.object(server, "client_kind", return_value="tailnet"), \
                 mock.patch.object(config, "CORE", ["127.0.0.1"]), \
-                mock.patch.object(server.independent_usage, "read", return_value={"mode": "independent", "providers": []}):
+                mock.patch.object(server.independent, "read", return_value={"mode": "independent", "providers": []}):
             self.assertEqual(self.get("/api/usage/independent")[1]["mode"], "independent")
 
     def test_viewers(self):

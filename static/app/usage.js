@@ -36,7 +36,7 @@
  };
  const at=ts=>ts?new Date(ts*1000).toLocaleString("ko-KR",{month:"numeric",day:"numeric",weekday:"short",hour:"2-digit",minute:"2-digit",hour12:false})+" 리셋":"";
  const isErr=a=>a.status==="error";
- // 사용량 행의 닫힌 failure 코드(provider_usage.FAILURES 와 같은 키) -> [배지, 힌트]. 문구는 코드로만 정한다(USAGE-17)
+ // 사용량 행의 닫힌 failure 코드(usage.caam.FAILURES 와 같은 키) -> [배지, 힌트]. 문구는 코드로만 정한다(USAGE-17)
  const CODES={auth:["로그인 만료","로그인이 만료되었거나 풀렸습니다. 다시 로그인하세요."],expiring:["로그인 만료 임박","로그인 기한이 곧 끝납니다. 그 계정으로 다시 로그인하세요."],rate:["요청 제한","프로바이더가 잠시 요청을 막았습니다. 잠시 뒤 새로고침하세요."],limit:["한도 도달","사용 한도에 도달했습니다. 리셋 시각에 풀립니다."],wait:["갱신 대기","hswap 이 토큰 갱신이나 다음 측정을 기다립니다. 계속되면 다시 로그인하세요(상주 하네스가 있으면 먼저 끝냅니다)."],keychain:["키체인 문제","키체인을 읽지 못했습니다. 다시 로그인 방법을 확인하세요."],perm:["권한·설정 문제","이 기기의 권한이나 hswap 설정을 확인하세요."],net:["네트워크 오류","프로바이더에 닿지 못했습니다. 잠시 뒤 새로고침하세요."],server:["프로바이더 오류","프로바이더 서버가 오류를 냈습니다. 잠시 뒤 새로고침하세요."],unsupported:["측정 안 함","hswap 이 이 계정의 사용량을 재지 않습니다(usage.remote 설정을 확인하세요)."],unknown:["알 수 없는 오류","사용량을 읽지 못했습니다."]};
  // 옛 게이트웨이는 failure 에 hswap 상태 이름을 싣는다
  const OLD={authentication_required:"auth",stale:"wait",rate_limited:"limit"};

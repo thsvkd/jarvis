@@ -5,29 +5,29 @@ import sys
 import threading
 import time
 
-from . import antigravity_usage, caam_usage, claude_accounts, cli_login, codex_native_usage, gemini_usage, hswap_usage, kimi_usage, minimax_usage, opencode_usage, provider_usage, zcode_usage
-from .util import which_local
+from . import antigravity, caam, claude, codex, gemini, hswap, kimi, login, minimax, opencode, zcode
+from ..util import which_local
 
 _pool = ThreadPoolExecutor(max_workers=5, thread_name_prefix="jarvis-usage")
 _lock = threading.Lock()
 _tasks = {}  # 이름 → (시작 시각, Future, 강제 여부). 늦은 수집을 중복 실행하지 않는다.
 FORCE_WAIT_S = 10  # 새로고침이 진행 중인 보통 읽기를 기다리는 시간. 이어지는 읽기의 시한(40초)과 합쳐 read 의 대기(55초) 안이어야 한다
 _names = {"claude": "Claude", "codex": "Codex", "grok": "Grok", "cursor": "Cursor", "opencodeGo": "OpenCode Go", "antigravity": "Antigravity", "kimi": "Kimi", "zcode": "ZCode", "gemini": "Gemini", "minimax": "MiniMax"}
-# 계정 하나를 직접 읽는 수집기. read() 가 {"status", "accounts"} 를 돌려준다(usage_common.account)
-_DIRECT = {"antigravity": antigravity_usage, "kimi": kimi_usage, "zcode": zcode_usage, "gemini": gemini_usage, "minimax": minimax_usage}
+# 계정 하나를 직접 읽는 수집기. read() 가 {"status", "accounts"} 를 돌려준다(common.account)
+_DIRECT = {"antigravity": antigravity, "kimi": kimi, "zcode": zcode, "gemini": gemini, "minimax": minimax}
 
 
 def _caam(name):
-    exe = caam_usage.binary()
+    exe = caam.binary()
     if not exe:
         raise RuntimeError("caam 없음")
     # caam 은 실행 때 기존 데이터를 마이그레이션할 수 있다. 기존 Codex 수집과도 직렬화한다.
-    if not caam_usage._lock.acquire(timeout=caam_usage.BUDGET_S):
+    if not caam._lock.acquire(timeout=caam.BUDGET_S):
         raise RuntimeError("caam 대기 시간 초과")
     try:
-        return provider_usage.read_provider(exe, name)
+        return caam.read_provider(exe, name)
     finally:
-        caam_usage._lock.release()
+        caam._lock.release()
 
 
 def _opencode():
@@ -35,7 +35,7 @@ def _opencode():
     if not exe:
         candidate = os.path.expanduser("~/.opencode/bin/opencode" + (".exe" if sys.platform == "win32" else ""))
         exe = candidate if os.path.isfile(candidate) else None
-    return opencode_usage.read(exe) if exe else {"status": "unavailable", "accounts": []}
+    return opencode.read(exe) if exe else {"status": "unavailable", "accounts": []}
 
 
 def _codex():
@@ -43,16 +43,16 @@ def _codex():
         rows = _caam("codex")
     except Exception:
         rows = []
-    return rows + codex_native_usage.read()
+    return rows + codex.read()
 
 
 def _hswap(harness, fallback, force=False):
-    """hswap 과 기존 수집기(fallback)를 함께 읽어 계정마다 합친다(hswap_usage.read). force 면 측정 전에 hswap refresh 를 한다."""
-    return lambda: hswap_usage.read(harness, fallback, force)
+    """hswap 과 기존 수집기(fallback)를 함께 읽어 계정마다 합친다(hswap.read). force 면 측정 전에 hswap refresh 를 한다."""
+    return lambda: hswap.read(harness, fallback, force)
 
 
 def _claude(force):
-    return claude_accounts.read(force)
+    return claude.read(force)
 
 
 def _claude_after(running):
@@ -71,7 +71,7 @@ def read(force=False):
     with _lock:
         for name, job in jobs.items():
             previous = _tasks.get(name)
-            # Claude 는 claude_accounts 가 hswap 을 부를 때를 정하므로 여기서 묶지 않는다. 묶으면 계정 전환 직후에도 이전 '사용 중'을 보인다
+            # Claude 는 claude 가 hswap 을 부를 때를 정하므로 여기서 묶지 않는다. 묶으면 계정 전환 직후에도 이전 '사용 중'을 보인다
             ttl = 0 if name == "claude" else 120
             if previous is None or (previous[1].done() and (force or now - previous[0] >= ttl)):
                 previous = _tasks[name] = (now, _pool.submit(job), force)
@@ -81,38 +81,38 @@ def read(force=False):
     wait(selected.values(), timeout=55)
     providers, unavailable = [], []
     for name, future in selected.items():
-        accounts, failed, login = [], True, None
+        accounts, failed, device_login = [], True, None
         try:
             value = future.result(0) if future.done() else None
             if name == "claude":
                 accounts = value.get("accounts", []) if isinstance(value, dict) else []
                 failed = not isinstance(value, dict) or bool(value.get("error"))
-                login = value.get("login") if isinstance(value, dict) else None
+                device_login = value.get("login") if isinstance(value, dict) else None
             elif name in _DIRECT:
                 accounts = value.get("accounts", []) if isinstance(value, dict) else []
                 failed = not isinstance(value, dict) or value.get("status") != "ok"
             else:
                 accounts = value if isinstance(value, list) else []
                 failed = not future.done()
-                if name == "codex":  # 갱신이 멈춘 로그인(USAGE-19). 실패하면 이 try 가 삼켜 login 은 None 이다
-                    login = codex_native_usage.login(hswap_usage._skipped.get("codex"))
+                if name == "codex":  # 갱신이 멈춘 로그인(USAGE-19). 실패하면 이 try 가 삼켜 device_login 은 None 이다
+                    device_login = codex.login(hswap._skipped.get("codex"))
         except Exception:
             pass
         if failed or not accounts:
             unavailable.append(name)
-        if accounts or login:  # 계정이 없어도 기기 로그인 상태의 경고·복구 안내를 보일 칸은 남긴다
-            providers.append({"id": name, "name": _names[name], "accounts": accounts, **({"login": login} if login else {})})
+        if accounts or device_login:  # 계정이 없어도 기기 로그인 상태의 경고·복구 안내를 보일 칸은 남긴다
+            providers.append({"id": name, "name": _names[name], "accounts": accounts, **({"login": device_login} if device_login else {})})
     body = {"mode": "independent", "providers": providers, "unavailable": unavailable, "fetched_at": time.time()}
     # 화면의 '다시 로그인' 버튼을 낼 CLI 목록
-    if logins := cli_login.available():
+    if logins := login.available():
         body["logins"] = logins
     # '계정 추가' 버튼을 낼 프로바이더(이 키가 없는 옛 게이트웨이에는 버튼을 내지 않는다)
-    if login_adds := cli_login.adds():
+    if login_adds := login.adds():
         body["login_adds"] = login_adds
     # 저장한 자격가 없어 새로 로그인해도 잃을 게 없는 프로바이더(기기 행의 '로그인' 버튼). 알 수 없으면 넣지 않는다
-    if fresh_logins := cli_login.fresh():
+    if fresh_logins := login.fresh():
         body["fresh_logins"] = fresh_logins
     # 기기 행에 보일 hswap 버전(게이트웨이가 확인해 둔 값만 쓴다. 여기서 실행·설치하지 않는다)
-    if hswap := claude_accounts.status():
-        body["hswap"] = hswap
+    if hswap_status := claude.status():
+        body["hswap"] = hswap_status
     return body

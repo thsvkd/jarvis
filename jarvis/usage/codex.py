@@ -9,7 +9,7 @@ import os
 import time
 import urllib.request
 
-from . import caam_usage, claude_accounts, opencode_usage, provider_usage
+from . import caam, claude, common
 
 STALL_S = 7200  # 접근 토큰이 만료된 뒤 이만큼 지나도 그대로면 갱신이 멈춘 것으로 본다(USAGE-19)
 # shortcut: 공개된 규칙이 아니라 pit5 실측 하나다(auth_time 2026-10-14 13:31, refresh token has expired 2026-11-13 10:26 = 29.9일). 다른 기한이 관측되면 고친다
@@ -36,7 +36,7 @@ def _email(tokens, account):
         claims = json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
         auth = claims.get("https://api.openai.com/auth") or {}
         if claims.get("email_verified") is True and auth.get("chatgpt_account_id") == account:
-            email = provider_usage._email(claims)
+            email = common.email(claims)
             return "기본 계정" if email == "이름 없는 계정" else email
     except (AttributeError, IndexError, TypeError, ValueError):
         pass
@@ -56,11 +56,11 @@ def _claim(token, key):
 
 def login(skipped):
     """USAGE-19: 기기 단위 Codex login. 시각에서 계산한 경과·남은 시간만 내보낸다(토큰·계정 ID·시각 원값은 내보내지 않는다).
-    stalled: 로그인 유지가 돌았는데(skipped 가 None 이 아님) 접근 토큰이 STALL_S 넘게 만료된 채다. skipped: 마지막 hswap codex refresh 가 건너뛰었는가(hswap_usage._skipped).
+    stalled: 로그인 유지가 돌았는데(skipped 가 None 이 아님) 접근 토큰이 STALL_S 넘게 만료된 채다. skipped: 마지막 hswap codex refresh 가 건너뛰었는가(hswap._skipped).
     expiring: id_token 의 auth_time + LOGIN_S 가 LOGIN_WARN_S 안이거나 지났다. 갱신으로는 늘어나지 않는다.
     파일이 없거나(키링 저장 방식 포함) 읽지 못했거나 해당 시각이 없으면 None."""
     try:
-        tokens = opencode_usage._private_json(os.path.join(_home(), "auth.json"))["tokens"]
+        tokens = common.private_json(os.path.join(_home(), "auth.json"))["tokens"]
     except Exception:  # 형식이 어긋난 파일 하나가 사용량 응답을 막지 않게 하고, 메시지(경로·값)는 남기지 않는다
         return None
     try:  # 접근 토큰을 읽지 못하면 멈춤 판정만 건너뛰고 기한 경고는 그대로 본다
@@ -73,12 +73,12 @@ def login(skipped):
         auth = None
     now = time.time()
     if skipped is not None and exp is not None and now - exp > STALL_S:
-        note = (f"접근 토큰이 {claude_accounts._span(now - exp)} 전에 만료됐습니다. 다시 로그인하세요. 상주 Codex(데몬·앱)가 있으면 먼저 끝내야 새 로그인을 씁니다."
+        note = (f"접근 토큰이 {claude._span(now - exp)} 전에 만료됐습니다. 다시 로그인하세요. 상주 Codex(데몬·앱)가 있으면 먼저 끝내야 새 로그인을 씁니다."
                 + (" hswap 은 실행 중인 Codex 때문에 갱신을 건너뜁니다." if skipped else ""))
         return {"state": "stalled", "text": "Codex 다시 로그인 필요", "note": note, "attention": True, "slot": None, "other": False, "store": None}
-    if auth is not None and auth + LOGIN_S - now <= claude_accounts.LOGIN_WARN_S:
+    if auth is not None and auth + LOGIN_S - now <= claude.LOGIN_WARN_S:
         left = auth + LOGIN_S - now
-        return {"state": "expiring", "text": f"Codex 로그인 만료 임박(약 {claude_accounts._span(left)})" if left > 0 else "Codex 로그인 기한이 지났습니다",
+        return {"state": "expiring", "text": f"Codex 로그인 만료 임박(약 {claude._span(left)})" if left > 0 else "Codex 로그인 기한이 지났습니다",
                 "note": "Codex 로그인은 로그인한 지 약 30일이 지나면 끊기고, 사용해도 늘어나지 않습니다. 다시 로그인하세요.",
                 "attention": True, "slot": None, "other": False, "store": None}
     return None
@@ -87,7 +87,7 @@ def login(skipped):
 def read():
     """현재 자격이 없거나 만료되면 빈 목록. 갱신 토큰은 사용하지 않는다."""
     try:
-        body = opencode_usage._private_json(os.path.join(_home(), "auth.json"))
+        body = common.private_json(os.path.join(_home(), "auth.json"))
         tokens = body.get("tokens") if isinstance(body, dict) else None
         token = tokens.get("access_token") if isinstance(tokens, dict) else None
         account = tokens.get("account_id") if isinstance(tokens, dict) else None
@@ -109,7 +109,7 @@ def read():
             if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration <= 0:
                 continue
             reset = reset if isinstance(reset, (int, float)) and not isinstance(reset, bool) and math.isfinite(reset) and reset > 0 else None
-            windows.append({"key": caam_usage._key(duration), "used": round(used), "resets_at": reset})
+            windows.append({"key": caam._key(duration), "used": round(used), "resets_at": reset})
         if not windows:
             return []
         return [{"label": _email(tokens, account), "org": None, "active": True, "status": "ok", "error": None,

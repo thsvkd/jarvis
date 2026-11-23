@@ -20,7 +20,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from . import __version__, claude_accounts, cli_login, config, fleet, hswap_usage, independent_usage, ipc, modules_api, self_update, session_vault
+from . import __version__, config, fleet, ipc, modules_api, self_update, session_vault
+from .usage import claude, hswap, independent, login
 from .core import why
 from .util import client_kind
 
@@ -240,7 +241,7 @@ def make_handler(collector, core=None):
                     if client_kind(self.client_address[0]) not in ("tailnet", "local"):
                         return self._json({"error": "tailnet 기기에서만 볼 수 있습니다"}, head, 403)
                     since = (parse_qs(u.query).get("since") or ["1h"])[0]
-                    if not hswap_usage.SINCE.fullmatch(since):
+                    if not hswap.SINCE.fullmatch(since):
                         return self._json({"error": "since 는 30m·1h·2d 꼴이어야 합니다"}, head, 400)
                     code, body = core.hswap_log(dev, since)
                     return self._json(body, head, code)
@@ -309,7 +310,7 @@ def make_handler(collector, core=None):
                             return self._json({"error": "core 로 지정한 기기만 부를 수 있습니다"}, head, 403)
                         provider, pasted = (parse_qs(u.query).get("provider") or [""])[0], self.headers.get("X-Jarvis-Login-Code")
                         add = (parse_qs(u.query).get("mode") or [""])[0] == "add"
-                        code, body = cli_login.start(provider, add) if pasted is None else cli_login.submit(provider, pasted)
+                        code, body = login.start(provider, add) if pasted is None else login.submit(provider, pasted)
                         return self._json(body, head, code)
                     if core and path.startswith("/api/devices/") and path.endswith("/login"):
                         dev = path.split("/")[3]
@@ -323,7 +324,7 @@ def make_handler(collector, core=None):
                     if path == "/api/usage/account":
                         if not self._trusted(config.CORE):
                             return self._json({"error": "core 로 지정한 기기만 부를 수 있습니다"}, head, 403)
-                        code, body = claude_accounts.switch((parse_qs(u.query).get("slot") or [""])[0])
+                        code, body = claude.switch((parse_qs(u.query).get("slot") or [""])[0])
                         return self._json(body, head, code)
                     if core and path.startswith("/api/devices/") and path.endswith("/account"):
                         dev = path.split("/")[3]
@@ -337,7 +338,7 @@ def make_handler(collector, core=None):
                         if not self._trusted(config.CORE):
                             return self._json({"error": "core 로 지정한 기기만 부를 수 있습니다"}, head, 403)
                         q = parse_qs(u.query)
-                        code, body = hswap_usage.set_rotation(*((q.get(k) or [""])[0] for k in ("on", "order", "threshold")))
+                        code, body = hswap.set_rotation(*((q.get(k) or [""])[0] for k in ("on", "order", "threshold")))
                         return self._json(body, head, code)
                     if core and path.startswith("/api/devices/") and path.endswith("/rotation"):
                         dev = path.split("/")[3]
@@ -350,7 +351,7 @@ def make_handler(collector, core=None):
                     if path == "/api/usage/account/remove":
                         if not self._trusted(config.CORE):
                             return self._json({"error": "core 로 지정한 기기만 부를 수 있습니다"}, head, 403)
-                        code, body = claude_accounts.remove((parse_qs(u.query).get("slot") or [""])[0])
+                        code, body = claude.remove((parse_qs(u.query).get("slot") or [""])[0])
                         return self._json(body, head, code)
                     if core and path.startswith("/api/devices/") and path.endswith("/account/remove"):
                         dev = path.split("/")[3]
@@ -405,21 +406,21 @@ def make_handler(collector, core=None):
                 if path == "/api/usage/login":
                     if not self._trusted(config.CORE):
                         return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
-                    return self._json(cli_login.status((parse_qs(u.query).get("provider") or [""])[0]), head)
+                    return self._json(login.status((parse_qs(u.query).get("provider") or [""])[0]), head)
                 if path == "/api/usage/rotation":
                     if not self._trusted(config.CORE):
                         return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
-                    code, body = hswap_usage.rotation()
+                    code, body = hswap.rotation()
                     return self._json(body, head, code)
                 if path == "/api/usage/hswap-log":  # USAGE-16: 이 기기의 hswap 기록(core 가 전달한다)
                     if not self._trusted(config.CORE):
                         return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
-                    code, body = hswap_usage.hswap_log((parse_qs(u.query).get("since") or ["1h"])[0])
+                    code, body = hswap.hswap_log((parse_qs(u.query).get("since") or ["1h"])[0])
                     return self._json(body, head, code)
                 if path == "/api/usage/independent":
                     if not self._trusted(config.CORE):
                         return self._json({"error": "core 로 지정한 기기만 받을 수 있습니다"}, head, 403)
-                    body = independent_usage.read(force=parse_qs(u.query).get("refresh") == ["1"])
+                    body = independent.read(force=parse_qs(u.query).get("refresh") == ["1"])
                     return self._json(body, head)
                 if path == "/api/jarvis/update":
                     if not self._trusted(config.CORE):

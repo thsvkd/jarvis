@@ -4,58 +4,58 @@ import threading
 import time
 from unittest import mock
 
-from jarvis import independent_usage
+from jarvis.usage import independent
 
 
 class IndependentUsageTest(unittest.TestCase):
     def setUp(self):
         # 자격 파일·CLI 상태는 실제 홈을 읽으므로 가짜로 고정한다(테스트가 실기기를 건드리지 않게)
-        p = mock.patch.object(independent_usage.cli_login, "fresh", return_value=[])
+        p = mock.patch.object(independent.login, "fresh", return_value=[])
         self.fresh = p.start()
         self.addCleanup(p.stop)
         # 강제 조회는 hswap 을 부른다: 이 기기의 hswap·keepalive.json 에 닿지 않게 한다
-        for name, kw in (("binary", {"return_value": None}), ("_keepalive", {"return_value": None}), ("_state", {"new": independent_usage.claude_accounts._State()})):
-            p = mock.patch.object(independent_usage.claude_accounts, name, **kw)
+        for name, kw in (("binary", {"return_value": None}), ("_keepalive", {"return_value": None}), ("_state", {"new": independent.claude._State()})):
+            p = mock.patch.object(independent.claude, name, **kw)
             p.start()
             self.addCleanup(p.stop)
         # 로그인 유지가 돈 적 없는 상태로 둔다: Codex login(USAGE-19)이 이 기기의 ~/.codex/auth.json 을 읽지 않게 한다
-        p = mock.patch.object(independent_usage.hswap_usage, "_skipped", {})
+        p = mock.patch.object(independent.hswap, "_skipped", {})
         p.start()
         self.addCleanup(p.stop)
 
     def tearDown(self):
-        independent_usage._tasks.clear()
+        independent._tasks.clear()
 
     def test_login_buttons_list_the_clis_of_this_device(self):
         """covers: USAGE-3"""
         empty = {"status": "unavailable", "accounts": []}
-        with mock.patch.object(independent_usage, "_claude", return_value={"accounts": []}), \
-                mock.patch.object(independent_usage, "_codex", return_value=[]), \
-                mock.patch.object(independent_usage, "_caam", return_value=[]), \
-                mock.patch.object(independent_usage, "_opencode", return_value=empty), \
-                mock.patch.object(independent_usage.antigravity_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.gemini_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.kimi_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.minimax_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.zcode_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.cli_login, "available", return_value=["codex", "grok"]):
-            data = independent_usage.read(force=True)
+        with mock.patch.object(independent, "_claude", return_value={"accounts": []}), \
+                mock.patch.object(independent, "_codex", return_value=[]), \
+                mock.patch.object(independent, "_caam", return_value=[]), \
+                mock.patch.object(independent, "_opencode", return_value=empty), \
+                mock.patch.object(independent.antigravity, "read", return_value=empty), \
+                mock.patch.object(independent.gemini, "read", return_value=empty), \
+                mock.patch.object(independent.kimi, "read", return_value=empty), \
+                mock.patch.object(independent.minimax, "read", return_value=empty), \
+                mock.patch.object(independent.zcode, "read", return_value=empty), \
+                mock.patch.object(independent.login, "available", return_value=["codex", "grok"]):
+            data = independent.read(force=True)
         self.assertEqual(data["logins"], ["codex", "grok"])
 
     def test_all_provider_results_are_returned(self):
         """covers: USAGE-3"""
         account = {"label": "fixture@example.com"}
         result = {"status": "ok", "accounts": [account]}
-        with mock.patch.object(independent_usage, "_claude", return_value={"accounts": [account]}), \
-                mock.patch.object(independent_usage, "_codex", return_value=[account]), \
-                mock.patch.object(independent_usage, "_caam", return_value=[account]), \
-                mock.patch.object(independent_usage, "_opencode", return_value=result), \
-                mock.patch.object(independent_usage.antigravity_usage, "read", return_value=result), \
-                mock.patch.object(independent_usage.gemini_usage, "read", return_value=result), \
-                mock.patch.object(independent_usage.kimi_usage, "read", return_value=result), \
-                mock.patch.object(independent_usage.minimax_usage, "read", return_value=result), \
-                mock.patch.object(independent_usage.zcode_usage, "read", return_value=result):
-            data = independent_usage.read(force=True)
+        with mock.patch.object(independent, "_claude", return_value={"accounts": [account]}), \
+                mock.patch.object(independent, "_codex", return_value=[account]), \
+                mock.patch.object(independent, "_caam", return_value=[account]), \
+                mock.patch.object(independent, "_opencode", return_value=result), \
+                mock.patch.object(independent.antigravity, "read", return_value=result), \
+                mock.patch.object(independent.gemini, "read", return_value=result), \
+                mock.patch.object(independent.kimi, "read", return_value=result), \
+                mock.patch.object(independent.minimax, "read", return_value=result), \
+                mock.patch.object(independent.zcode, "read", return_value=result):
+            data = independent.read(force=True)
         self.assertEqual({p["id"] for p in data["providers"]}, {"claude", "codex", "grok", "cursor", "opencodeGo", "antigravity", "gemini", "kimi", "minimax", "zcode"})
         self.assertEqual(data["unavailable"], [])
 
@@ -63,18 +63,18 @@ class IndependentUsageTest(unittest.TestCase):
         """covers: USAGE-4, USAGE-5"""
         self.fresh.return_value = ["codex"]  # 가짜: codex 자격만 없음
         empty = {"status": "unavailable", "accounts": []}
-        with mock.patch.object(independent_usage, "_claude", return_value={"accounts": []}), \
-                mock.patch.object(independent_usage, "_codex", return_value=[]), \
-                mock.patch.object(independent_usage, "_caam", return_value=[]), \
-                mock.patch.object(independent_usage, "_opencode", return_value=empty), \
-                mock.patch.object(independent_usage.antigravity_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.gemini_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.kimi_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.minimax_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.zcode_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.cli_login, "available", return_value=["codex", "grok"]), \
-                mock.patch.object(independent_usage.claude_accounts, "status", return_value={"version": "0.2.0", "pinned": "0.2.1", "note": None}):
-            data = independent_usage.read(force=True)
+        with mock.patch.object(independent, "_claude", return_value={"accounts": []}), \
+                mock.patch.object(independent, "_codex", return_value=[]), \
+                mock.patch.object(independent, "_caam", return_value=[]), \
+                mock.patch.object(independent, "_opencode", return_value=empty), \
+                mock.patch.object(independent.antigravity, "read", return_value=empty), \
+                mock.patch.object(independent.gemini, "read", return_value=empty), \
+                mock.patch.object(independent.kimi, "read", return_value=empty), \
+                mock.patch.object(independent.minimax, "read", return_value=empty), \
+                mock.patch.object(independent.zcode, "read", return_value=empty), \
+                mock.patch.object(independent.login, "available", return_value=["codex", "grok"]), \
+                mock.patch.object(independent.claude, "status", return_value={"version": "0.2.0", "pinned": "0.2.1", "note": None}):
+            data = independent.read(force=True)
         self.assertEqual(data["hswap"], {"version": "0.2.0", "pinned": "0.2.1", "note": None})  # 기기 행의 hswap 버전
         self.assertEqual(data["logins"], ["codex", "grok"])
         self.assertEqual(data["fresh_logins"], ["codex"])  # 화면은 이 목록으로만 기기 행 '로그인' 버튼을 낸다
@@ -85,17 +85,17 @@ class IndependentUsageTest(unittest.TestCase):
         empty = {"status": "unavailable", "accounts": []}
         claude = mock.Mock(side_effect=[{"accounts": [{"label": "a@example.com", "active": True}]},
                                         {"accounts": [{"label": "a@example.com", "active": False}]}])
-        with mock.patch.object(independent_usage, "_claude", claude), \
-                mock.patch.object(independent_usage, "_codex", return_value=[]) as codex, \
-                mock.patch.object(independent_usage, "_caam", return_value=[]), \
-                mock.patch.object(independent_usage, "_opencode", return_value=empty), \
-                mock.patch.object(independent_usage.antigravity_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.gemini_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.kimi_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.minimax_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.zcode_usage, "read", return_value=empty):
-            independent_usage.read()
-            data = independent_usage.read()
+        with mock.patch.object(independent, "_claude", claude), \
+                mock.patch.object(independent, "_codex", return_value=[]) as codex, \
+                mock.patch.object(independent, "_caam", return_value=[]), \
+                mock.patch.object(independent, "_opencode", return_value=empty), \
+                mock.patch.object(independent.antigravity, "read", return_value=empty), \
+                mock.patch.object(independent.gemini, "read", return_value=empty), \
+                mock.patch.object(independent.kimi, "read", return_value=empty), \
+                mock.patch.object(independent.minimax, "read", return_value=empty), \
+                mock.patch.object(independent.zcode, "read", return_value=empty):
+            independent.read()
+            data = independent.read()
         self.assertEqual(claude.call_count, 2)
         self.assertEqual(codex.call_count, 1)
         self.assertFalse(data["providers"][0]["accounts"][0]["active"])
@@ -103,17 +103,17 @@ class IndependentUsageTest(unittest.TestCase):
     def test_fresh_logins_are_omitted_when_nothing_is_confirmed(self):
         """covers: USAGE-4, USAGE-5"""
         # 자격이 없음이 확인되지 않으면(빈 목록) 키 자체를 넣지 않는다: 화면은 버튼을 내지 않는다
-        with mock.patch.object(independent_usage, "_claude", return_value={"accounts": []}), \
-                mock.patch.object(independent_usage, "_codex", return_value=[]), \
-                mock.patch.object(independent_usage, "_caam", return_value=[]), \
-                mock.patch.object(independent_usage, "_opencode", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.antigravity_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.gemini_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.kimi_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.minimax_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.zcode_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.claude_accounts, "status", return_value=None):
-            data = independent_usage.read(force=True)
+        with mock.patch.object(independent, "_claude", return_value={"accounts": []}), \
+                mock.patch.object(independent, "_codex", return_value=[]), \
+                mock.patch.object(independent, "_caam", return_value=[]), \
+                mock.patch.object(independent, "_opencode", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent.antigravity, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent.gemini, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent.kimi, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent.minimax, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent.zcode, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent.claude, "status", return_value=None):
+            data = independent.read(force=True)
         self.assertNotIn("fresh_logins", data)  # 키가 없으면 화면도 버튼을 내지 않는다
         self.assertNotIn("hswap", data)  # 게이트웨이가 아직 확인하지 않았다
 
@@ -123,18 +123,18 @@ class IndependentUsageTest(unittest.TestCase):
         opencode = {"status": "ok", "accounts": [{"label": "기본 계정"}]}
         def provider(_exe, name):
             return [{"label": name + "@example.com"}] if name == "grok" else []
-        with mock.patch.object(independent_usage.minimax_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.gemini_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.zcode_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.kimi_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.codex_native_usage, "read", return_value=[]), \
-                mock.patch.object(independent_usage.claude_accounts, "_store_read", return_value=claude), \
-                mock.patch.object(independent_usage.antigravity_usage, "read", return_value={"status": "ok", "accounts": [{"label": "a@example.com"}]}), \
-                mock.patch.object(independent_usage.caam_usage, "binary", return_value="/fake/caam"), \
-                mock.patch.object(independent_usage.provider_usage, "read_provider", side_effect=provider), \
-                mock.patch.object(independent_usage, "which_local", return_value="/fake/opencode"), \
-                mock.patch.object(independent_usage.opencode_usage, "read", return_value=opencode):
-            data = independent_usage.read(force=True)
+        with mock.patch.object(independent.minimax, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent.gemini, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent.zcode, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent.kimi, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent.codex, "read", return_value=[]), \
+                mock.patch.object(independent.claude, "_store_read", return_value=claude), \
+                mock.patch.object(independent.antigravity, "read", return_value={"status": "ok", "accounts": [{"label": "a@example.com"}]}), \
+                mock.patch.object(independent.caam, "binary", return_value="/fake/caam"), \
+                mock.patch.object(independent.caam, "read_provider", side_effect=provider), \
+                mock.patch.object(independent, "which_local", return_value="/fake/opencode"), \
+                mock.patch.object(independent.opencode, "read", return_value=opencode):
+            data = independent.read(force=True)
         self.assertEqual([p["id"] for p in data["providers"]], ["claude", "grok", "opencodeGo", "antigravity"])
         self.assertEqual(data["mode"], "independent")
         self.assertNotIn("antigravity", data["unavailable"])
@@ -142,16 +142,16 @@ class IndependentUsageTest(unittest.TestCase):
 
     def test_missing_caam_is_unavailable_not_empty_usage(self):
         """covers: USAGE-3"""
-        with mock.patch.object(independent_usage.minimax_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.gemini_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.zcode_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.kimi_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.codex_native_usage, "read", return_value=[]), \
-                mock.patch.object(independent_usage.claude_accounts, "_store_read", return_value=None), \
-                mock.patch.object(independent_usage.antigravity_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.caam_usage, "binary", return_value=None), \
-                mock.patch.object(independent_usage, "which_local", return_value=None):
-            data = independent_usage.read(force=True)
+        with mock.patch.object(independent.minimax, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent.gemini, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent.zcode, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent.kimi, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent.codex, "read", return_value=[]), \
+                mock.patch.object(independent.claude, "_store_read", return_value=None), \
+                mock.patch.object(independent.antigravity, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent.caam, "binary", return_value=None), \
+                mock.patch.object(independent, "which_local", return_value=None):
+            data = independent.read(force=True)
         for name in ("codex", "grok", "cursor", "opencodeGo"):
             self.assertIn(name, data["unavailable"])
 
@@ -167,80 +167,80 @@ class IndependentUsageTest(unittest.TestCase):
             with lock:
                 active[0] -= 1
             return []
-        with mock.patch.object(independent_usage.minimax_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.gemini_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.zcode_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.kimi_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.codex_native_usage, "read", return_value=[]), \
-                mock.patch.object(independent_usage.claude_accounts, "_store_read", return_value=None), \
-                mock.patch.object(independent_usage.antigravity_usage, "read", return_value={"status": "unavailable", "accounts": []}), \
-                mock.patch.object(independent_usage.caam_usage, "binary", return_value="/fake/caam"), \
-                mock.patch.object(independent_usage.provider_usage, "read_provider", side_effect=provider), \
-                mock.patch.object(independent_usage, "which_local", return_value=None):
-            independent_usage.read(force=True)
+        with mock.patch.object(independent.minimax, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent.gemini, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent.zcode, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent.kimi, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent.codex, "read", return_value=[]), \
+                mock.patch.object(independent.claude, "_store_read", return_value=None), \
+                mock.patch.object(independent.antigravity, "read", return_value={"status": "unavailable", "accounts": []}), \
+                mock.patch.object(independent.caam, "binary", return_value="/fake/caam"), \
+                mock.patch.object(independent.caam, "read_provider", side_effect=provider), \
+                mock.patch.object(independent, "which_local", return_value=None):
+            independent.read(force=True)
         self.assertEqual(active[1], 1)
 
     def test_missing_cswap_does_not_start_installer(self):
         """covers: USAGE-3"""
-        with mock.patch.object(independent_usage.claude_accounts, "_store_read", return_value=None), \
-                mock.patch.object(independent_usage.claude_accounts, "live") as read:
-            self.assertIsNone(independent_usage._claude(False))
+        with mock.patch.object(independent.claude, "_store_read", return_value=None), \
+                mock.patch.object(independent.claude, "live") as read:
+            self.assertIsNone(independent._claude(False))
         read.assert_not_called()
 
     def test_cswap_disappearing_after_lookup_cannot_start_installer(self):
         """covers: USAGE-3"""
-        with mock.patch.object(independent_usage.claude_accounts, "_store_read", return_value=None), \
-                mock.patch.object(independent_usage.claude_accounts, "ensure") as ensure:
-            self.assertIsNone(independent_usage._claude(False))
+        with mock.patch.object(independent.claude, "_store_read", return_value=None), \
+                mock.patch.object(independent.claude, "ensure") as ensure:
+            self.assertIsNone(independent._claude(False))
         ensure.assert_not_called()
 
     def test_cswap_provider_error_does_not_expose_raw_credentials(self):
         """covers: USAGE-3"""
-        account = independent_usage.claude_accounts.account({"usageStatus": "other", "usageError": "Bearer synthetic-secret"})
+        account = independent.claude.account({"usageStatus": "other", "usageError": "Bearer synthetic-secret"})
         self.assertNotIn("synthetic-secret", str(account))
 
     def test_stalled_codex_login_keeps_the_provider_without_accounts(self):
         """covers: USAGE-19. Codex 계정이 0개여도 갱신이 멈춘 로그인을 보일 칸이 남는다"""
         empty = {"status": "unavailable", "accounts": []}
         stalled = {"state": "stalled", "text": "Codex 다시 로그인 필요", "note": "n", "attention": True, "slot": None, "other": False, "store": None}
-        independent_usage.hswap_usage._skipped["codex"] = True
-        with mock.patch.object(independent_usage, "_claude", return_value={"accounts": []}), \
-                mock.patch.object(independent_usage, "_codex", return_value=[]), \
-                mock.patch.object(independent_usage, "_caam", return_value=[]), \
-                mock.patch.object(independent_usage.hswap_usage, "read", side_effect=lambda h, fallback, force=False: fallback()), \
-                mock.patch.object(independent_usage, "_opencode", return_value=empty), \
-                mock.patch.object(independent_usage.antigravity_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.gemini_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.kimi_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.minimax_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.zcode_usage, "read", return_value=empty), \
-                mock.patch.object(independent_usage.codex_native_usage, "login", return_value=stalled) as login:
-            data = independent_usage.read(force=True)
+        independent.hswap._skipped["codex"] = True
+        with mock.patch.object(independent, "_claude", return_value={"accounts": []}), \
+                mock.patch.object(independent, "_codex", return_value=[]), \
+                mock.patch.object(independent, "_caam", return_value=[]), \
+                mock.patch.object(independent.hswap, "read", side_effect=lambda h, fallback, force=False: fallback()), \
+                mock.patch.object(independent, "_opencode", return_value=empty), \
+                mock.patch.object(independent.antigravity, "read", return_value=empty), \
+                mock.patch.object(independent.gemini, "read", return_value=empty), \
+                mock.patch.object(independent.kimi, "read", return_value=empty), \
+                mock.patch.object(independent.minimax, "read", return_value=empty), \
+                mock.patch.object(independent.zcode, "read", return_value=empty), \
+                mock.patch.object(independent.codex, "login", return_value=stalled) as login:
+            data = independent.read(force=True)
         login.assert_called_once_with(True)
         codex = [p for p in data["providers"] if p["id"] == "codex"]
         self.assertEqual(codex, [{"id": "codex", "name": "Codex", "accounts": [], "login": stalled}])
 
     def test_codex_falls_back_to_native_when_caam_absent(self):
         """covers: USAGE-3"""
-        with mock.patch.object(independent_usage, "_caam", side_effect=RuntimeError("absent")), \
-                mock.patch.object(independent_usage.codex_native_usage, "read", return_value=[{"label": "기본 계정"}]):
-            self.assertEqual(independent_usage._codex(), [{"label": "기본 계정"}])
+        with mock.patch.object(independent, "_caam", side_effect=RuntimeError("absent")), \
+                mock.patch.object(independent.codex, "read", return_value=[{"label": "기본 계정"}]):
+            self.assertEqual(independent._codex(), [{"label": "기본 계정"}])
 
     def test_native_codex_account_is_not_hidden_by_other_vault_accounts(self):
         """covers: USAGE-3"""
         vault = [{"label": "vault@example.com", "status": "error"}]
         native = [{"label": "기본 계정", "status": "ok"}]
-        with mock.patch.object(independent_usage, "_caam", return_value=vault), \
-                mock.patch.object(independent_usage.codex_native_usage, "read", return_value=native):
-            self.assertEqual(independent_usage._codex(), vault + native)
+        with mock.patch.object(independent, "_caam", return_value=vault), \
+                mock.patch.object(independent.codex, "read", return_value=native):
+            self.assertEqual(independent._codex(), vault + native)
 
     def test_opencode_user_install_is_found_without_service_path(self):
         """covers: USAGE-3"""
         result = {"status": "unavailable", "accounts": []}
-        with mock.patch.object(independent_usage, "which_local", return_value=None), \
-                mock.patch.object(independent_usage.os.path, "isfile", return_value=True), \
-                mock.patch.object(independent_usage.opencode_usage, "read", return_value=result) as read:
-            self.assertEqual(independent_usage._opencode(), result)
+        with mock.patch.object(independent, "which_local", return_value=None), \
+                mock.patch.object(independent.os.path, "isfile", return_value=True), \
+                mock.patch.object(independent.opencode, "read", return_value=result) as read:
+            self.assertEqual(independent._opencode(), result)
         self.assertIn(".opencode", read.call_args.args[0])
 
 
